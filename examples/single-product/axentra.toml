@@ -1,0 +1,14 @@
+# Axentra server configuration for the single-product demo (development; plain http on localhost).
+#   export AXENTRA__DATABASE__URL=postgresql://$USER@127.0.0.1:5432/axentra_taskboard
+#   AXENTRA_CONFIG=examples/single-product/axentra.toml axentra migrate && axentra serve
+# Production: deploy/config/single.toml and docs/operations/DEPLOYMENT.md.
+environment = "development"
+mode = "single"
+
+[product]
+slug = "taskboard"
+name = "Taskboard"
+
+[security]
+public_url = "http://127.0.0.1:8080"
+allowed_origins = ["http://localhost:5173"]

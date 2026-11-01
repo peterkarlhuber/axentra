@@ -85,6 +85,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "C4", "PT"]
 ignore = ["S101", "B008", "RUF012", "S608", "UP040", "E501"]
 
 [tool.ruff.lint.per-file-ignores]
+"examples/**/tests/**" = ["PT018", "RUF059", "PT022", "RUF005", "S105", "S106", "S107", "S311", "S603", "S607", "S108", "B017", "PT011", "S113"]
 "tests/**" = ["PT018", "RUF059", "PT022", "RUF005", "S105", "S106", "S107", "S311", "S603", "S607", "S108", "B017", "PT011", "S113"]
 
 [tool.ruff.lint.isort]
@@ -104,7 +105,9 @@ module = ["boto3.*", "botocore.*", "moto.*", "jwt.*", "opentelemetry.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "examples/taskboard/tests"]
+# sdk/ holds the client SDKs with their own test suites and configuration (sdk/python/pyproject.toml).
+norecursedirs = [".*", "*.egg", "build", "dist", "node_modules", "venv", "sdk"]
 addopts = "-ra --strict-markers"
 markers = [
     "postgres: needs a real PostgreSQL (AXENTRA_TEST_DATABASE_URL)",

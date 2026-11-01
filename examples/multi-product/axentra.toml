@@ -1,0 +1,10 @@
+# Axentra server configuration for the multi-product demo (development; plain http on localhost).
+#   export AXENTRA__DATABASE__URL=postgresql://$USER@127.0.0.1:5432/axentra_multi
+#   AXENTRA_CONFIG=examples/multi-product/axentra.toml axentra migrate && axentra serve
+# Production: deploy/config/multi.toml and docs/operations/DEPLOYMENT.md.
+environment = "development"
+mode = "multi"
+
+[security]
+public_url = "http://127.0.0.1:8080"
+allowed_origins = ["http://localhost:5173"]

@@ -1,0 +1,23 @@
+# One isolated Axentra installation for one product (mode = "single").
+# The product itself comes from the server's [product] section (axentra.toml); this file lists
+# what to provision inside it. Used by provision.py and tests/integration/test_deployment_models.py.
+
+[admin]
+email = "admin@example.com"
+password_env = "AXENTRA_DEMO_ADMIN_PASSWORD"
+setup_token_env = "AXENTRA_SETUP_TOKEN"
+
+[operators]
+password_env = "AXENTRA_DEMO_OPERATOR_PASSWORD"
+
+[product]
+# Must match the server's product.slug; the script refuses to run against another product.
+slug = "taskboard"
+tenants = ["acme", "globex"]
+operators = [
+    { email = "ops@taskboard.example", name = "Taskboard Ops", role = "product_admin" },
+]
+api_keys = [
+    { name = "taskboard-backend", permissions = ["tenants:read", "records:read", "records:write"] },
+    { name = "acme-integration", tenant = "acme", permissions = ["records:read", "records:write"] },
+]

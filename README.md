@@ -145,7 +145,9 @@ Axentra runs without Studio; Studio is just another client. Tested combinations 
   [data](docs/architecture/DATA.md), [deployment models](docs/architecture/DEPLOYMENT_MODELS.md),
   [versioning](docs/architecture/VERSIONING.md), [API conventions](docs/architecture/API_CONVENTIONS.md),
   [decisions (ADRs)](docs/adr/)
-- Guides: [product tables](docs/guides/PRODUCT_TABLES.md)
+- Guides: [building a product](docs/guides/BUILDING_A_PRODUCT.md), [product tables](docs/guides/PRODUCT_TABLES.md);
+  tested examples: [examples/](examples/README.md) (Taskboard demo SaaS, single- and multi-product deployments)
+- Client SDKs: [TypeScript](docs/sdk/TYPESCRIPT.md) (`sdk/typescript`), [Python](docs/sdk/PYTHON.md) (`sdk/python`)
 - Operations: [deployment](docs/operations/DEPLOYMENT.md), [configuration](docs/operations/CONFIGURATION.md),
   [backup and restore](docs/operations/BACKUP_RESTORE.md)
 - Project: [roadmap](docs/ROADMAP.md), [open work](docs/TODO.md), [changelog](CHANGELOG.md),
