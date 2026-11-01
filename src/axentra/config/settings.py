@@ -160,6 +160,33 @@ class ObservabilitySettings(_Section):
     job_retention_days: int = Field(30, ge=1)
 
 
+class EventsSettings(_Section):
+    """Job queue, workers, schedules, events, outgoing webhooks and event streams (module ``events``)."""
+
+    lease_seconds: int = Field(60, ge=1, le=3600)
+    """How long a claimed job stays reserved for its worker without a heartbeat."""
+    poll_interval_seconds: float = Field(1.0, gt=0, le=60)
+    """Worker polling interval (LISTEN/NOTIFY wakes workers earlier)."""
+    listen_notify: bool = True
+    reap_interval_seconds: float = Field(15.0, gt=0)
+    scheduler_interval_seconds: float = Field(5.0, gt=0)
+    default_max_attempts: int = Field(5, ge=1, le=100)
+    backoff_base_seconds: float = Field(2.0, gt=0)
+    backoff_max_seconds: float = Field(3600.0, gt=0)
+    webhook_max_attempts: int = Field(8, ge=1, le=50)
+    webhook_timeout_seconds: float = Field(10.0, gt=0, le=60)
+    webhook_response_max_bytes: int = Field(4096, ge=0, le=65536)
+    webhook_allow_private_targets: bool = False
+    """Allow webhook URLs that resolve to private, loopback or link-local addresses (tests/dev only)."""
+    webhook_allow_http: bool = False
+    """Allow plain-http webhook URLs outside production (never in production)."""
+    sse_poll_seconds: float = Field(1.0, gt=0, le=30)
+    sse_reauth_seconds: float = Field(15.0, gt=0, le=300)
+    sse_keepalive_seconds: float = Field(15.0, gt=0, le=300)
+    sse_max_seconds: float = Field(3600.0, gt=0)
+    """A stream ends after this time; clients reconnect with ``Last-Event-ID``."""
+
+
 class Settings(_Section):
     environment: Environment = Environment.DEVELOPMENT
     mode: DeploymentMode = DeploymentMode.SINGLE
@@ -172,6 +199,7 @@ class Settings(_Section):
     notify: NotifySettings = Field(default_factory=NotifySettings)
     billing: BillingSettings = Field(default_factory=BillingSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
+    events: EventsSettings = Field(default_factory=EventsSettings)
     features: dict[str, bool] = Field(default_factory=dict)
     """Optional feature flags (``features.<name> = true``), readable via :meth:`feature`."""
 
@@ -217,6 +245,8 @@ class Settings(_Section):
                     problems.append(f"oidc[{p.id}].client_secret must be a *_ref in production")
                 if not p.issuer.startswith("https://"):
                     problems.append(f"oidc[{p.id}].issuer must use https")
+            if self.events.webhook_allow_http:
+                problems.append("events.webhook_allow_http is not allowed in production")
             if self.billing.provider == "fake":
                 problems.append("billing.provider 'fake' is not allowed in production")
         if self.billing.live_payments and self.billing.provider != "stripe":
