@@ -8,10 +8,11 @@ cannot be accidentally public.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 import logging
 import time
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -55,30 +56,58 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
 API_VERSION_STR = f"{API_VERSION[0]}.{API_VERSION[1]}"
 
 
-def _depends_on_principal(route: APIRoute) -> bool:
-    stack = list(route.dependant.dependencies)
+def _depends_on_principal(route: APIRoute, extra: list[Any]) -> bool:
+    stack = list(route.dependant.dependencies) + list(extra)
     while stack:
         dep = stack.pop()
-        if dep.call is resolve_principal:
+        call = getattr(dep, "call", None) or getattr(dep, "dependency", None)
+        if call is resolve_principal:
             return True
-        stack.extend(dep.dependencies)
+        stack.extend(getattr(dep, "dependencies", []) or [])
     return False
 
 
-def check_routes(app: FastAPI) -> None:
-    unprotected = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+def iter_api_routes(
+    routes: list[Any], prefix: str = "", deps: list[Any] | None = None
+) -> Iterator[tuple[str, APIRoute, list[Any]]]:
+    """All API routes with their full path, including routers mounted with ``include_router``.
+
+    FastAPI >= 0.162 keeps included routers as wrapper objects in ``app.routes``; older versions
+    copy the routes. Both shapes are walked so the protection check can never silently pass.
+    """
+    deps = deps or []
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield prefix + route.path, route, deps
             continue
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            ctx = getattr(route, "include_context", None)
+            yield from iter_api_routes(
+                list(original.routes),
+                prefix + (getattr(ctx, "prefix", "") or ""),
+                deps + list(getattr(ctx, "dependencies", []) or []),
+            )
+
+
+def check_routes(app: FastAPI) -> int:
+    """Refuse to start if an API route is neither authenticated nor explicitly public. Returns the count checked."""
+    unprotected = []
+    checked = 0
+    for path, route, deps in iter_api_routes(list(app.routes)):
         for method in route.methods or ():
             if method == "HEAD":
                 continue
-            if (method, route.path) in PUBLIC_ROUTES:
+            checked += 1
+            if (method, path) in PUBLIC_ROUTES:
                 continue
-            if not _depends_on_principal(route):
-                unprotected.append(f"{method} {route.path}")
+            if not _depends_on_principal(route, deps):
+                unprotected.append(f"{method} {path}")
     if unprotected:
         raise ConfigurationError("routes without authentication: " + ", ".join(sorted(unprotected)))
+    if checked == 0:
+        raise ConfigurationError("route protection check found no routes")
+    return checked
 
 
 def create_app(
