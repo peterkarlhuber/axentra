@@ -34,3 +34,11 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   linking, signup/invitation/allowed-domain rules, safe `return_to` (relative paths or allowed
   origins), `?login_error=<code>` redirects; redaction of auth query values in `uvicorn.access`.
   New settings: `security.login_page`, `oidc[].token_endpoint_auth_method`.
+- Notify (migration `0005_notify.sql`): versioned email templates with de/en locale variants and a safe
+  `{{ var }}` renderer, built-in invitation template, encrypted outbox with idempotent send, preferences
+  (opt-out per category), local mailbox and SMTP (STARTTLS) providers, `NotifyDispatcher` with
+  SKIP LOCKED leases and exponential backoff, delivery stats, invitation emails via `ax.on_invitation`,
+  `axentra notify-dispatch --once|--loop`.
+- Observability: Prometheus metrics registry (`ax.metrics`) at `GET /metrics` (bearer token via
+  `observability.metrics_token_ref`; disabled in production without one), optional OpenTelemetry request
+  tracing, notify readiness check, `axentra maintenance purge` (audit, sessions, notify retention).

@@ -31,6 +31,9 @@ from axentra.data.database import Database
 from axentra.data.migrations import Migration, MigrationRunner
 from axentra.data.record_service import RecordService
 from axentra.identity.service import IdentityService
+from axentra.notify.service import NotifyService
+from axentra.observability.metrics import MetricsRegistry, register_db_pool_metrics
+from axentra.observability.tracing import setup_tracing
 from axentra.storage.service import StorageService
 from axentra.tenancy.models import Product
 from axentra.tenancy.service import TenancyService
@@ -105,6 +108,17 @@ class Axentra:
             if settings.module_enabled("storage")
             else None
         )
+        # Observability: metrics registry (ax.metrics.counter(...)) and optional tracing.
+        self.metrics = MetricsRegistry()
+        register_db_pool_metrics(self.metrics, self.db)
+        self.tracing = setup_tracing(settings.observability)
+        # Notifications (the API calls ax.on_invitation after creating an invitation).
+        self.notify: NotifyService | None = None
+        if settings.module_enabled("notify"):
+            self.notify = NotifyService(
+                self.db, settings, self.authz, self.audit, self.secrets, metrics=self.metrics
+            )
+            self.on_invitation = self.notify.on_invitation
         self._extra_migrations: list[Migration] = []
         self._started = False
         self._init_modules()
@@ -147,6 +161,7 @@ class Axentra:
     def close(self) -> None:
         if self.oidc is not None:
             self.oidc.close()
+        self.tracing.shutdown()
         self.db.close()
         self._started = False
 

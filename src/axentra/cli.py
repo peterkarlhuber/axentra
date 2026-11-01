@@ -103,6 +103,46 @@ def cmd_generate_key(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_notify_dispatch(args: argparse.Namespace) -> int:
+    import signal
+    import threading
+
+    from axentra.audit.logging import configure_logging
+
+    ax = _ax(args)
+    configure_logging(ax.settings.observability.log_level, ax.settings.observability.log_format)
+    if ax.notify is None:
+        print("the notify module is not enabled", file=sys.stderr)
+        return 1
+    ax.start()
+    try:
+        dispatcher = ax.notify.dispatcher()
+        if not args.loop:
+            res = dispatcher.run_once(args.batch)
+            print(json.dumps({k: v for k, v in vars(res).items() if k != "message_ids"}))
+            return 0
+        stop = threading.Event()
+        signal.signal(signal.SIGTERM, lambda *_: stop.set())
+        signal.signal(signal.SIGINT, lambda *_: stop.set())
+        dispatcher.run_loop(batch=args.batch, interval=args.interval, stop=stop)
+        return 0
+    finally:
+        ax.close()
+
+
+def cmd_maintenance_purge(args: argparse.Namespace) -> int:
+    from axentra.observability.maintenance import run_maintenance
+
+    ax = _ax(args)
+    ax.db.open()
+    try:
+        report = run_maintenance(ax)
+    finally:
+        ax.close()
+    print(json.dumps(report, default=str))
+    return 1 if report.get("errors") else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="axentra", description="Axentra SaaS backend foundation")
     p.add_argument("--version", action="version", version=f"axentra {__version__}")
@@ -138,6 +178,18 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--no-orphans", action="store_true", help="skip the backend scan for orphaned objects")
     pu.add_argument("--retain-deleted-days", type=int, default=30)
     pu.set_defaults(func=cmd_storage_purge)
+    nd = sub.add_parser("notify-dispatch", help="deliver queued notifications")
+    mode = nd.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="one batch, then exit (default)")
+    mode.add_argument("--loop", action="store_true", help="run until SIGTERM/SIGINT")
+    nd.add_argument("--batch", type=int, default=20)
+    nd.add_argument("--interval", type=float, default=2.0, help="idle sleep in seconds (--loop)")
+    nd.set_defaults(func=cmd_notify_dispatch)
+
+    mt = sub.add_parser("maintenance", help="maintenance tasks")
+    mtsub = mt.add_subparsers(dest="maintenance_command", required=True)
+    pg = mtsub.add_parser("purge", help="audit retention, expired sessions, notification retention")
+    pg.set_defaults(func=cmd_maintenance_purge)
 
     k = sub.add_parser("keys", help="encryption keyring tasks")
     ksub = k.add_subparsers(dest="keys_command", required=True)

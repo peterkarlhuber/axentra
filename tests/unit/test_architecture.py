@@ -24,6 +24,7 @@ DOMAIN = (
     "billing",
     "notify",
     "search",
+    "observability",
     "platform.py",
 )
 
