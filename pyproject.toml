@@ -56,6 +56,8 @@ dev = [
     "moto[s3,server]>=5",
     "boto3>=1.34",
     "import-linter>=2.1",
+    "aiosmtpd>=1.4",
+    "opentelemetry-sdk>=1.25",
 ]
 
 [project.scripts]
@@ -124,6 +126,7 @@ type = "forbidden"
 source_modules = [
     "axentra.core", "axentra.config", "axentra.data", "axentra.identity", "axentra.tenancy",
     "axentra.access", "axentra.audit", "axentra.platform",
+    "axentra.notify", "axentra.observability",
 ]
 forbidden_modules = ["axentra.api", "axentra.cli", "fastapi", "starlette", "uvicorn"]
 

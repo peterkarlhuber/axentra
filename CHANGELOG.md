@@ -21,3 +21,11 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - HTTP API `/v1` (FastAPI) with RFC 9457 problem details, request ids, security headers, CORS for
   configured origins, route-protection registry; committed OpenAPI contract `openapi/axentra-v1.json`.
 - CLI: `axentra serve | migrate | admin setup-token | openapi export | keys generate`.
+- Notify (migration `0005_notify.sql`): versioned email templates with de/en locale variants and a safe
+  `{{ var }}` renderer, built-in invitation template, encrypted outbox with idempotent send, preferences
+  (opt-out per category), local mailbox and SMTP (STARTTLS) providers, `NotifyDispatcher` with
+  SKIP LOCKED leases and exponential backoff, delivery stats, invitation emails via `ax.on_invitation`,
+  `axentra notify-dispatch --once|--loop`.
+- Observability: Prometheus metrics registry (`ax.metrics`) at `GET /metrics` (bearer token via
+  `observability.metrics_token_ref`; disabled in production without one), optional OpenTelemetry request
+  tracing, notify readiness check, `axentra maintenance purge` (audit, sessions, notify retention).
