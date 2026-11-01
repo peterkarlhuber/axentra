@@ -61,3 +61,11 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Tests: automated backup/restore test (`pg_dump`/`pg_restore`, data, RLS and a working app on the
   restored database) and a test for the product-table template; CI installs matching PostgreSQL
   client tools and builds the container image.
+- Events module (migration 0002): PostgreSQL job queue (SKIP LOCKED claims, leases + heartbeats,
+  reaper, retries with capped exponential backoff and jitter, dead letters, idempotency keys,
+  cancellation, manual retry, LISTEN/NOTIFY wake-up), `JobWorker` and `axentra worker`, recurring
+  schedules (interval or 5-field cron, leader lock, each slot fires at most once), events with a
+  transactional outbox (`publish_in_tx`) and in-process subscribers, signed outgoing webhooks
+  (HMAC-SHA256, SSRF protection, retries, redelivery, test ping, secret rotation with grace), SSE
+  streams for events and job changes with `Last-Event-ID` resume, retention purge. See
+  docs/modules/EVENTS_AND_JOBS.md.

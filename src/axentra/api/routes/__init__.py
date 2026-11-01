@@ -11,6 +11,7 @@ from axentra.api.routes import (
     audit,
     auth,
     billing,
+    events,
     meta,
     notify,
     observability,
@@ -43,4 +44,5 @@ ROUTERS: list[ModuleRouter] = [
     ModuleRouter(observability.router, None),
     ModuleRouter(usage.router, "usage"),
     ModuleRouter(billing.router, "billing"),
+    ModuleRouter(events.router, "events"),
 ]

@@ -128,6 +128,16 @@ class Axentra:
         )
         if settings.module_enabled("usage") and settings.module_enabled("billing"):
             self.usage.set_policy(self.billing.usage_policy())
+        # Events module (job queue, schedules, events, webhooks). Always constructed (other modules
+        # enqueue jobs and publish events through it); module "events" gates its HTTP routes.
+        from axentra.events import EventService, JobService, ScheduleService, WebhookService
+
+        self.jobs = JobService(self.db, settings, self.authz, self.audit)
+        self.events = EventService(self.db, self.authz, self.audit, self.jobs)
+        self.schedules = ScheduleService(self.db, self.authz, self.audit, self.jobs.queue)
+        self.webhooks = WebhookService(
+            self.db, settings, self.authz, self.audit, self.secrets, self.jobs.queue, self.events
+        )
         self._extra_migrations: list[Migration] = []
         self._started = False
         self._init_modules()

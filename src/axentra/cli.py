@@ -96,6 +96,45 @@ def cmd_storage_purge(args: argparse.Namespace) -> int:
     return 0 if report.errors == 0 else 2
 
 
+def cmd_worker(args: argparse.Namespace) -> int:
+    """Run a job worker (also fires schedules and purges old jobs while it is the leader)."""
+    import importlib
+    import signal
+
+    from axentra.audit.logging import configure_logging
+    from axentra.events.worker import JobWorker
+
+    ax = _ax(args)
+    configure_logging(ax.settings.observability.log_level, ax.settings.observability.log_format)
+    if not ax.settings.module_enabled("events"):
+        print("the events module is disabled (settings.modules)", file=sys.stderr)
+        return 1
+    ax.start()
+    for name in args.load or []:
+        # Product modules register their handlers/subscribers on import: `def setup(ax)` is called if present.
+        mod = importlib.import_module(name)
+        setup = getattr(mod, "setup", None)
+        if callable(setup):
+            setup(ax)
+    kinds = [k.strip() for k in args.kinds.split(",") if k.strip()] if args.kinds else None
+    worker = JobWorker(ax, kinds=kinds, concurrency=args.concurrency, scheduler=not args.no_scheduler)
+    try:
+        if args.once:
+            print(json.dumps({"processed": worker.run_once()}))
+            return 0
+
+        def _stop(signum: int, frame: object) -> None:
+            worker.stop(timeout=args.shutdown_timeout)
+
+        signal.signal(signal.SIGTERM, _stop)
+        signal.signal(signal.SIGINT, _stop)
+        worker._stop_timeout = args.shutdown_timeout
+        worker.run()
+        return 0
+    finally:
+        ax.close()
+
+
 def cmd_generate_key(args: argparse.Namespace) -> int:
     from axentra.config.secrets import generate_key
 
@@ -158,6 +197,20 @@ def build_parser() -> argparse.ArgumentParser:
     m = sub.add_parser("migrate", help="apply database migrations")
     m.add_argument("--status", action="store_true", help="only show the migration status")
     m.set_defaults(func=lambda a: cmd_migrate_status(a) if a.status else cmd_migrate(a))
+
+    w = sub.add_parser("worker", help="run a background job worker (jobs, schedules, webhooks)")
+    w.add_argument("--kinds", help="comma-separated job kinds (default: every registered kind)")
+    w.add_argument("--concurrency", type=int, default=4)
+    w.add_argument("--once", action="store_true", help="run due jobs, then exit")
+    w.add_argument("--no-scheduler", action="store_true", help="never fire schedules in this worker")
+    w.add_argument("--shutdown-timeout", type=float, default=30.0, help="seconds to wait for running jobs")
+    w.add_argument(
+        "--load",
+        action="append",
+        metavar="MODULE",
+        help="import a module that registers handlers (setup(ax))",
+    )
+    w.set_defaults(func=cmd_worker)
 
     a = sub.add_parser("admin", help="administration tasks")
     asub = a.add_subparsers(dest="admin_command", required=True)
