@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv*/
+dist/
+build/
+.coverage
+coverage.xml
+test-results.xml
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+var/
+.env
+*.local.toml
+node_modules/
