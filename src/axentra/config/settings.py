@@ -64,6 +64,13 @@ class DatabaseSettings(_Section):
     """Reference to a secret holding the URL (``env:`` / ``file:``); overrides ``url``."""
     migration_url: str | None = None
     """Optional separate (owner) URL for migrations; defaults to ``url``."""
+    migration_url_ref: str | None = None
+    """Reference to a secret holding the migration URL (``env:`` / ``file:``); overrides ``migration_url``."""
+    extra_migrations: list[str] = Field(default_factory=list)
+    """Product migration sources applied by ``axentra migrate``: ``package.module:attribute``
+    (a list of ``Migration`` or a callable returning one)."""
+    migration_entry_points: bool = True
+    """Also apply migrations published by installed packages in the ``axentra.migrations`` entry point group."""
     pool_min: int = Field(1, ge=0)
     pool_max: int = Field(10, ge=1)
     statement_timeout_ms: int = Field(30_000, ge=0)
@@ -96,6 +103,18 @@ class SecuritySettings(_Section):
     master_keys: str | None = None
     """Inline keyring; allowed only outside production."""
     setup_token_ttl_minutes: int = Field(60, ge=5)
+    max_body_bytes: int = Field(10 * 1024 * 1024, ge=1024)
+    """Largest request body accepted (413 above it). File uploads use ``storage.max_file_bytes`` instead."""
+    rate_limit_per_minute: int | None = Field(None, ge=1)
+    """Requests per minute per credential (API key or session; per IP for anonymous requests).
+    ``None`` (default): off. In-memory token bucket per process; see SECURITY_MODEL.md."""
+    rate_limit_ip_per_minute: int | None = Field(None, ge=1)
+    """Requests per minute per client IP regardless of credentials (``None``: off)."""
+    rate_limit_burst: int | None = Field(None, ge=1)
+    """Bucket size (burst); defaults to the per-minute budget."""
+    api_docs: Literal["public", "authenticated", "disabled"] | None = None
+    """``/v1/docs`` and ``/v1/openapi.json``: ``None`` (default) means ``disabled`` in production and
+    ``public`` otherwise; ``authenticated`` requires a session or API key."""
     login_page: str = "/login"
     """Where failed OIDC logins are sent (``?login_error=<code>``): a path on the origin of the login's
     ``return_to``, or an absolute URL used when that origin is unknown."""
@@ -147,6 +166,9 @@ class StorageSettings(_Section):
     default_quota_files: int | None = Field(None, ge=0)
     pending_upload_timeout_seconds: int = Field(3600, ge=60)
     """Uploads still pending after this time are treated as abandoned by the purge."""
+    store_blocked_as_inert: bool = False
+    """Accept executable/HTML/SVG/script uploads and store them as inert ``application/octet-stream``
+    attachments instead of refusing them (415). Downloads are always attachments with ``nosniff``."""
 
 
 class NotifySettings(_Section):
@@ -258,6 +280,12 @@ class Settings(_Section):
     @property
     def is_production(self) -> bool:
         return self.environment is Environment.PRODUCTION
+
+    @property
+    def api_docs_mode(self) -> str:
+        if self.security.api_docs is not None:
+            return self.security.api_docs
+        return "disabled" if self.is_production else "public"
 
     @property
     def secure_cookies(self) -> bool:

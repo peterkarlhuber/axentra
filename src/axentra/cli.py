@@ -17,6 +17,17 @@ def _ax(args: argparse.Namespace):  # type: ignore[no-untyped-def]
     return Axentra.from_settings(load_settings(args.config))
 
 
+def _load_modules(ax, names: list[str] | None) -> None:  # type: ignore[no-untyped-def]
+    """Import product modules; ``def setup(ax)`` is called if present (handlers, encrypted columns)."""
+    import importlib
+
+    for name in names or []:
+        mod = importlib.import_module(name)
+        setup = getattr(mod, "setup", None)
+        if callable(setup):
+            setup(ax)
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
     ax = _ax(args)
     done = ax.migrate()
@@ -25,12 +36,25 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
 
 def cmd_migrate_status(args: argparse.Namespace) -> int:
-    from axentra.data.migrations import MigrationRunner
+    ax = _ax(args)
+    print(json.dumps(ax.migration_runner().status(), indent=2))
+    return 0
+
+
+def cmd_secrets_reencrypt(args: argparse.Namespace) -> int:
+    """Re-encrypt stored ciphertexts with the active key (exit 2 if any value could not be read)."""
+    from axentra.audit.logging import configure_logging
 
     ax = _ax(args)
-    runner = MigrationRunner(ax.settings.database.migration_url or ax.db.url)
-    print(json.dumps(runner.status(), indent=2))
-    return 0
+    configure_logging(ax.settings.observability.log_level, ax.settings.observability.log_format)
+    _load_modules(ax, args.load)
+    ax.db.open()
+    try:
+        report = ax.reencrypt_secrets(dry_run=args.dry_run, batch_size=args.batch_size)
+    finally:
+        ax.close()
+    print(json.dumps(report.as_dict(), indent=2))
+    return 2 if report.failed else 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -98,7 +122,6 @@ def cmd_storage_purge(args: argparse.Namespace) -> int:
 
 def cmd_worker(args: argparse.Namespace) -> int:
     """Run a job worker (also fires schedules and purges old jobs while it is the leader)."""
-    import importlib
     import signal
 
     from axentra.audit.logging import configure_logging
@@ -110,12 +133,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
         print("the events module is disabled (settings.modules)", file=sys.stderr)
         return 1
     ax.start()
-    for name in args.load or []:
-        # Product modules register their handlers/subscribers on import: `def setup(ax)` is called if present.
-        mod = importlib.import_module(name)
-        setup = getattr(mod, "setup", None)
-        if callable(setup):
-            setup(ax)
+    _load_modules(ax, args.load)
     kinds = [k.strip() for k in args.kinds.split(",") if k.strip()] if args.kinds else None
     worker = JobWorker(ax, kinds=kinds, concurrency=args.concurrency, scheduler=not args.no_scheduler)
     try:
@@ -249,6 +267,19 @@ def build_parser() -> argparse.ArgumentParser:
     g = ksub.add_parser("generate", help="print a new keyring entry kid:base64key")
     g.add_argument("--kid", default="k1")
     g.set_defaults(func=cmd_generate_key)
+
+    sc = sub.add_parser("secrets", help="stored secret tasks")
+    scsub = sc.add_subparsers(dest="secrets_command", required=True)
+    re_ = scsub.add_parser("reencrypt", help="re-encrypt stored values with the active key (key rotation)")
+    re_.add_argument("--dry-run", action="store_true", help="only report counts per column and key id")
+    re_.add_argument("--batch-size", type=int, default=500)
+    re_.add_argument(
+        "--load",
+        action="append",
+        metavar="MODULE",
+        help="import a module whose setup(ax) registers encrypted columns",
+    )
+    re_.set_defaults(func=cmd_secrets_reencrypt)
     return p
 
 

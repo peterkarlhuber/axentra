@@ -9,16 +9,27 @@ Applied migrations are recorded in ``axentra_schema_migrations`` with a SHA-256 
 changed file that was already applied is refused (never edit applied migrations — add a new one).
 Each migration runs in its own transaction; concurrent runners serialize on an advisory lock.
 Migrations only move forward; rollback is restore from backup (see docs/operations/BACKUP_RESTORE.md).
+
+Discovery of product namespaces (so ``axentra migrate`` applies them without custom code):
+
+- ``database.extra_migrations = ["crm.schema:migrations"]``: each entry is ``module:attribute``;
+  the attribute is a list of :class:`Migration` or a callable returning one (for example
+  ``lambda: package_migrations("crm", "crm.sql")``).
+- Installed distributions may declare the entry point group ``axentra.migrations`` with the same
+  kind of target (disable with ``database.migration_entry_points = false``).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import hashlib
-from importlib import resources
+import importlib
+from importlib import metadata, resources
 import logging
 from pathlib import Path
 import re
+from typing import Any
 
 import psycopg
 
@@ -50,13 +61,60 @@ def load_directory(namespace: str, directory: Path) -> list[Migration]:
     return out
 
 
-def builtin_migrations() -> list[Migration]:
+def package_migrations(namespace: str, package: str) -> list[Migration]:
+    """The ``NNNN_name.sql`` files of an importable package (works from wheels and zip files)."""
     out = []
-    root = resources.files("axentra.data.sql")
+    root = resources.files(package)
     for entry in sorted(root.iterdir(), key=lambda e: e.name):
         m = _NAME.match(entry.name)
         if m:
-            out.append(Migration("axentra", int(m.group(1)), m.group(2), entry.read_text(encoding="utf-8")))
+            out.append(Migration(namespace, int(m.group(1)), m.group(2), entry.read_text(encoding="utf-8")))
+    return out
+
+
+def builtin_migrations() -> list[Migration]:
+    return package_migrations("axentra", "axentra.data.sql")
+
+
+ENTRY_POINT_GROUP = "axentra.migrations"
+
+
+def _coerce(obj: Any, origin: str) -> list[Migration]:
+    if callable(obj) and not isinstance(obj, Migration):
+        obj = obj()
+    if not isinstance(obj, Iterable):
+        raise TypeError(f"migration source {origin} is not a list of Migration")
+    items = list(obj)
+    if not all(isinstance(m, Migration) for m in items):
+        raise TypeError(f"migration source {origin} must yield Migration objects")
+    return items
+
+
+def load_migration_source(ref: str) -> list[Migration]:
+    """Resolve ``module:attribute`` (attribute: list of migrations or a callable returning one)."""
+    module, sep, attr = ref.partition(":")
+    if not sep or not module or not attr:
+        raise ValueError(f"migration source {ref!r} must look like 'package.module:attribute'")
+    obj: Any = importlib.import_module(module)
+    for part in attr.split("."):
+        obj = getattr(obj, part)
+    return _coerce(obj, ref)
+
+
+def discover_migrations(
+    sources: Iterable[str] = (),
+    *,
+    entry_points: bool = True,
+    loader: Callable[[], Iterable[metadata.EntryPoint]] | None = None,
+) -> list[Migration]:
+    """Configured sources first (in order), then entry points of ``axentra.migrations`` (by name)."""
+    out: list[Migration] = []
+    for ref in sources:
+        out.extend(load_migration_source(ref))
+    if entry_points:
+        eps = loader() if loader else metadata.entry_points(group=ENTRY_POINT_GROUP)
+        for ep in sorted(eps, key=lambda e: e.name):
+            out.extend(_coerce(ep.load(), f"entry point {ep.name} ({ep.value})"))
     return out
 
 
@@ -66,10 +124,21 @@ class MigrationRunner:
         self.migrations: list[Migration] = builtin_migrations()
 
     def register(self, migrations: list[Migration]) -> None:
+        """Add product migrations; registering the identical migration twice is a no-op."""
+        known = {(m.namespace, m.version): m for m in self.migrations}
         for mig in migrations:
             if mig.namespace == "axentra":
                 raise ValueError("the 'axentra' namespace is reserved")
-        self.migrations.extend(migrations)
+            prev = known.get((mig.namespace, mig.version))
+            if prev is not None:
+                if prev.checksum != mig.checksum or prev.name != mig.name:
+                    raise ValueError(
+                        f"two different migrations claim {mig.namespace}:{mig.version:04d}"
+                        f" ({prev.name}, {mig.name})"
+                    )
+                continue
+            known[(mig.namespace, mig.version)] = mig
+            self.migrations.append(mig)
 
     def _ensure_table(self, conn: psycopg.Connection[tuple[object, ...]]) -> None:
         conn.execute(

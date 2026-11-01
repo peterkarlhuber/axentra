@@ -69,7 +69,46 @@ ax.start()
 ```
 
 Run `ax.migrate()` from your product's deployment step (a one-shot job, like the `migrate`
-service in the compose files). `axentra migrate` alone does not know your namespace.
+service in the compose files). To let the plain `axentra migrate` command apply your namespace
+too, publish the migrations instead of (or in addition to) registering them in code:
+
+```toml
+# axentra.toml
+[database]
+extra_migrations = ["crm.schema:migrations"]
+```
+
+```python
+# crm/schema.py (the SQL files live in the package crm.migrations, with an __init__.py)
+from axentra.data.migrations import package_migrations
+
+def migrations():
+    return package_migrations("crm", "crm.migrations")
+```
+
+or declare an entry point in your package metadata, which `axentra migrate` picks up without
+configuration:
+
+```toml
+# pyproject.toml of the product
+[project.entry-points."axentra.migrations"]
+crm = "crm.schema:migrations"
+```
+
+If your tables hold values encrypted with `ax.secrets`, register each column so key rotation
+(`axentra secrets reencrypt`) rewrites them too:
+
+```python
+from axentra.data.reencrypt import EncryptedColumn
+
+ax.register_encrypted_column(
+    EncryptedColumn("crm_connections", "token_enc", "id", lambda row: f"crm_connections:{row['id']}")
+)
+```
+
+The CLI builds its own `Axentra`: put the registration in a `setup(ax)` function and run
+`axentra secrets reencrypt --load crm.setup` (the same convention as `axentra worker --load`), or
+call `ax.reencrypt_secrets()` from your own maintenance entry point.
 
 ## 4. Use the table with authorization, scope and audit
 

@@ -17,8 +17,9 @@ or data loss; Nodestro's central key had exactly this limitation.
   `axs1|<kid>|<context>`, where the caller passes a context such as table and row id, so values
   cannot be swapped between rows or purposes.
 - Rotation: add the new key in front, restart, re-encrypt stored values, remove the old key.
-  `SecretBox.needs_rotation()` identifies values under an old key. A bulk re-encryption command
-  is planned ([TODO](../TODO.md)).
+  `SecretBox.needs_rotation()` identifies values under an old key; `axentra secrets reencrypt`
+  (`--dry-run` for counts per key id) rewrites every registered encrypted column in batches
+  (`axentra.data.reencrypt`; products register their columns with `ax.register_encrypted_column`).
 
 ## Consequences
 

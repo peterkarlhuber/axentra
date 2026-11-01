@@ -2228,6 +2228,10 @@ export interface components {
             features: {
                 [key: string]: boolean;
             };
+            /** Limits */
+            limits?: {
+                [key: string]: unknown;
+            };
             /** Login Rate Per Minute */
             login_rate_per_minute: number;
             /** Mode */

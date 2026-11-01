@@ -62,7 +62,10 @@ superuser or `BYPASSRLS` role is refused in production unless `database.allow_su
 |---|---|---|---|
 | `url` | `AXENTRA__DATABASE__URL` | `postgresql://axentra@127.0.0.1:5432/axentra` | Connection URL (development convenience; prefer `url_ref`) |
 | `url_ref` | `AXENTRA__DATABASE__URL_REF` | none | Secret reference for the URL; overrides `url` |
-| `migration_url` | `AXENTRA__DATABASE__MIGRATION_URL` | none (= the runtime URL) | Separate owner connection for migrations. Plain value, no `_ref` variant yet; in the compose files the `migrate` job instead gets the owner URL through `url_ref` |
+| `migration_url` | `AXENTRA__DATABASE__MIGRATION_URL` | none (= the runtime URL) | Separate owner connection for migrations (development convenience; prefer `migration_url_ref`) |
+| `migration_url_ref` | `AXENTRA__DATABASE__MIGRATION_URL_REF` | none | Secret reference for the migration URL; overrides `migration_url` |
+| `extra_migrations` | `AXENTRA__DATABASE__EXTRA_MIGRATIONS` | `[]` | Product migration sources for `axentra migrate`: `"package.module:attribute"` (a list of `Migration` or a callable returning one) |
+| `migration_entry_points` | `AXENTRA__DATABASE__MIGRATION_ENTRY_POINTS` | `true` | Also apply migrations that installed packages publish in the `axentra.migrations` entry point group |
 | `pool_min` | `AXENTRA__DATABASE__POOL_MIN` | `1` | Minimum pooled connections per process |
 | `pool_max` | `AXENTRA__DATABASE__POOL_MAX` | `10` | Maximum pooled connections per process |
 | `statement_timeout_ms` | `AXENTRA__DATABASE__STATEMENT_TIMEOUT_MS` | `30000` | `statement_timeout` per connection (0 = none) |
@@ -83,9 +86,16 @@ superuser or `BYPASSRLS` role is refused in production unless `database.allow_su
 | `master_keys_ref` | `AXENTRA__SECURITY__MASTER_KEYS_REF` | none | Secret reference to the keyring `kid:base64key[,...]` (first key active). Required in production |
 | `master_keys` | `AXENTRA__SECURITY__MASTER_KEYS` | none | Inline keyring; refused in production. Without either, development uses `./var/dev-keyring`, test an ephemeral key |
 | `setup_token_ttl_minutes` | `AXENTRA__SECURITY__SETUP_TOKEN_TTL_MINUTES` | `60` | Lifetime of first-run setup tokens (>= 5) |
+| `max_body_bytes` | `AXENTRA__SECURITY__MAX_BODY_BYTES` | `10485760` (10 MiB) | Largest request body (413 above it); file uploads use `storage.max_file_bytes` instead |
+| `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); in-memory, per process |
+| `rate_limit_ip_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_IP_PER_MINUTE` | none (off) | Requests per minute per client IP, whatever the credential |
+| `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size |
+| `api_docs` | `AXENTRA__SECURITY__API_DOCS` | `disabled` in production, else `public` | `/v1/docs` and `/v1/openapi.json`: `public`, `authenticated` or `disabled` |
 
-Generate keyring entries with `axentra keys generate --kid k1`. Rotation:
-[SECURITY_MODEL](../architecture/SECURITY_MODEL.md#secrets-and-the-keyring).
+Generate keyring entries with `axentra keys generate --kid k1`. Rotation (with
+`axentra secrets reencrypt [--dry-run] [--batch-size N]`):
+[SECURITY_MODEL](../architecture/SECURITY_MODEL.md#secrets-and-the-keyring). Rate limits and the
+body limit: [SECURITY_MODEL](../architecture/SECURITY_MODEL.md#rate-limiting).
 
 ## `[[oidc]]` (list of providers)
 
@@ -121,6 +131,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `s3_access_key_ref`, `s3_secret_key_ref` | none |
 | `max_file_bytes` | `52428800` (50 MiB) |
 | `allowed_content_types` | `[]` (all except always-blocked executable/HTML types) |
+| `store_blocked_as_inert` | `false` (`true`: store executable/HTML/SVG/script uploads as inert `application/octet-stream` attachments instead of refusing them with 415) |
 | `signed_url_ttl_seconds` | `300` (10-86400) |
 
 `[notify]`

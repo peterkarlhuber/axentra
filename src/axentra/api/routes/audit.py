@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from axentra.api.context import Ax, CurrentPrincipal
 from axentra.api.routes.common import Cursor, Limit
@@ -28,6 +28,8 @@ class EffectiveSettings(BaseModel):
     password_login: bool
     password_min_length: int
     login_rate_per_minute: int
+    limits: dict[str, Any] = Field(default_factory=dict)
+    """Request limits: max_body_bytes, rate_limit_per_minute, rate_limit_ip_per_minute, rate_limit_burst, api_docs."""
     oidc_providers: list[dict[str, Any]]
     storage: dict[str, Any]
     notify: dict[str, Any]
@@ -114,6 +116,13 @@ def effective_settings(principal: CurrentPrincipal, ax: Ax) -> EffectiveSettings
         password_login=s.security.password_login,
         password_min_length=s.security.password_min_length,
         login_rate_per_minute=s.security.login_rate_per_minute,
+        limits={
+            "max_body_bytes": s.security.max_body_bytes,
+            "rate_limit_per_minute": s.security.rate_limit_per_minute,
+            "rate_limit_ip_per_minute": s.security.rate_limit_ip_per_minute,
+            "rate_limit_burst": s.security.rate_limit_burst,
+            "api_docs": s.api_docs_mode,
+        },
         oidc_providers=[
             {
                 "id": p.id,
@@ -128,6 +137,7 @@ def effective_settings(principal: CurrentPrincipal, ax: Ax) -> EffectiveSettings
             "backend": s.storage.backend,
             "max_file_bytes": s.storage.max_file_bytes,
             "allowed_content_types": s.storage.allowed_content_types,
+            "store_blocked_as_inert": s.storage.store_blocked_as_inert,
             "s3_bucket": s.storage.s3_bucket,
             "s3_region": s.storage.s3_region,
         },

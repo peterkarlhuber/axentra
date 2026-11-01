@@ -12,6 +12,7 @@ columns and the same RLS policy (see docs/guides/PRODUCT_TABLES.md) and use
 from __future__ import annotations
 
 import builtins
+from collections.abc import Callable
 from datetime import datetime
 import json
 import re
@@ -23,7 +24,10 @@ from pydantic import BaseModel
 from axentra.core.errors import NotFound, PayloadTooLarge, PreconditionFailed, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
-from axentra.data.database import Database, DbScope
+from axentra.data.database import Database, DbScope, Tx
+
+#: Called inside the write transaction (e.g. to write the audit event atomically).
+RecordHook = Callable[[Tx, "Record"], None]
 
 _COLLECTION = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 _FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
@@ -71,7 +75,14 @@ class RecordStore:
         self.db = db
 
     def create(
-        self, product_id: str, tenant_id: str, collection: str, data: dict[str, Any], *, actor: str
+        self,
+        product_id: str,
+        tenant_id: str,
+        collection: str,
+        data: dict[str, Any],
+        *,
+        actor: str,
+        hook: RecordHook | None = None,
     ) -> Record:
         rid = new_id("rec")
         with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
@@ -88,7 +99,10 @@ class RecordStore:
                     actor,
                 ),
             )
-        return Record.model_validate(row)
+            record = Record.model_validate(row)
+            if hook is not None:
+                hook(tx, record)
+        return record
 
     def get(self, product_id: str, tenant_id: str, collection: str, record_id: str) -> Record:
         with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
@@ -161,6 +175,7 @@ class RecordStore:
         *,
         actor: str,
         if_match: int | None = None,
+        hook: RecordHook | None = None,
     ) -> Record:
         with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
             cur = tx.one(
@@ -177,10 +192,20 @@ class RecordStore:
                 " updated_at = now() WHERE id = %s RETURNING *",
                 (Jsonb(_check_data(data)), actor, record_id),
             )
-        return Record.model_validate(row)
+            record = Record.model_validate(row)
+            if hook is not None:
+                hook(tx, record)
+        return record
 
     def delete(
-        self, product_id: str, tenant_id: str, collection: str, record_id: str, *, if_match: int | None = None
+        self,
+        product_id: str,
+        tenant_id: str,
+        collection: str,
+        record_id: str,
+        *,
+        if_match: int | None = None,
+        hook: Callable[[Tx], None] | None = None,
     ) -> None:
         with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
             cur = tx.one(
@@ -193,6 +218,8 @@ class RecordStore:
             if if_match is not None and cur["version"] != if_match:
                 raise PreconditionFailed("the record was changed by someone else")
             tx.execute("DELETE FROM axentra_records WHERE id = %s", (record_id,))
+            if hook is not None:
+                hook(tx)
 
     def collections(self, product_id: str) -> builtins.list[CollectionStats]:
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:

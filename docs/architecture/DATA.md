@@ -49,11 +49,19 @@ also visible in tenant scope of the same product (see
 - Forward only. Rolling back means restoring a backup taken before the migration
   ([BACKUP_RESTORE](../operations/BACKUP_RESTORE.md)); write migrations so that the previous
   release still works with the new schema where possible (expand, then contract).
-- Migrations may run with a separate owner connection (`database.migration_url`); the API should
-  run as a role without DDL rights ([DEPLOYMENT](../operations/DEPLOYMENT.md)).
-- `axentra migrate` (CLI) applies only Axentra's own namespace, because it does not know your
-  product's migrations. Products call `ax.migrate()` from their own entry point after
-  `register_migrations`.
+- Migrations may run with a separate owner connection (`database.migration_url_ref`, or
+  `migration_url` outside production); the API should run as a role without DDL rights
+  ([DEPLOYMENT](../operations/DEPLOYMENT.md)).
+- `axentra migrate` (CLI) applies Axentra's namespace and every discovered product namespace:
+  sources listed in `database.extra_migrations` (`"crm.schema:migrations"`, a list of `Migration`
+  or a callable returning one, e.g. `lambda: package_migrations("crm", "crm.sql")`) in the listed
+  order, then entry points of the group `axentra.migrations` of installed packages (by entry point
+  name; off with `database.migration_entry_points = false`). `ax.migrate()` additionally applies
+  migrations passed to `register_migrations`. The same migration registered twice is applied
+  once; two different migrations claiming one `namespace:version` are refused.
+- Backups: `pg_dump` must run as a superuser or a dedicated backup role with `BYPASSRLS`
+  (`pg_read_all_data`); forced RLS makes dumps as the owner or the application role fail
+  ([BACKUP_RESTORE](../operations/BACKUP_RESTORE.md#database-backup)).
 
 ## Identifiers
 
