@@ -31,6 +31,7 @@ from axentra.data.database import Database
 from axentra.data.migrations import Migration, MigrationRunner
 from axentra.data.record_service import RecordService
 from axentra.identity.service import IdentityService
+from axentra.storage.service import StorageService
 from axentra.tenancy.models import Product
 from axentra.tenancy.service import TenancyService
 
@@ -99,6 +100,11 @@ class Axentra:
                 self.secrets,
                 accept_invitation=self.tenancy.accept_invitation,
             )
+        self.storage: StorageService | None = (
+            StorageService(self.db, settings, self.authz, self.audit, self.keyring)
+            if settings.module_enabled("storage")
+            else None
+        )
         self._extra_migrations: list[Migration] = []
         self._started = False
         self._init_modules()
