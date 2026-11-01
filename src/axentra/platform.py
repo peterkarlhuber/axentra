@@ -24,6 +24,7 @@ from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
 from axentra.access.roles import RoleService
 from axentra.audit.log import AuditLog
+from axentra.billing.service import BillingService
 from axentra.config.secrets import SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
 from axentra.core.errors import ConfigurationError
@@ -37,6 +38,7 @@ from axentra.observability.tracing import setup_tracing
 from axentra.storage.service import StorageService
 from axentra.tenancy.models import Product
 from axentra.tenancy.service import TenancyService
+from axentra.usage.service import UsageService
 
 if TYPE_CHECKING:
     from axentra.identity.oidc import OidcService
@@ -119,6 +121,13 @@ class Axentra:
                 self.db, settings, self.authz, self.audit, self.secrets, metrics=self.metrics
             )
             self.on_invitation = self.notify.on_invitation
+        # Usage and billing (billing feeds plan limits and billing periods into usage via a policy).
+        self.usage = UsageService(self.db, self.authz, self.audit)
+        self.billing = BillingService(
+            self.db, settings, self.authz, self.audit, events=lambda: getattr(self, "events", None)
+        )
+        if settings.module_enabled("usage") and settings.module_enabled("billing"):
+            self.usage.set_policy(self.billing.usage_policy())
         self._extra_migrations: list[Migration] = []
         self._started = False
         self._init_modules()
