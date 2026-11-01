@@ -1,0 +1,40 @@
+# Axentra, single-product mode: this installation serves exactly one SaaS product.
+# The product is created on first start from [product]; products cannot be created or archived.
+#
+# Secrets are never written here: *_ref fields point to environment variables (env:NAME) or
+# files (file:/run/secrets/name). Any value can be overridden with AXENTRA__SECTION__KEY,
+# e.g. AXENTRA__SECURITY__PUBLIC_URL (the compose files do that from .env).
+# Reference of every setting: docs/operations/CONFIGURATION.md
+
+environment = "production"
+mode = "single"
+# Enabled modules (default: all known modules). identity, tenancy, access and audit cannot be
+# disabled; restrict the list to switch optional modules (and their routes) off, e.g.
+# modules = ["identity", "tenancy", "access", "data", "audit"]
+
+[product]
+slug = "app"
+name = "My SaaS"
+
+[database]
+# Runtime role without superuser/BYPASSRLS (see deploy/compose/initdb/01-roles.sql).
+url_ref = "env:AXENTRA_DATABASE_URL"
+pool_min = 1
+pool_max = 10
+statement_timeout_ms = 30000
+
+[security]
+public_url = "https://api.example.com"
+# Browser origins allowed to send credentialed requests: your product frontend and, optionally,
+# Axentra Studio. Exact https origins only in production.
+allowed_origins = ["https://app.example.com", "https://studio.example.com"]
+# Peers whose X-Forwarded-For is trusted (your reverse proxy). Empty: the TCP peer is the client.
+trusted_proxies = []
+master_keys_ref = "env:AXENTRA_MASTER_KEYS"
+session_ttl_hours = 12
+session_idle_minutes = 120
+login_rate_per_minute = 10
+
+[observability]
+log_level = "INFO"
+log_format = "json"

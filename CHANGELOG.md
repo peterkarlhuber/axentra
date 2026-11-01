@@ -50,3 +50,14 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   state machine, entitlement overrides feeding usage quotas, manual/fake/Stripe provider adapters
   (Stripe guarded by explicit keys and `live_payments`), signed and replay-safe webhooks with
   out-of-order protection; no payment processing or card data in Axentra; docs/modules/BILLING.md.
+- Documentation: README, architecture overview, security model (RLS limits, threat model, GDPR
+  responsibilities), data, deployment models, versioning/compatibility (`docs/COMPATIBILITY.md`),
+  ADRs 0001-0012, product-table guide with a tested example, roadmap, central TODO list,
+  development, deployment, configuration and backup/restore guides.
+- Deployment: multi-stage `Dockerfile` (python:3.13-slim, non-root uid 10001, healthcheck,
+  constraints-pinned dependencies in `deploy/constraints.txt`), compose stacks for single- and
+  multi-product mode with separate owner/application database roles
+  (`deploy/compose/initdb/01-roles.sql`), example configurations in `deploy/config/`.
+- Tests: automated backup/restore test (`pg_dump`/`pg_restore`, data, RLS and a working app on the
+  restored database) and a test for the product-table template; CI installs matching PostgreSQL
+  client tools and builds the container image.

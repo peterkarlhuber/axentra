@@ -1,0 +1,37 @@
+# Axentra, multi-product mode: one installation serves several SaaS products. Platform admins
+# create, archive and restore products; each product has its own operators, roles, API keys,
+# tenants and data, separated by authorization and row-level security.
+#
+# Secrets are never written here: *_ref fields point to environment variables (env:NAME) or
+# files (file:/run/secrets/name). Any value can be overridden with AXENTRA__SECTION__KEY.
+# Reference of every setting: docs/operations/CONFIGURATION.md
+
+environment = "production"
+mode = "multi"
+# Enabled modules (default: all known modules). identity, tenancy, access and audit cannot be
+# disabled; restrict the list to switch optional modules (and their routes) off, e.g.
+# modules = ["identity", "tenancy", "access", "data", "audit"]
+
+[database]
+url_ref = "env:AXENTRA_DATABASE_URL"
+pool_min = 2
+pool_max = 20
+statement_timeout_ms = 30000
+
+[security]
+public_url = "https://api.example.com"
+# Every product frontend that talks to this API with cookies, plus Axentra Studio.
+allowed_origins = [
+    "https://studio.example.com",
+    "https://crm.example.com",
+    "https://books.example.com",
+]
+trusted_proxies = []
+master_keys_ref = "env:AXENTRA_MASTER_KEYS"
+session_ttl_hours = 12
+session_idle_minutes = 120
+login_rate_per_minute = 10
+
+[observability]
+log_level = "INFO"
+log_format = "json"
