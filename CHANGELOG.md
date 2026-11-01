@@ -21,3 +21,10 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - HTTP API `/v1` (FastAPI) with RFC 9457 problem details, request ids, security headers, CORS for
   configured origins, route-protection registry; committed OpenAPI contract `openapi/axentra-v1.json`.
 - CLI: `axentra serve | migrate | admin setup-token | openapi export | keys generate`.
+- Identity: OpenID Connect login (`GET /v1/auth/oidc/{provider}/start` and `/callback`):
+  authorization code + PKCE S256, hashed single-use state bound to a browser login cookie,
+  nonce, discovery with exact issuer match, cached JWKS with refresh on unknown `kid`, strict ID
+  token checks (asymmetric algorithms only, `aud`/`azp`, `iss`, `exp`/`iat`), verified-email
+  linking, signup/invitation/allowed-domain rules, safe `return_to` (relative paths or allowed
+  origins), `?login_error=<code>` redirects; redaction of auth query values in `uvicorn.access`.
+  New settings: `security.login_page`, `oidc[].token_endpoint_auth_method`.

@@ -10,7 +10,7 @@ summary. Permission names in brackets.
 ## Auth
 - `POST /v1/auth/setup` `{setup_token, email, name, password}` -> first platform admin (token printed by `axentra admin setup-token`)
 - `POST /v1/auth/login/password` `{email, password}` -> `Session`
-- `GET /v1/auth/oidc/{provider}/start?return_to=/path` -> 302; `GET /v1/auth/oidc/{provider}/callback`
+- `GET /v1/auth/oidc/{provider}/start?return_to=/path|<allowed origin URL>&invitation=<token>` -> 302 to the IdP; `GET /v1/auth/oidc/{provider}/callback?code&state` -> 302 to return_to (session cookie) or to the login page with `?login_error=<code>` (see docs/modules/IDENTITY.md)
 - `GET /v1/auth/session` -> `{user, csrf_token, expires_at, platform_role|null}`
 - `POST /v1/auth/logout`
 - `GET /v1/auth/sessions` (own), `DELETE /v1/auth/sessions/{session_id}` (own)
