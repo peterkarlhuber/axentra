@@ -6,7 +6,21 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter
 
-from axentra.api.routes import access, audit, auth, meta, products, records, storage, tenants, users
+from axentra.api.routes import (
+    access,
+    audit,
+    auth,
+    billing,
+    meta,
+    notify,
+    observability,
+    products,
+    records,
+    storage,
+    tenants,
+    usage,
+    users,
+)
 
 
 @dataclass(frozen=True)
@@ -25,4 +39,8 @@ ROUTERS: list[ModuleRouter] = [
     ModuleRouter(records.router, "data"),
     ModuleRouter(audit.router, "audit"),
     ModuleRouter(storage.router, "storage"),
+    ModuleRouter(notify.router, "notify"),
+    ModuleRouter(observability.router, None),
+    ModuleRouter(usage.router, "usage"),
+    ModuleRouter(billing.router, "billing"),
 ]

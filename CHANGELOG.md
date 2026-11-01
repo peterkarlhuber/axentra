@@ -34,3 +34,19 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   linking, signup/invitation/allowed-domain rules, safe `return_to` (relative paths or allowed
   origins), `?login_error=<code>` redirects; redaction of auth query values in `uvicorn.access`.
   New settings: `security.login_page`, `oidc[].token_endpoint_auth_method`.
+- Notify (migration `0005_notify.sql`): versioned email templates with de/en locale variants and a safe
+  `{{ var }}` renderer, built-in invitation template, encrypted outbox with idempotent send, preferences
+  (opt-out per category), local mailbox and SMTP (STARTTLS) providers, `NotifyDispatcher` with
+  SKIP LOCKED leases and exponential backoff, delivery stats, invitation emails via `ax.on_invitation`,
+  `axentra notify-dispatch --once|--loop`.
+- Observability: Prometheus metrics registry (`ax.metrics`) at `GET /metrics` (bearer token via
+  `observability.metrics_token_ref`; disabled in production without one), optional OpenTelemetry request
+  tracing, notify readiness check, `axentra maintenance purge` (audit, sessions, notify retention).
+- Usage (migration 0004): generic meters (sum/max/last; reset none/day/month/billing period),
+  idempotent usage events with atomically updated counters, per-tenant quotas (hard/soft;
+  defaults from plan entitlements or the meter), concurrency-safe `check_and_record`,
+  reservations (reserve/commit/release/sweep), summaries and daily time series; docs/modules/USAGE.md.
+- Billing (migration 0004): plans with prices and entitlements, tenant subscriptions with a strict
+  state machine, entitlement overrides feeding usage quotas, manual/fake/Stripe provider adapters
+  (Stripe guarded by explicit keys and `live_payments`), signed and replay-safe webhooks with
+  out-of-order protection; no payment processing or card data in Axentra; docs/modules/BILLING.md.

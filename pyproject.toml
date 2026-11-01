@@ -56,6 +56,8 @@ dev = [
     "moto[s3,server]>=5",
     "boto3>=1.34",
     "import-linter>=2.1",
+    "aiosmtpd>=1.4",
+    "opentelemetry-sdk>=1.25",
 ]
 
 [project.scripts]
@@ -124,6 +126,7 @@ type = "forbidden"
 source_modules = [
     "axentra.core", "axentra.config", "axentra.data", "axentra.identity", "axentra.tenancy",
     "axentra.access", "axentra.audit", "axentra.platform", "axentra.storage",
+    "axentra.notify", "axentra.observability", "axentra.usage", "axentra.billing",
 ]
 forbidden_modules = ["axentra.api", "axentra.cli", "fastapi", "starlette", "uvicorn"]
 
@@ -132,6 +135,12 @@ name = "Axentra never depends on Nodestro, orkexa or Axentra Studio"
 type = "forbidden"
 source_modules = ["axentra"]
 forbidden_modules = ["nodestro_runtime", "nodestro_api", "nodestro_studio", "nodestro", "orkexa", "axentra_studio"]
+
+[[tool.importlinter.contracts]]
+name = "Usage never depends on billing"
+type = "forbidden"
+source_modules = ["axentra.usage"]
+forbidden_modules = ["axentra.billing"]
 
 [[tool.importlinter.contracts]]
 name = "Core is the bottom layer"

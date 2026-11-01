@@ -157,6 +157,19 @@ class NotifySettings(_Section):
     smtp_username: str | None = None
     smtp_password_ref: str | None = None
     smtp_starttls: bool = True
+    smtp_ca_file: str | None = None
+    """Optional CA bundle (PEM) to verify the SMTP server certificate (private CAs)."""
+    smtp_timeout_seconds: float = Field(20.0, gt=0, le=300)
+    max_attempts: int = Field(5, ge=1, le=50)
+    """Delivery attempts before a message is marked ``failed``."""
+    backoff_base_seconds: float = Field(30.0, ge=0)
+    backoff_max_seconds: float = Field(3600.0, ge=0)
+    lease_seconds: int = Field(120, ge=5)
+    """How long a dispatcher owns a claimed message before another dispatcher may retry it."""
+    content_retention_days: int = Field(30, ge=1)
+    """Rendered subjects/bodies (and local mailbox entries) are erased after this many days."""
+    message_retention_days: int = Field(180, ge=1)
+    """Finished messages (incl. recipient addresses) are deleted after this many days."""
 
 
 class BillingSettings(_Section):
@@ -173,6 +186,11 @@ class ObservabilitySettings(_Section):
     otel_enabled: bool = False
     otel_service_name: str = "axentra"
     metrics_enabled: bool = True
+    metrics_token_ref: str | None = None
+    """Bearer token (``env:``/``file:`` reference) required by ``GET /metrics``. Without it,
+    metrics are served openly outside production and disabled (404) in production."""
+    otel_endpoint: str | None = None
+    """OTLP/HTTP traces endpoint; default: the exporter's ``OTEL_EXPORTER_OTLP_*`` environment."""
     audit_retention_days: int = Field(365, ge=1)
     job_retention_days: int = Field(30, ge=1)
 

@@ -199,6 +199,10 @@ def create_app(
         )
         return response
 
+    from axentra.api.observability import install_observability
+
+    install_observability(app, ax)
+
     if ax.settings.security.allowed_origins:
         app.add_middleware(
             CORSMiddleware,

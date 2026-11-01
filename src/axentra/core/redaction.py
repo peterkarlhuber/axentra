@@ -13,6 +13,7 @@ _SENSITIVE_KEY = re.compile(
 )
 _PATTERNS = [
     re.compile(r"axk_[a-z0-9]+_[A-Za-z0-9_-]{16,}"),  # Axentra API keys
+    re.compile(r"axinv_[A-Za-z0-9_-]{16,}"),  # Axentra invitation tokens
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWTs
     re.compile(r"(?i)(postgres(ql)?://[^:/@\s]+:)[^@\s]+@"),
