@@ -82,6 +82,105 @@ jobs:
           name: test-results-py${{ matrix.python }}-pg${{ matrix.postgres }}
           path: test-results.xml
 
+  sdk-typescript:
+    name: TypeScript SDK (generated types, unit tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Generated types match the committed OpenAPI
+        run: npm run generate:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  sdk-python:
+    name: Python SDK (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AXENTRA_TEST_DATABASE_URL: postgresql://postgres:pg@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - name: The client installs and its unit tests pass WITHOUT the server package
+        run: |
+          python -m venv /tmp/client && /tmp/client/bin/pip install "./sdk/python[test]"
+          ! /tmp/client/bin/python -c "import axentra" 2>/dev/null
+          cd sdk/python && /tmp/client/bin/python -m pytest -q -p no:cacheprovider tests/unit
+      - run: pip install -e ".[server]" -e "./sdk/python[test]"
+      - name: Lint, types, generated sync client
+        working-directory: sdk/python
+        run: |
+          ruff check src tests scripts
+          ruff format --check src tests scripts
+          mypy
+          python scripts/unasync.py --check
+      - name: Unit + integration tests against an in-process server (skips are failures)
+        working-directory: sdk/python
+        run: |
+          pytest -ra tests/unit tests/integration --junitxml=sdk-results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("sdk-results.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          skipped = int(suite.get("skipped", 0))
+          print(f"tests={suite.get('tests')} failures={suite.get('failures')} errors={suite.get('errors')} skipped={skipped}")
+          raise SystemExit(1 if skipped else 0)
+          PY
+
+  sdk-e2e:
+    name: SDK contract tests against axentra serve
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AXENTRA_TEST_DATABASE_URL: postgresql://postgres:pg@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[server]" -e "./sdk/python[test]"
+      - run: npm ci --no-audit --no-fund
+        working-directory: sdk/typescript
+      - name: Start a PostgreSQL-backed server and run both SDK e2e suites
+        run: AXENTRA_PYTHON="$(command -v python)" scripts/sdk-e2e.sh
+
   package:
     name: Package builds and installs headless
     runs-on: ubuntu-latest

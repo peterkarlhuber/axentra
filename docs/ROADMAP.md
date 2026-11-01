@@ -48,7 +48,8 @@ configuration. Module documentation will be in `docs/modules/*` once merged.
 
 ## Phase 4: Developer experience + complete Studio (planned)
 
-Python SDK and TypeScript SDK (generated from the committed OpenAPI), complete OpenAPI, CLI
+Python SDK (hand-maintained, contract-tested) and TypeScript SDK (generated from the committed
+OpenAPI) - both in `sdk/`, see docs/sdk/ - complete OpenAPI, CLI
 extensions, configuration examples, a demo SaaS application, installation/development/deployment/
 backup documentation, single- and multi-product example configurations. Studio polished and
 complete in German and English.

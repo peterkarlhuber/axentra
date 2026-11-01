@@ -7,6 +7,14 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 ## [Unreleased]
 
 ### Added
+- SDKs (Phase 4): TypeScript SDK `@axentra/sdk` in `sdk/typescript` (types generated from the
+  committed OpenAPI with openapi-typescript, openapi-fetch client with API key/session bearer or
+  cookie mode with automatic CSRF header, `AxentraApiError` from problem details,
+  `checkCompatibility()`, cursor `paginate()`, `idempotencyKey()`; `generate:check` staleness
+  check in CI) and Python SDK `axentra-client` in `sdk/python` (pure httpx client, sync + async,
+  pydantic models for the main resources, streamed file transfer; contract tests against an
+  in-process server). `scripts/sdk-e2e.sh` runs both SDKs' e2e suites against a PostgreSQL-backed
+  `axentra serve`; CI jobs `sdk-typescript`, `sdk-python`, `sdk-e2e`. See docs/sdk/.
 - Foundation (Phase 1): core (errors, ids, pagination, redaction), typed configuration with secret
   references and a rotatable AES-256-GCM keyring, PostgreSQL pool with scoped transactions and
   forced row-level security, versioned SQL migrations with checksums and advisory lock.
