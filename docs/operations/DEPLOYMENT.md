@@ -46,6 +46,11 @@ the configuration file (`deploy/config/single.toml` or `multi.toml`):
 - `api`: `axentra serve` as `axentra_app`, after `migrate` completed successfully. Read-only root
   filesystem, all capabilities dropped, `no-new-privileges`, `/tmp` as tmpfs.
 
+`deploy/compose/docker-compose.taskboard.yml` follows the same pattern for the demo product
+[examples/taskboard](../../examples/taskboard/), which embeds Axentra as a library. Its `migrate`
+job runs `taskboard migrate` (Axentra's and the `taskboard` namespace), and its `app` serves
+Taskboard with the Axentra API mounted under `/axentra`, on port 8090, using its own database.
+
 Values come from `deploy/compose/.env` (template: `.env.example`): database passwords
 (URL-safe, e.g. `openssl rand -hex 24`), the keyring (`AXENTRA_MASTER_KEYS`, from
 `axentra keys generate`), and `AXENTRA_ENVIRONMENT`, `AXENTRA_PUBLIC_URL`,

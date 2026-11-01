@@ -1,0 +1,91 @@
+# Taskboard (examples/taskboard) on its own Axentra database: the single-product model with the
+# product backend and Axentra in ONE process (Axentra used as a library, its API mounted under
+# /axentra). PostgreSQL 16, a one-shot migration job (Axentra + "taskboard" namespace) and the app.
+#
+#   cp .env.example .env    # same variables as the Axentra stacks
+#   docker compose -f docker-compose.taskboard.yml up -d --build
+#   curl -s http://localhost:8090/api/health
+#   python ../../examples/taskboard/walkthrough.py --base-url http://localhost:8090
+#
+# Taskboard's settings: ../../examples/taskboard/taskboard.toml (+ env overrides below).
+
+name: axentra-taskboard
+
+x-taskboard: &taskboard
+  image: taskboard:local
+  build:
+    context: ../..
+    dockerfile: examples/taskboard/Dockerfile
+  environment: &taskboard-env
+    AXENTRA_CONFIG: /etc/taskboard/taskboard.toml
+    AXENTRA_MASTER_KEYS: ${AXENTRA_MASTER_KEYS:?set AXENTRA_MASTER_KEYS in .env}
+    AXENTRA__SECURITY__MASTER_KEYS_REF: env:AXENTRA_MASTER_KEYS
+    AXENTRA__ENVIRONMENT: ${AXENTRA_ENVIRONMENT:-production}
+    AXENTRA__DATABASE__URL_REF: env:AXENTRA_DATABASE_URL
+    # The Axentra API is mounted under /axentra; the browser origin is Taskboard's own origin.
+    AXENTRA__SECURITY__PUBLIC_URL: ${TASKBOARD_ORIGIN:-http://localhost:8090}/axentra
+    AXENTRA__SECURITY__ALLOWED_ORIGINS: '["${TASKBOARD_ORIGIN:-http://localhost:8090}"]'
+  configs:
+    - source: taskboard
+      target: /etc/taskboard/taskboard.toml
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: taskboard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      AXENTRA_DB_OWNER_PASSWORD: ${AXENTRA_DB_OWNER_PASSWORD:?set AXENTRA_DB_OWNER_PASSWORD in .env}
+      AXENTRA_DB_APP_PASSWORD: ${AXENTRA_DB_APP_PASSWORD:?set AXENTRA_DB_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d taskboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    <<: *taskboard
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      <<: *taskboard-env
+      # Axentra's and Taskboard's migrations run as the schema owner.
+      AXENTRA_DATABASE_URL: postgresql://axentra_owner:${AXENTRA_DB_OWNER_PASSWORD}@db:5432/taskboard
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    <<: *taskboard
+    command: ["serve", "--host", "0.0.0.0", "--port", "8090"]
+    restart: unless-stopped
+    environment:
+      <<: *taskboard-env
+      # Runtime role without superuser/BYPASSRLS: row-level security applies to Taskboard's tables too.
+      AXENTRA_DATABASE_URL: postgresql://axentra_app:${AXENTRA_DB_APP_PASSWORD}@db:5432/taskboard
+    ports:
+      - "${TASKBOARD_HTTP_PORT:-8090}:8090"
+    volumes:
+      - appdata:/var/lib/taskboard/var
+    tmpfs:
+      - /tmp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+configs:
+  taskboard:
+    file: ../../examples/taskboard/taskboard.toml
+
+volumes:
+  pgdata:
+  appdata:

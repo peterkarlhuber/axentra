@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1
+# Taskboard container image (demo). Build from the repository root:
+#
+#   docker build -f examples/taskboard/Dockerfile -t taskboard:local .
+#
+# Installs Axentra from this repository (pinned by deploy/constraints.txt) plus the Taskboard
+# package; runs as an unprivileged user like the Axentra image.
+
+ARG PYTHON_IMAGE=python:3.13-slim
+
+FROM ${PYTHON_IMAGE} AS build
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+RUN python -m venv /opt/taskboard
+WORKDIR /src
+COPY deploy/constraints.txt deploy/constraints.txt
+COPY pyproject.toml README.md LICENSE CHANGELOG.md NOTICE.md ./
+COPY src ./src
+COPY examples/taskboard ./examples/taskboard
+RUN /opt/taskboard/bin/pip install --constraint deploy/constraints.txt "/src[server]" \
+    && /opt/taskboard/bin/pip install --no-deps ./examples/taskboard \
+    && /opt/taskboard/bin/taskboard --help > /dev/null
+
+FROM ${PYTHON_IMAGE} AS runtime
+LABEL org.opencontainers.image.title="Taskboard (Axentra demo)" \
+      org.opencontainers.image.licenses="MIT"
+RUN groupadd --system --gid 10001 taskboard \
+    && useradd --system --uid 10001 --gid taskboard --home-dir /var/lib/taskboard --create-home \
+       --shell /usr/sbin/nologin taskboard \
+    && install -d -o taskboard -g taskboard -m 0750 /var/lib/taskboard/var
+COPY --from=build /opt/taskboard /opt/taskboard
+ENV PATH=/opt/taskboard/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+WORKDIR /var/lib/taskboard
+USER 10001:10001
+EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/api/health', timeout=4).status == 200 else 1)"]
+ENTRYPOINT ["taskboard"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8090"]

@@ -15,6 +15,15 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   pydantic models for the main resources, streamed file transfer; contract tests against an
   in-process server). `scripts/sdk-e2e.sh` runs both SDKs' e2e suites against a PostgreSQL-backed
   `axentra serve`; CI jobs `sdk-typescript`, `sdk-python`, `sdk-e2e`. See docs/sdk/.
+- Examples: `examples/taskboard`, a demo multi-tenant SaaS backend (FastAPI) that uses Axentra as
+  a library and mounts the Axentra API under `/axentra` in the same process. It has its own tables
+  (`taskboard` migration namespace, forced RLS), authorization via `ax.authz`, attachments via
+  `ax.storage`, a `tasks_created` meter with plan limits (free 50/month, pro unlimited, 429 when
+  exceeded) and audited deletions, plus a scripted walkthrough and PostgreSQL tests in the main
+  pytest run. `examples/single-product` and `examples/multi-product` are configs and httpx scripts
+  that provision products, tenants, operators and API keys and assert isolation (exit 1 on any
+  leak), tested in `tests/integration/test_deployment_models.py`. Compose stack
+  `deploy/compose/docker-compose.taskboard.yml`, guide `docs/guides/BUILDING_A_PRODUCT.md`.
 - Foundation (Phase 1): core (errors, ids, pagination, redaction), typed configuration with secret
   references and a rotatable AES-256-GCM keyring, PostgreSQL pool with scoped transactions and
   forced row-level security, versioned SQL migrations with checksums and advisory lock.
