@@ -149,7 +149,8 @@ Axentra runs without Studio; Studio is just another client. Tested combinations 
 - Operations: [deployment](docs/operations/DEPLOYMENT.md), [configuration](docs/operations/CONFIGURATION.md),
   [backup and restore](docs/operations/BACKUP_RESTORE.md)
 - Project: [roadmap](docs/ROADMAP.md), [open work](docs/TODO.md), [changelog](CHANGELOG.md),
-  [Nodestro reuse analysis](docs/architecture/NODESTRO_REUSE.md)
+  [Nodestro reuse analysis](docs/architecture/NODESTRO_REUSE.md),
+  [Nodestro migration plan](docs/integrations/NODESTRO_MIGRATION_PLAN.md) (analysis only)
 
 ## License
 

@@ -61,3 +61,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Tests: automated backup/restore test (`pg_dump`/`pg_restore`, data, RLS and a working app on the
   restored database) and a test for the product-table template; CI installs matching PostgreSQL
   client tools and builds the container image.
+- Docs: Nodestro migration plan (Phase 6, analysis only, nothing implemented):
+  `docs/integrations/NODESTRO_MIGRATION_PLAN.md` - functions Nodestro could take from Axentra,
+  modules that become adapters, table-by-table data mapping (one product `nodestro`, legacy
+  `ndk_` keys, `nodestro:enc:v1` secrets, session hashes), compatibility, version pins, tests,
+  phased order, rollback, risks and open questions. The migration is a separate future project and
+  not a prerequisite for Axentra; Axentra keeps no dependency on Nodestro.
