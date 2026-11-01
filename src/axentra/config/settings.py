@@ -96,6 +96,9 @@ class SecuritySettings(_Section):
     master_keys: str | None = None
     """Inline keyring; allowed only outside production."""
     setup_token_ttl_minutes: int = Field(60, ge=5)
+    login_page: str = "/login"
+    """Where failed OIDC logins are sent (``?login_error=<code>``): a path on the origin of the login's
+    ``return_to``, or an absolute URL used when that origin is unknown."""
 
 
 class OidcProviderSettings(_Section):
@@ -109,6 +112,10 @@ class OidcProviderSettings(_Section):
     allow_signup: bool = False
     """Create unknown users on first login; otherwise only invited/existing users may log in."""
     allowed_email_domains: list[str] = Field(default_factory=list)
+    token_endpoint_auth_method: Literal["client_secret_basic", "client_secret_post", "none"] = (
+        "client_secret_basic"  # noqa: S105 (a method name, not a secret)
+    )
+    """How the client authenticates at the token endpoint (``none``: public client, PKCE only)."""
 
     @field_validator("id")
     @classmethod
