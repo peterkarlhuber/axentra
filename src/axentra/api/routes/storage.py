@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from axentra.api.context import Ax, CurrentPrincipal
+from axentra.api.limits import own_body_limit
 from axentra.api.multipart import parse_upload
 from axentra.api.routes.common import Cursor, IfMatch, Limit, parse_if_match
 from axentra.core.errors import ModuleDisabled, ValidationFailed
@@ -100,6 +101,7 @@ def _file_response(info: FileInfo, stream: Iterator[bytes]) -> StreamingResponse
 
 
 @router.post(F, response_model=FileInfo, status_code=201, summary="Upload a file", openapi_extra=_UPLOAD_BODY)
+@own_body_limit  # storage.max_file_bytes, enforced while streaming (axentra.api.multipart)
 async def upload_file(
     product_id: str, tenant_id: str, request: Request, principal: CurrentPrincipal, ax: Ax
 ) -> FileInfo:

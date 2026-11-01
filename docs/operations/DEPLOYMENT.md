@@ -13,7 +13,7 @@ covers the container image, the compose stacks and the production checklist. Set
 | API processes | `axentra serve --host 0.0.0.0 --port 8080`; scale horizontally, no sticky sessions needed |
 | Reverse proxy | TLS termination, request size and rate limits, HTTP/2; forward to port 8080 |
 | Secrets | Database URLs and the keyring via `env:` or `file:` references |
-| Persistent volume | `/var/lib/axentra/var` (local file storage of the planned storage module) |
+| Persistent volume | `/var/lib/axentra/var` (local file storage, `storage.local_path`) |
 
 ## Container image
 
@@ -81,15 +81,20 @@ TLS; `.env.example` uses `development` so that plain HTTP on localhost works.
   (startup fails otherwise). Do not set `database.allow_superuser`.
 - `database.pool_max` x number of API processes stays below PostgreSQL `max_connections` (leave
   room for migrations, backups and administration).
-- Reverse proxy limits: request body size (Axentra has no global limit; records are capped at
-  256 KiB), request rate, timeouts.
-- Decide whether `/v1/docs` and `/v1/openapi.json` should be reachable publicly; block them at the
-  proxy if not.
+- Limits: Axentra refuses bodies above `security.max_body_bytes` (10 MiB; uploads use
+  `storage.max_file_bytes`) and can rate-limit per credential and per IP
+  (`security.rate_limit_per_minute`, `rate_limit_ip_per_minute`; off by default, per process).
+  Keep timeouts, slow-client protection and any global rate limit in the reverse proxy.
+- `/v1/docs` and `/v1/openapi.json` are disabled in production unless `security.api_docs` is
+  `public` or `authenticated`.
 - Logs are JSON on stdout (`observability.log_format = "json"`), with request ids; ship them to
   your log system. Secrets are redacted, but treat logs as personal data (IP addresses, emails).
 - Backups scheduled and restore tested ([BACKUP_RESTORE](BACKUP_RESTORE.md)).
-- Retention: expired sessions and old audit events are not purged automatically yet
-  ([TODO](../TODO.md)).
+- Retention: the job worker's leader runs `axentra maintenance purge` tasks hourly (audit
+  retention, expired sessions, notification retention, storage purge); without a worker, schedule
+  `axentra maintenance purge` yourself.
+- Key rotation: `axentra secrets reencrypt` after a new key is in front of the keyring
+  ([SECURITY_MODEL](../architecture/SECURITY_MODEL.md#secrets-and-the-keyring)).
 
 ## Without containers
 

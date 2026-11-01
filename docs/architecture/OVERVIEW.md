@@ -155,7 +155,7 @@ class Principal:
 | Authorization | Enforced by the services (`*Service` classes) | Same services |
 | RLS | Enforced if the database role is not a superuser and has no BYPASSRLS | Same |
 | Low-level access | `ax.db.transaction(...)`, `RecordStore` and similar classes do **no** authorization | Not exposed |
-| Rate limiting | Login/setup throttling inside `IdentityService` | Same; nothing else (put limits in your proxy) |
+| Rate limiting | Login/setup throttling inside `IdentityService` | Same, plus the optional per-credential/per-IP limit and the request body limit (`security.*`, HTTP middleware) |
 | Security headers, CORS, request ids | Your web layer | Axentra middleware |
 | Processes | Your process owns the pool (`ax.start()` / `ax.close()`) | `axentra serve` (uvicorn), one pool per process |
 

@@ -50,8 +50,12 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/v1/billing/webhooks/{provider}"),
         ("GET", "/v1/files/download/{token}"),
         ("GET", "/metrics"),
+        # Only registered when security.api_docs is "public" (see _install_api_docs).
+        ("GET", "/v1/openapi.json"),
+        ("GET", "/v1/docs"),
     }
 )
+DOCS_ROUTES = frozenset({("GET", "/v1/openapi.json"), ("GET", "/v1/docs")})
 
 API_VERSION_STR = f"{API_VERSION[0]}.{API_VERSION[1]}"
 
@@ -90,6 +94,34 @@ def iter_api_routes(
             )
 
 
+def _install_limits(app: FastAPI, ax: Axentra) -> None:
+    """Body size limit and optional rate limits; added before request_context so they run inside it."""
+    from starlette.routing import compile_path
+
+    from axentra.api.context import client_ip, session_cookie_name
+    from axentra.api.limits import BodyLimitMiddleware, RateLimitMiddleware, TokenBuckets, has_own_body_limit
+
+    sec = ax.settings.security
+    exempt = [
+        compile_path(path)[0]
+        for path, route, _ in iter_api_routes(list(app.routes))
+        if has_own_body_limit(route.endpoint)
+    ]
+    app.add_middleware(BodyLimitMiddleware, max_bytes=sec.max_body_bytes, exempt=exempt)
+    if sec.rate_limit_per_minute or sec.rate_limit_ip_per_minute:
+        app.add_middleware(
+            RateLimitMiddleware,
+            per_credential=TokenBuckets(sec.rate_limit_per_minute, sec.rate_limit_burst)
+            if sec.rate_limit_per_minute
+            else None,
+            per_ip=TokenBuckets(sec.rate_limit_ip_per_minute, sec.rate_limit_burst)
+            if sec.rate_limit_ip_per_minute
+            else None,
+            client_ip=client_ip,
+            session_cookie=lambda: session_cookie_name(ax),
+        )
+
+
 def check_routes(app: FastAPI) -> int:
     """Refuse to start if an API route is neither authenticated nor explicitly public. Returns the count checked."""
     unprotected = []
@@ -108,6 +140,25 @@ def check_routes(app: FastAPI) -> int:
     if checked == 0:
         raise ConfigurationError("route protection check found no routes")
     return checked
+
+
+def _install_api_docs(app: FastAPI, mode: str) -> None:
+    """``/v1/openapi.json`` and ``/v1/docs`` per ``security.api_docs`` (public/authenticated/disabled)."""
+    if mode == "disabled":
+        return
+    from fastapi import Depends
+    from fastapi.openapi.docs import get_swagger_ui_html
+    from fastapi.responses import HTMLResponse, JSONResponse
+
+    deps = [Depends(resolve_principal)] if mode == "authenticated" else []
+
+    @app.get("/v1/openapi.json", include_in_schema=False, dependencies=deps)
+    def openapi_document() -> JSONResponse:
+        return JSONResponse(app.openapi())
+
+    @app.get("/v1/docs", include_in_schema=False, dependencies=deps)
+    def swagger_ui() -> HTMLResponse:
+        return get_swagger_ui_html(openapi_url="/v1/openapi.json", title="Axentra API")
 
 
 def create_app(
@@ -135,8 +186,9 @@ def create_app(
             "scoping, pagination, errors and versioning rules."
         ),
         lifespan=lifespan,
-        openapi_url="/v1/openapi.json",
-        docs_url="/v1/docs",
+        # Served by _install_api_docs according to security.api_docs (app.openapi() always works).
+        openapi_url=None,
+        docs_url=None,
         redoc_url=None,
         license_info={"name": "MIT", "identifier": "MIT"},
     )
@@ -151,6 +203,8 @@ def create_app(
     for router in ROUTERS:
         if router.module is None or ax.settings.module_enabled(router.module):
             app.include_router(router.router)
+    _install_api_docs(app, ax.settings.api_docs_mode)
+    _install_limits(app, ax)
 
     @app.middleware("http")
     async def request_context(

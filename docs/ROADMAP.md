@@ -13,7 +13,7 @@ Status as of 2026-11-01.
 | 2 | Infrastructure modules + UI | in progress |
 | 3 | SaaS business services + UI | in progress |
 | 4 | Developer experience + complete Studio | planned |
-| 5 | Hardening and acceptance | planned |
+| 5 | Hardening and acceptance | in progress |
 | 6 | Nodestro integration preparation (analysis only) | plan written |
 
 ## Phase 0: Architecture, branding and foundations (done)
@@ -53,7 +53,7 @@ extensions, configuration examples, a demo SaaS application, installation/develo
 backup documentation, single- and multi-product example configurations. Studio polished and
 complete in German and English.
 
-## Phase 5: Hardening and acceptance (planned)
+## Phase 5: Hardening and acceptance (in progress)
 
 Architecture, unit, PostgreSQL integration, contract, SDK and isolation tests; single- and
 multi-product deployment tests; concurrency and worker-restart tests; migration and
@@ -61,7 +61,9 @@ backup/restore tests; reproducible containers; security and dependency scans; fr
 end-to-end, accessibility and responsive tests; screenshots; cross-repository compatibility tests.
 
 Already started: backup/restore integration test, product-table template test, container build
-and compose validation in CI, dependency audit and bandit in CI.
+and compose validation in CI, dependency audit and bandit in CI. Backend hardening done: key
+rotation with `axentra secrets reencrypt`, record audit events, request body and rate limits,
+production default for API docs, product migration discovery for `axentra migrate`.
 
 ## Phase 6: Nodestro integration preparation (plan written, analysis only)
 

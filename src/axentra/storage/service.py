@@ -259,13 +259,18 @@ class StorageService:
             if expires_at <= utcnow():
                 raise ValidationFailed("expires_at must be in the future")
         declared = safety.normalize_content_type(content_type)
-        if safety.is_blocked(declared) or safety.extension(clean_name) in safety.BLOCKED_EXTENSIONS:
+        inert = self.cfg.store_blocked_as_inert
+        blocked = safety.is_blocked(declared) or safety.extension(clean_name) in safety.BLOCKED_EXTENSIONS
+        if blocked and not inert:
             raise UnsupportedMediaType("executable, HTML, SVG and script files are not accepted")
         head, stream = _peek(_chunks(data), safety.SNIFF_BYTES)
         sniffed = safety.sniff(head)
         if safety.is_blocked(sniffed):
-            raise UnsupportedMediaType("executable, HTML, SVG and script files are not accepted")
-        ctype = safety.choose_content_type(declared, sniffed)
+            if not inert:
+                raise UnsupportedMediaType("executable, HTML, SVG and script files are not accepted")
+            blocked = True
+        # storage.store_blocked_as_inert: risky files are kept as opaque bytes, never as their real type.
+        ctype = safety.OCTET_STREAM if blocked else safety.choose_content_type(declared, sniffed)
         if not safety.type_allowed(ctype, self.cfg.allowed_content_types):
             raise UnsupportedMediaType(f"content type {ctype} is not allowed")
         if not head:
@@ -487,7 +492,10 @@ class StorageService:
             changes: dict[str, Any] = {}
             if name is not None:
                 clean = safety.sanitize_name(name)
-                if safety.extension(clean) in safety.BLOCKED_EXTENSIONS:
+                if (
+                    safety.extension(clean) in safety.BLOCKED_EXTENSIONS
+                    and not self.cfg.store_blocked_as_inert
+                ):
                     raise UnsupportedMediaType("this file name extension is not accepted")
                 if clean != row["name"]:
                     changes["name"] = clean

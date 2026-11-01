@@ -6,7 +6,7 @@ An Axentra installation has three things to back up. Losing any one of them lose
 |---|---|---|
 | PostgreSQL database | All Axentra tables (users, tenants, records, keys, audit, ...) and your product tables | `pg_dump --format=custom`, plus continuous archiving if you need a small RPO |
 | **Encryption keyring** (`security.master_keys_ref`) | The keys that decrypt values stored with `SecretBox` | Copy of the secret, stored separately from the dumps (password manager, KMS, offline) |
-| File storage (planned storage module) | Uploaded files (`storage.local_path`, default `/var/lib/axentra/var/storage` in the image, or the S3 bucket) | Volume snapshot / file backup, or bucket versioning and replication |
+| File storage (storage module) | Uploaded files (`storage.local_path`, default `/var/lib/axentra/var/storage` in the image, or the S3 bucket) | Volume snapshot / file backup, or bucket versioning and replication |
 
 Configuration files and `.env` (or your secret store) should be versioned or backed up too; they
 are needed to start the restored system.

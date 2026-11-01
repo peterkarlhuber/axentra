@@ -75,3 +75,32 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   `ndk_` keys, `nodestro:enc:v1` secrets, session hashes), compatibility, version pins, tests,
   phased order, rollback, risks and open questions. The migration is a separate future project and
   not a prerequisite for Axentra; Axentra keeps no dependency on Nodestro.
+- Hardening (Phase 5):
+  - `axentra secrets reencrypt [--dry-run] [--batch-size N] [--load MODULE]` and
+    `ax.reencrypt_secrets()`: re-encrypts every stored SecretBox value not under the active key
+    (OIDC login states, webhook secrets, notification content and mailbox) in batches with a
+    per-row compare-and-swap; dry run reports counts per column and key id. Products register
+    their own columns with `ax.register_encrypted_column(EncryptedColumn(...))`.
+  - Records: audit events `data.record.create` and `data.record.replace` (collection and version,
+    never the data), written in the same transaction as the change; `data.record.delete` now
+    also commits atomically with the delete.
+  - Request body limit `security.max_body_bytes` (default 10 MiB, 413 problem+json; file uploads
+    keep `storage.max_file_bytes`) and an optional in-memory token-bucket rate limit per
+    credential and per client IP (`security.rate_limit_per_minute`, `rate_limit_ip_per_minute`,
+    `rate_limit_burst`; off by default; 429 with `Retry-After`).
+  - `security.api_docs` (`public` / `authenticated` / `disabled`) for `/v1/docs` and
+    `/v1/openapi.json`; `GET /v1/settings` reports the effective limits in a new `limits` object.
+  - `axentra migrate` applies product namespaces discovered from `database.extra_migrations`
+    (`"package.module:attribute"`) and the `axentra.migrations` entry point group
+    (`database.migration_entry_points`); `package_migrations(namespace, package)` helper;
+    `axentra migrate --status` includes them. New `database.migration_url_ref`.
+  - `storage.store_blocked_as_inert`: optionally keep executable/HTML/SVG/script uploads as inert
+    `application/octet-stream` attachments instead of refusing them.
+  - `from axentra import load_settings, Settings` works (lazy re-export), matching the documented
+    library example.
+
+### Changed
+- `/v1/docs` and `/v1/openapi.json` are disabled by default in production (set
+  `security.api_docs = "public"` to keep the previous behavior).
+- Registering the identical migration twice is now a no-op; two different migrations with the same
+  `namespace:version` are refused.

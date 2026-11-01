@@ -48,6 +48,7 @@ Code: `src/axentra/storage/` (service, backends, safety, tokens, models), HTTP l
 | `s3_presigned_downloads` | `false` | `download-url` returns a presigned S3 URL instead of an Axentra URL |
 | `max_file_bytes` | 50 MiB | hard per-file limit, enforced while streaming |
 | `allowed_content_types` | `[]` | allow-list (`image/png`, `image/*`); empty: everything except the blocked types |
+| `store_blocked_as_inert` | `false` | store blocked (executable/HTML/SVG/script) uploads as inert `application/octet-stream` instead of refusing them |
 | `signed_url_ttl_seconds` | 300 | maximum (and default) lifetime of download URLs |
 | `default_quota_bytes`, `default_quota_files` | none | installation-wide tenant default |
 | `pending_upload_timeout_seconds` | 3600 | after this, a still-pending upload counts as abandoned |
@@ -162,7 +163,9 @@ Audit events (same transaction as the change): `storage.file.upload`, `storage.f
 - Content types: the declared type is a hint. The first 512 bytes are sniffed (PE/ELF/Mach-O,
   shebang, HTML, SVG, XML, PNG, JPEG, GIF, WebP, PDF, ZIP, GZIP). Executable, HTML, XHTML, SVG and
   script types are refused at upload by declared type, by sniffed content and by file name
-  extension. A sniffed type replaces the declared one when that is missing, generic or of another
+  extension. With `storage.store_blocked_as_inert = true` they are accepted instead and stored as
+  `application/octet-stream` (never with their real type), so they can only be downloaded as
+  attachments; the setting is installation-wide (no per-product policy yet). A sniffed type replaces the declared one when that is missing, generic or of another
   top-level type. `allowed_content_types` is applied to the resulting type.
 - Downloads are always `Content-Disposition: attachment` (ASCII fallback plus RFC 5987
   `filename*`), `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`,

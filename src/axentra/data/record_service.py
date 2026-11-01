@@ -9,8 +9,8 @@ from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
 from axentra.core.context import Principal
 from axentra.core.pagination import Page
-from axentra.data.database import Database, DbScope
-from axentra.data.records import CollectionStats, Record, RecordStore
+from axentra.data.database import Database, Tx
+from axentra.data.records import CollectionStats, Record, RecordHook, RecordStore
 
 
 class RecordService:
@@ -40,7 +40,14 @@ class RecordService:
         self, principal: Principal, product_id: str, tenant_id: str, collection: str, data: dict[str, Any]
     ) -> Record:
         self.authz.require(principal, "records:write", product_id, tenant_id)
-        return self.store.create(product_id, tenant_id, collection, data, actor=principal.actor.id)
+        return self.store.create(
+            product_id,
+            tenant_id,
+            collection,
+            data,
+            actor=principal.actor.id,
+            hook=self._audit(principal, "data.record.create"),
+        )
 
     def replace(
         self,
@@ -54,7 +61,14 @@ class RecordService:
     ) -> Record:
         self.authz.require(principal, "records:write", product_id, tenant_id)
         return self.store.replace(
-            product_id, tenant_id, collection, record_id, data, actor=principal.actor.id, if_match=if_match
+            product_id,
+            tenant_id,
+            collection,
+            record_id,
+            data,
+            actor=principal.actor.id,
+            if_match=if_match,
+            hook=self._audit(principal, "data.record.replace"),
         )
 
     def delete(
@@ -67,8 +81,8 @@ class RecordService:
         if_match: int | None = None,
     ) -> None:
         self.authz.require(principal, "records:write", product_id, tenant_id)
-        self.store.delete(product_id, tenant_id, collection, record_id, if_match=if_match)
-        with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
+
+        def audit(tx: Tx) -> None:
             self.audit.record(
                 tx,
                 principal,
@@ -79,3 +93,22 @@ class RecordService:
                 tenant_id=tenant_id,
                 details={"collection": collection},
             )
+
+        self.store.delete(product_id, tenant_id, collection, record_id, if_match=if_match, hook=audit)
+
+    def _audit(self, principal: Principal, action: str) -> RecordHook:
+        """Audit event in the write transaction; the record data itself is never copied into it."""
+
+        def hook(tx: Tx, record: Record) -> None:
+            self.audit.record(
+                tx,
+                principal,
+                action,
+                target_type="record",
+                target_id=record.id,
+                product_id=record.product_id,
+                tenant_id=record.tenant_id,
+                details={"collection": record.collection, "version": record.version},
+            )
+
+        return hook
