@@ -123,7 +123,7 @@ name = "Domain modules do not depend on the HTTP layer or web frameworks"
 type = "forbidden"
 source_modules = [
     "axentra.core", "axentra.config", "axentra.data", "axentra.identity", "axentra.tenancy",
-    "axentra.access", "axentra.audit", "axentra.platform",
+    "axentra.access", "axentra.audit", "axentra.platform", "axentra.usage", "axentra.billing",
 ]
 forbidden_modules = ["axentra.api", "axentra.cli", "fastapi", "starlette", "uvicorn"]
 
@@ -132,6 +132,12 @@ name = "Axentra never depends on Nodestro, orkexa or Axentra Studio"
 type = "forbidden"
 source_modules = ["axentra"]
 forbidden_modules = ["nodestro_runtime", "nodestro_api", "nodestro_studio", "nodestro", "orkexa", "axentra_studio"]
+
+[[tool.importlinter.contracts]]
+name = "Usage never depends on billing"
+type = "forbidden"
+source_modules = ["axentra.usage"]
+forbidden_modules = ["axentra.billing"]
 
 [[tool.importlinter.contracts]]
 name = "Core is the bottom layer"

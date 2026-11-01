@@ -23,6 +23,7 @@ from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
 from axentra.access.roles import RoleService
 from axentra.audit.log import AuditLog
+from axentra.billing.service import BillingService
 from axentra.config.secrets import SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
 from axentra.core.errors import ConfigurationError
@@ -32,6 +33,7 @@ from axentra.data.record_service import RecordService
 from axentra.identity.service import IdentityService
 from axentra.tenancy.models import Product
 from axentra.tenancy.service import TenancyService
+from axentra.usage.service import UsageService
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +86,13 @@ class Axentra:
         self.roles = RoleService(self.db, self.authz, self.audit)
         self.api_keys = ApiKeyService(self.db, self.authz, self.audit)
         self.records = RecordService(self.db, self.authz, self.audit)
+        # Usage and billing (billing feeds plan limits and billing periods into usage via a policy).
+        self.usage = UsageService(self.db, self.authz, self.audit)
+        self.billing = BillingService(
+            self.db, settings, self.authz, self.audit, events=lambda: getattr(self, "events", None)
+        )
+        if settings.module_enabled("usage") and settings.module_enabled("billing"):
+            self.usage.set_policy(self.billing.usage_policy())
         self._extra_migrations: list[Migration] = []
         self._started = False
         self._init_modules()
