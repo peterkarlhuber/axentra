@@ -82,6 +82,20 @@ def cmd_openapi(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_storage_purge(args: argparse.Namespace) -> int:
+    ax = _ax(args)
+    if ax.storage is None:
+        print("the storage module is not enabled", file=sys.stderr)
+        return 1
+    ax.db.open()
+    try:
+        report = ax.storage.purge(orphans=not args.no_orphans, retain_deleted_days=args.retain_deleted_days)
+    finally:
+        ax.close()
+    print(report.model_dump_json())
+    return 0 if report.errors == 0 else 2
+
+
 def cmd_generate_key(args: argparse.Namespace) -> int:
     from axentra.config.secrets import generate_key
 
@@ -117,6 +131,13 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--output", default="openapi/axentra-v1.json")
     ex.add_argument("--check", action="store_true", help="fail if the committed document differs")
     ex.set_defaults(func=cmd_openapi)
+
+    sp = sub.add_parser("storage", help="file storage tasks")
+    spsub = sp.add_subparsers(dest="storage_command", required=True)
+    pu = spsub.add_parser("purge", help="expire files, discard abandoned uploads, delete orphaned objects")
+    pu.add_argument("--no-orphans", action="store_true", help="skip the backend scan for orphaned objects")
+    pu.add_argument("--retain-deleted-days", type=int, default=30)
+    pu.set_defaults(func=cmd_storage_purge)
 
     k = sub.add_parser("keys", help="encryption keyring tasks")
     ksub = k.add_subparsers(dest="keys_command", required=True)

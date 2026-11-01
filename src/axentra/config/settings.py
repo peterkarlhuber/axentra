@@ -137,6 +137,16 @@ class StorageSettings(_Section):
     allowed_content_types: list[str] = Field(default_factory=list)
     """Empty: all types except the always-blocked executable/HTML types."""
     signed_url_ttl_seconds: int = Field(300, ge=10, le=86_400)
+    s3_prefix: str = ""
+    """Optional key prefix inside the bucket (e.g. ``axentra``)."""
+    s3_server_side_encryption: Literal["AES256", "aws:kms"] | None = None
+    s3_presigned_downloads: bool = False
+    """S3 only: download-url returns a presigned S3 URL instead of an Axentra-signed URL."""
+    default_quota_bytes: int | None = Field(None, ge=0)
+    """Per-tenant default when neither the tenant quota nor product settings set one (None: unlimited)."""
+    default_quota_files: int | None = Field(None, ge=0)
+    pending_upload_timeout_seconds: int = Field(3600, ge=60)
+    """Uploads still pending after this time are treated as abandoned by the purge."""
 
 
 class NotifySettings(_Section):
