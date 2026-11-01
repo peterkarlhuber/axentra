@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
@@ -32,6 +33,9 @@ from axentra.data.record_service import RecordService
 from axentra.identity.service import IdentityService
 from axentra.tenancy.models import Product
 from axentra.tenancy.service import TenancyService
+
+if TYPE_CHECKING:
+    from axentra.identity.oidc import OidcService
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +88,17 @@ class Axentra:
         self.roles = RoleService(self.db, self.authz, self.audit)
         self.api_keys = ApiKeyService(self.db, self.authz, self.audit)
         self.records = RecordService(self.db, self.authz, self.audit)
+        self.oidc: OidcService | None = None
+        if settings.oidc:  # needs the "oidc" extra (PyJWT, httpx)
+            from axentra.identity.oidc import OidcService
+
+            self.oidc = OidcService(
+                self.db,
+                settings,
+                self.identity,
+                self.secrets,
+                accept_invitation=self.tenancy.accept_invitation,
+            )
         self._extra_migrations: list[Migration] = []
         self._started = False
         self._init_modules()
@@ -124,6 +139,8 @@ class Axentra:
         return self.tenancy.single_product()
 
     def close(self) -> None:
+        if self.oidc is not None:
+            self.oidc.close()
         self.db.close()
         self._started = False
 

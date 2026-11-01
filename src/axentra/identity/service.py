@@ -540,10 +540,15 @@ class IdentityService:
                 user_id: str = row["user_id"]
             else:
                 if not email or not email_verified:
-                    raise Forbidden("the identity provider did not confirm an email address")
+                    raise Forbidden(
+                        "the identity provider did not confirm an email address",
+                        extra={"reason": "email_not_verified"},
+                    )
                 email = normalize_email(email)
                 if allowed_domains and email.rpartition("@")[2] not in allowed_domains:
-                    raise Forbidden("this email domain may not log in")
+                    raise Forbidden(
+                        "this email domain may not log in", extra={"reason": "domain_not_allowed"}
+                    )
                 existing = self.find_user_by_email(tx, email)
                 if existing:
                     user_id = existing["id"]
@@ -554,7 +559,7 @@ class IdentityService:
                 ):
                     user_id = self.create_user(tx, email=email, name=name)
                 else:
-                    raise Forbidden("no account exists for this login")
+                    raise Forbidden("no account exists for this login", extra={"reason": "signup_disabled"})
                 tx.execute(
                     "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
                     " VALUES (%s, %s, %s, %s, %s)",
@@ -571,5 +576,5 @@ class IdentityService:
                 )
             status = tx.scalar("SELECT status FROM axentra_users WHERE id = %s", (user_id,))
             if status != "active":
-                raise Forbidden("this account is disabled")
+                raise Forbidden("this account is disabled", extra={"reason": "account_disabled"})
         return user_id

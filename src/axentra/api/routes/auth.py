@@ -1,13 +1,28 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response
+import logging
+from typing import TYPE_CHECKING, Annotated, Any
+
+from fastapi import APIRouter, Path, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from axentra.api.context import Ax, CurrentPrincipal, check_origin, client_ip, session_cookie_name
-from axentra.core.errors import Unauthenticated
+from axentra.api.context import (
+    Ax,
+    CurrentPrincipal,
+    check_origin,
+    client_ip,
+    login_cookie_name,
+    session_cookie_name,
+)
+from axentra.core.errors import NotFound, Unauthenticated
 from axentra.identity.models import NewSession, Session, SessionInfo
 from axentra.platform import Axentra
 
+if TYPE_CHECKING:
+    from axentra.identity.oidc import OidcService
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 
@@ -93,3 +108,98 @@ def revoke_my_session(session_id: str, principal: CurrentPrincipal, ax: Ax) -> R
         raise Unauthenticated("this endpoint needs a user session")
     ax.identity.revoke_session(principal, principal.user_id, session_id)
     return Response(status_code=204)
+
+
+# -- OpenID Connect ----------------------------------------------------------------------------------
+
+_REDIRECT: dict[int | str, dict[str, Any]] = {302: {"description": "Redirect (Location header)"}}
+ProviderId = Annotated[str, Path(max_length=64, pattern=r"^[a-z0-9-]+$")]
+
+
+def _login_cookie(ax: Axentra, response: Response, state: str | None) -> None:
+    name = login_cookie_name(ax)
+    secure = ax.settings.secure_cookies
+    if state is None:
+        response.delete_cookie(name, path="/", secure=secure, httponly=True, samesite="lax")
+    else:
+        response.set_cookie(name, state, max_age=600, path="/", secure=secure, httponly=True, samesite="lax")
+
+
+def _oidc(ax: Axentra) -> OidcService:
+    if ax.oidc is None:
+        raise NotFound("unknown login provider")
+    return ax.oidc
+
+
+@router.get(
+    "/oidc/{provider}/start",
+    status_code=302,
+    response_class=RedirectResponse,
+    responses=_REDIRECT,
+    summary="Start an OpenID Connect login (redirects to the identity provider)",
+)
+def oidc_start(
+    provider: ProviderId,
+    request: Request,
+    ax: Ax,
+    return_to: Annotated[str | None, Query(max_length=2000)] = None,
+    invitation: Annotated[str | None, Query(max_length=200)] = None,
+) -> Response:
+    """``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``).
+    ``invitation``: an invitation token; lets the invited email sign up and accepts the invitation."""
+    from axentra.identity.oidc import OidcLoginError, login_error_url
+
+    oidc = _oidc(ax)
+    try:
+        started = oidc.start(
+            provider, return_to=return_to, invitation=invitation or None, ip=client_ip(request)
+        )
+    except OidcLoginError as exc:
+        logger.warning("OIDC login for %s could not start: %s", provider, exc)
+        target = login_error_url(ax.settings.security.login_page, exc.return_to, exc.code)
+        return RedirectResponse(target, status_code=302)
+    out = RedirectResponse(started.authorization_url, status_code=302)
+    _login_cookie(ax, out, started.state)
+    return out
+
+
+@router.get(
+    "/oidc/{provider}/callback",
+    status_code=302,
+    response_class=RedirectResponse,
+    responses=_REDIRECT,
+    summary="OpenID Connect redirect URI: completes the login and redirects to return_to",
+)
+def oidc_callback(
+    provider: ProviderId,
+    request: Request,
+    ax: Ax,
+    code: Annotated[str | None, Query(max_length=4096)] = None,
+    state: Annotated[str | None, Query(max_length=200)] = None,
+    error: Annotated[str | None, Query(max_length=200)] = None,
+) -> Response:
+    """On failure the browser is sent to the login page with ``?login_error=<code>``."""
+    from axentra.identity.oidc import OidcLoginError, login_error_url
+
+    oidc = _oidc(ax)
+    try:
+        result = oidc.finish(
+            provider,
+            state=state,
+            code=code,
+            error=error,
+            browser_state=request.cookies.get(login_cookie_name(ax)),
+            ip=client_ip(request),
+            user_agent=request.headers.get("user-agent", ""),
+        )
+    except OidcLoginError as exc:
+        logger.warning("OIDC login with %s refused (%s): %s", provider, exc.code, exc)
+        out = RedirectResponse(
+            login_error_url(ax.settings.security.login_page, exc.return_to, exc.code), status_code=302
+        )
+        _login_cookie(ax, out, None)
+        return out
+    out = RedirectResponse(result.return_to, status_code=302)
+    _login_cookie(ax, out, None)
+    set_session_cookie(ax, out, result.session)
+    return out
