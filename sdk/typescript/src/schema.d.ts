@@ -545,6 +545,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List events (newest first) */
+        get: operations["list_events_v1_products__product_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Event */
+        get: operations["get_event_v1_products__product_id__events__event_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream new events (SSE)
+         * @description Server-sent events. Each message has `id` (the stream position; send it back as `Last-Event-ID` to resume), `event` and JSON `data`. Without `Last-Event-ID` the stream starts with new items. Authorization is re-checked periodically; the stream ends with an `error` event when access is lost and closes after `events.sse_max_seconds` (reconnect to continue).
+         */
+        get: operations["stream_events_v1_products__product_id__events_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List jobs (newest first) */
+        get: operations["list_jobs_v1_products__product_id__jobs_get"];
+        put?: never;
+        /** Enqueue a job */
+        post: operations["enqueue_job_v1_products__product_id__jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job */
+        get: operations["get_job_v1_products__product_id__jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a queued job, or request cancellation of a running one */
+        post: operations["cancel_job_v1_products__product_id__jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-queue a failed or dead job */
+        post: operations["retry_job_v1_products__product_id__jobs__job_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/jobs/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Job counts per status and recent failures */
+        get: operations["job_stats_v1_products__product_id__jobs_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/jobs/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream job status changes (SSE)
+         * @description Server-sent events. Each message has `id` (the stream position; send it back as `Last-Event-ID` to resume), `event` and JSON `data`. Without `Last-Event-ID` the stream starts with new items. Authorization is re-checked periodically; the stream ends with an `error` event when access is lost and closes after `events.sse_max_seconds` (reconnect to continue). Only the latest state of a job is guaranteed; intermediate states may be skipped.
+         */
+        get: operations["stream_jobs_v1_products__product_id__jobs_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/members": {
         parameters: {
             query?: never;
@@ -825,6 +985,43 @@ export interface paths {
         patch: operations["update_role_v1_products__product_id__roles__role_id__patch"];
         trace?: never;
     };
+    "/v1/products/{product_id}/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Schedules */
+        get: operations["list_schedules_v1_products__product_id__schedules_get"];
+        put?: never;
+        /** Create Schedule */
+        post: operations["create_schedule_v1_products__product_id__schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Schedule */
+        get: operations["get_schedule_v1_products__product_id__schedules__schedule_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Schedule */
+        delete: operations["delete_schedule_v1_products__product_id__schedules__schedule_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Schedule */
+        patch: operations["update_schedule_v1_products__product_id__schedules__schedule_id__patch"];
+        trace?: never;
+    };
     "/v1/products/{product_id}/storage/usage": {
         parameters: {
             query?: never;
@@ -1027,6 +1224,23 @@ export interface paths {
         put?: never;
         /** Set the status (manual provider only) */
         post: operations["set_subscription_status_v1_products__product_id__tenants__tenant_id__billing_subscription_status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/tenants/{tenant_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish an event in a tenant */
+        post: operations["publish_event_v1_products__product_id__tenants__tenant_id__events_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1489,6 +1703,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Webhooks */
+        get: operations["list_webhooks_v1_products__product_id__webhooks_get"];
+        put?: never;
+        /** Create a webhook endpoint (the signing secret is shown only in this response) */
+        post: operations["create_webhook_v1_products__product_id__webhooks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/webhooks/{webhook_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Webhook */
+        get: operations["get_webhook_v1_products__product_id__webhooks__webhook_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Webhook */
+        delete: operations["delete_webhook_v1_products__product_id__webhooks__webhook_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Webhook */
+        patch: operations["update_webhook_v1_products__product_id__webhooks__webhook_id__patch"];
+        trace?: never;
+    };
+    "/v1/products/{product_id}/webhooks/{webhook_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliveries */
+        get: operations["list_deliveries_v1_products__product_id__webhooks__webhook_id__deliveries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/webhooks/{webhook_id}/deliveries/{delivery_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Delivery */
+        get: operations["get_delivery_v1_products__product_id__webhooks__webhook_id__deliveries__delivery_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/webhooks/{webhook_id}/deliveries/{delivery_id}/redeliver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a delivery again */
+        post: operations["redeliver_v1_products__product_id__webhooks__webhook_id__deliveries__delivery_id__redeliver_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/webhooks/{webhook_id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate the signing secret (shown once; optional grace period signs with both) */
+        post: operations["rotate_webhook_secret_v1_products__product_id__webhooks__webhook_id__rotate_secret_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/webhooks/{webhook_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a signed axentra.ping now and return the recorded delivery */
+        post: operations["test_webhook_v1_products__product_id__webhooks__webhook_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/settings": {
         parameters: {
             query?: never;
@@ -1750,6 +2086,52 @@ export interface components {
             /** Tenants */
             tenants: number;
         };
+        /** Delivery */
+        Delivery: {
+            /** Attempts */
+            attempts: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Endpoint Id */
+            endpoint_id: string;
+            /** Event Id */
+            event_id: string | null;
+            /** Event Type */
+            event_type: string;
+            /** Id */
+            id: string;
+            /** Job Id */
+            job_id: string | null;
+            /** Last Error */
+            last_error: string | null;
+            /** Next Attempt At */
+            next_attempt_at: string | null;
+            /** Product Id */
+            product_id: string;
+            /** Response Body */
+            response_body: string | null;
+            /** Response Code */
+            response_code: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "succeeded" | "failed" | "dead";
+            /** Tenant Id */
+            tenant_id: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** DeliveryStats */
         DeliveryStats: {
             /** Attempts 24H */
@@ -1906,6 +2288,45 @@ export interface components {
             /** Tenant Id */
             tenant_id: string;
         };
+        /** Event */
+        Event: {
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Kind */
+            actor_kind: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /** Id */
+            id: string;
+            /** Idempotency Key */
+            idempotency_key: string | null;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Product Id */
+            product_id: string;
+            /** Request Id */
+            request_id: string | null;
+            /** Tenant Id */
+            tenant_id: string | null;
+            /** Type */
+            type: string;
+        };
+        /** EventCreate */
+        EventCreate: {
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Type */
+            type: string;
+        };
         /**
          * FileInfo
          * @description File metadata as returned by the API (the storage key stays internal).
@@ -2025,6 +2446,156 @@ export interface components {
              * @default member
              */
             role?: string;
+        };
+        /** Job */
+        Job: {
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts?: number;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested?: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Id */
+            id: string;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Kind */
+            kind: string;
+            /** Last Error */
+            last_error?: string | null;
+            /** Lease Until */
+            lease_until?: string | null;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Priority
+             * @default 0
+             */
+            priority?: number;
+            /** Product Id */
+            product_id: string;
+            /** Result */
+            result?: unknown;
+            /**
+             * Run After
+             * Format: date-time
+             */
+            run_after: string;
+            /** Schedule Id */
+            schedule_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "dead" | "cancelled";
+            /** Tenant Id */
+            tenant_id: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Worker */
+            worker?: string | null;
+        };
+        /** JobCreate */
+        JobCreate: {
+            /**
+             * Delay Seconds
+             * @default 0
+             */
+            delay_seconds?: number;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Kind */
+            kind: string;
+            /** Max Attempts */
+            max_attempts?: number | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Priority
+             * @default 0
+             */
+            priority?: number;
+            /** Run After */
+            run_after?: string | null;
+            /** Tenant Id */
+            tenant_id?: string | null;
+        };
+        /**
+         * JobStats
+         * @description Dashboard summary of the jobs of a product (optionally one tenant).
+         */
+        JobStats: {
+            /** By Kind */
+            by_kind: components["schemas"]["KindStats"][];
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Failed Last 24H */
+            failed_last_24h: number;
+            /** Oldest Queued At */
+            oldest_queued_at: string | null;
+            /** Succeeded Last 24H */
+            succeeded_last_24h: number;
+        };
+        /** KindStats */
+        KindStats: {
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled?: number;
+            /**
+             * Dead
+             * @default 0
+             */
+            dead?: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed?: number;
+            /** Kind */
+            kind: string;
+            /**
+             * Queued
+             * @default 0
+             */
+            queued?: number;
+            /**
+             * Running
+             * @default 0
+             */
+            running?: number;
+            /**
+             * Succeeded
+             * @default 0
+             */
+            succeeded?: number;
         };
         /** MailboxEntry */
         MailboxEntry: {
@@ -2383,6 +2954,15 @@ export interface components {
             /** Token */
             token: string;
         };
+        /**
+         * NewWebhookSecret
+         * @description Returned exactly once, at creation and rotation.
+         */
+        NewWebhookSecret: {
+            endpoint: components["schemas"]["WebhookEndpoint"];
+            /** Secret */
+            secret: string;
+        };
         /** OidcProviderInfo */
         OidcProviderInfo: {
             /** Id */
@@ -2407,10 +2987,31 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** Page[Delivery] */
+        Page_Delivery_: {
+            /** Items */
+            items: components["schemas"]["Delivery"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** Page[Event] */
+        Page_Event_: {
+            /** Items */
+            items: components["schemas"]["Event"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** Page[FileInfo] */
         Page_FileInfo_: {
             /** Items */
             items: components["schemas"]["FileInfo"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** Page[Job] */
+        Page_Job_: {
+            /** Items */
+            items: components["schemas"]["Job"][];
             /** Next Cursor */
             next_cursor?: string | null;
         };
@@ -2432,6 +3033,13 @@ export interface components {
         Page_Record_: {
             /** Items */
             items: components["schemas"]["Record"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** Page[Schedule] */
+        Page_Schedule_: {
+            /** Items */
+            items: components["schemas"]["Schedule"][];
             /** Next Cursor */
             next_cursor?: string | null;
         };
@@ -2467,6 +3075,13 @@ export interface components {
         Page_User_: {
             /** Items */
             items: components["schemas"]["User"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** Page[WebhookEndpoint] */
+        Page_WebhookEndpoint_: {
+            /** Items */
+            items: components["schemas"]["WebhookEndpoint"][];
             /** Next Cursor */
             next_cursor?: string | null;
         };
@@ -2993,6 +3608,117 @@ export interface components {
             name?: string | null;
             /** Permissions */
             permissions?: string[] | null;
+        };
+        /** Schedule */
+        Schedule: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Cron */
+            cron: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Interval Seconds */
+            interval_seconds: number | null;
+            /** Kind */
+            kind: string;
+            /** Last Job Id */
+            last_job_id: string | null;
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Name */
+            name: string;
+            /** Next Run At */
+            next_run_at: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Priority */
+            priority: number;
+            /** Product Id */
+            product_id: string;
+            /** Tenant Id */
+            tenant_id: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /** ScheduleCreate */
+        ScheduleCreate: {
+            /**
+             * Cron
+             * @description 5 fields, UTC: minute hour dom month dow
+             */
+            cron?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled?: boolean;
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /** Kind */
+            kind: string;
+            /**
+             * Max Attempts
+             * @default 5
+             */
+            max_attempts?: number;
+            /** Name */
+            name: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Priority
+             * @default 0
+             */
+            priority?: number;
+            /** Tenant Id */
+            tenant_id?: string | null;
+        };
+        /** ScheduleUpdate */
+        ScheduleUpdate: {
+            /** Cron */
+            cron?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Interval Seconds */
+            interval_seconds?: number | null;
+            /** Kind */
+            kind?: string | null;
+            /** Max Attempts */
+            max_attempts?: number | null;
+            /** Name */
+            name?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** Priority */
+            priority?: number | null;
+        };
+        /** SecretRotate */
+        SecretRotate: {
+            /**
+             * Grace Seconds
+             * @default 0
+             */
+            grace_seconds?: number;
         };
         /** SendRequest */
         SendRequest: {
@@ -3546,6 +4272,66 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** WebhookCreate */
+        WebhookCreate: {
+            /**
+             * Description
+             * @default
+             */
+            description?: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled?: boolean;
+            /** Event Types */
+            event_types: string[];
+            /**
+             * Tenant Id
+             * @description Only deliver events of this tenant
+             */
+            tenant_id?: string | null;
+            /** Url */
+            url: string;
+        };
+        /** WebhookEndpoint */
+        WebhookEndpoint: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Description */
+            description: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Event Types */
+            event_types: string[];
+            /**
+             * Has Previous Secret
+             * @default false
+             */
+            has_previous_secret?: boolean;
+            /** Id */
+            id: string;
+            /** Previous Secret Expires At */
+            previous_secret_expires_at?: string | null;
+            /** Product Id */
+            product_id: string;
+            /** Tenant Id */
+            tenant_id: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Url */
+            url: string;
+            /** Version */
+            version: number;
+        };
         /** WebhookResult */
         WebhookResult: {
             /** Event Id */
@@ -3560,6 +4346,17 @@ export interface components {
              * @default true
              */
             received?: boolean;
+        };
+        /** WebhookUpdate */
+        WebhookUpdate: {
+            /** Description */
+            description?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Event Types */
+            event_types?: string[] | null;
+            /** Url */
+            url?: string | null;
         };
     };
     responses: never;
@@ -4715,6 +5512,355 @@ export interface operations {
             };
         };
     };
+    list_events_v1_products__product_id__events_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                tenant_id?: string | null;
+                /** @description Exact type, or a prefix ending in * */
+                type?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Event_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_event_v1_products__product_id__events__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Event"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_events_v1_products__product_id__events_stream_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+                /** @description Comma-separated type patterns, e.g. invoice.* */
+                types?: string | null;
+            };
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_v1_products__product_id__jobs_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                kind?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                status?: ("queued" | "running" | "succeeded" | "failed" | "dead" | "cancelled") | null;
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Job_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_job_v1_products__product_id__jobs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Repeat-safe key; overrides the body field */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JobCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_v1_products__product_id__jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_job_v1_products__product_id__jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_job_v1_products__product_id__jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    job_stats_v1_products__product_id__jobs_stats_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStats"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_jobs_v1_products__product_id__jobs_stream_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_members_v1_products__product_id__members_get: {
         parameters: {
             query?: never;
@@ -5533,6 +6679,182 @@ export interface operations {
             };
         };
     };
+    list_schedules_v1_products__product_id__schedules_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Schedule_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_schedule_v1_products__product_id__schedules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_v1_products__product_id__schedules__schedule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_schedule_v1_products__product_id__schedules__schedule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected resource version */
+                "If-Match"?: string | null;
+            };
+            path: {
+                product_id: string;
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_schedule_v1_products__product_id__schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected resource version */
+                "If-Match"?: string | null;
+            };
+            path: {
+                product_id: string;
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     product_usage_v1_products__product_id__storage_usage_get: {
         parameters: {
             query?: {
@@ -6080,6 +7402,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Subscription"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_event_v1_products__product_id__tenants__tenant_id__events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Repeat-safe key; overrides the body field */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Event"];
                 };
             };
             /** @description Validation Error */
@@ -7544,6 +8905,353 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TimeSeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_webhooks_v1_products__product_id__webhooks_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_WebhookEndpoint_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_webhook_v1_products__product_id__webhooks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewWebhookSecret"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_webhook_v1_products__product_id__webhooks__webhook_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpoint"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_webhook_v1_products__product_id__webhooks__webhook_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected resource version */
+                "If-Match"?: string | null;
+            };
+            path: {
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_webhook_v1_products__product_id__webhooks__webhook_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Expected resource version */
+                "If-Match"?: string | null;
+            };
+            path: {
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpoint"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deliveries_v1_products__product_id__webhooks__webhook_id__deliveries_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                status?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Delivery_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_delivery_v1_products__product_id__webhooks__webhook_id__deliveries__delivery_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                delivery_id: string;
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    redeliver_v1_products__product_id__webhooks__webhook_id__deliveries__delivery_id__redeliver_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                delivery_id: string;
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_webhook_secret_v1_products__product_id__webhooks__webhook_id__rotate_secret_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretRotate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewWebhookSecret"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_webhook_v1_products__product_id__webhooks__webhook_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                webhook_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
                 };
             };
             /** @description Validation Error */
