@@ -614,3 +614,23 @@ def test_cli_notify_dispatch_and_maintenance_purge(pg_urls, ax_factory, tmp_path
     assert main(["--config", str(cfg), "maintenance", "purge"]) == 0
     report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert set(report) >= {"audit_events_deleted", "sessions_deleted", "notify"}
+
+
+def test_job_worker_dispatches_notifications_and_runs_housekeeping(world):
+    """`axentra worker` delivers queued notifications and runs the periodic sweeps."""
+    from axentra.events import JobWorker
+
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _template(world, pid)
+    mid = _send(world.admin, pid, tid, {"email": "dora@example.com"}).json()["id"]
+    fake = FakeProvider()
+    world.ax.notify.set_provider(fake)
+    JobWorker(world.ax).run_once()
+    assert len(fake.sent) == 1
+    m = world.admin.get(f"/v1/products/{pid}/notify/messages/{mid}").json()
+    assert m["status"] == "sent"
+    # Without housekeeping the worker leaves the outbox alone.
+    mid2 = _send(world.admin, pid, tid, {"email": "erin@example.com"}).json()["id"]
+    JobWorker(world.ax, housekeeping=False).run_once()
+    assert world.admin.get(f"/v1/products/{pid}/notify/messages/{mid2}").json()["status"] == "queued"

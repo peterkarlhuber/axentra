@@ -50,3 +50,22 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   state machine, entitlement overrides feeding usage quotas, manual/fake/Stripe provider adapters
   (Stripe guarded by explicit keys and `live_payments`), signed and replay-safe webhooks with
   out-of-order protection; no payment processing or card data in Axentra; docs/modules/BILLING.md.
+- Documentation: README, architecture overview, security model (RLS limits, threat model, GDPR
+  responsibilities), data, deployment models, versioning/compatibility (`docs/COMPATIBILITY.md`),
+  ADRs 0001-0012, product-table guide with a tested example, roadmap, central TODO list,
+  development, deployment, configuration and backup/restore guides.
+- Deployment: multi-stage `Dockerfile` (python:3.13-slim, non-root uid 10001, healthcheck,
+  constraints-pinned dependencies in `deploy/constraints.txt`), compose stacks for single- and
+  multi-product mode with separate owner/application database roles
+  (`deploy/compose/initdb/01-roles.sql`), example configurations in `deploy/config/`.
+- Tests: automated backup/restore test (`pg_dump`/`pg_restore`, data, RLS and a working app on the
+  restored database) and a test for the product-table template; CI installs matching PostgreSQL
+  client tools and builds the container image.
+- Events module (migration 0002): PostgreSQL job queue (SKIP LOCKED claims, leases + heartbeats,
+  reaper, retries with capped exponential backoff and jitter, dead letters, idempotency keys,
+  cancellation, manual retry, LISTEN/NOTIFY wake-up), `JobWorker` and `axentra worker`, recurring
+  schedules (interval or 5-field cron, leader lock, each slot fires at most once), events with a
+  transactional outbox (`publish_in_tx`) and in-process subscribers, signed outgoing webhooks
+  (HMAC-SHA256, SSRF protection, retries, redelivery, test ping, secret rotation with grace), SSE
+  streams for events and job changes with `Last-Event-ID` resume, retention purge. See
+  docs/modules/EVENTS_AND_JOBS.md.

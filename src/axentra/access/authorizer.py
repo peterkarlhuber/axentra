@@ -71,7 +71,10 @@ class Authorizer:
                 if tenant is None:
                     raise NotFound("tenant not found")
 
-            if principal.actor.kind is ActorKind.API_KEY:
+            # API keys, and system principals scoped like a key (job handlers, see axentra.events.worker).
+            if principal.actor.kind is ActorKind.API_KEY or (
+                principal.actor.kind is ActorKind.SYSTEM and principal.api_key_product_id is not None
+            ):
                 if principal.api_key_product_id != product_id:
                     raise NotFound("product not found")
                 if principal.api_key_tenant_id is not None:

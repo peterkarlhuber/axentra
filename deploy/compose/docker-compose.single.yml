@@ -1,0 +1,87 @@
+# Axentra in single-product mode: PostgreSQL 16, a one-shot migration job and the API.
+#
+#   cp .env.example .env    # fill in passwords and the keyring
+#   docker compose -f docker-compose.single.yml up -d --build
+#   docker compose -f docker-compose.single.yml run --rm api admin setup-token
+#
+# See docs/operations/DEPLOYMENT.md. Configuration: ../config/single.toml (+ env overrides below).
+
+name: axentra-single
+
+x-axentra: &axentra
+  image: axentra:local
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+  environment: &axentra-env
+    AXENTRA_CONFIG: /etc/axentra/axentra.toml
+    AXENTRA_MASTER_KEYS: ${AXENTRA_MASTER_KEYS:?set AXENTRA_MASTER_KEYS in .env}
+    AXENTRA__ENVIRONMENT: ${AXENTRA_ENVIRONMENT:-production}
+    AXENTRA__SECURITY__PUBLIC_URL: ${AXENTRA_PUBLIC_URL:?set AXENTRA_PUBLIC_URL in .env}
+    AXENTRA__SECURITY__ALLOWED_ORIGINS: ${AXENTRA_ALLOWED_ORIGINS:-[]}
+  configs:
+    - source: axentra
+      target: /etc/axentra/axentra.toml
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: axentra
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      AXENTRA_DB_OWNER_PASSWORD: ${AXENTRA_DB_OWNER_PASSWORD:?set AXENTRA_DB_OWNER_PASSWORD in .env}
+      AXENTRA_DB_APP_PASSWORD: ${AXENTRA_DB_APP_PASSWORD:?set AXENTRA_DB_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d axentra"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Not published on the host; use `docker compose exec db psql -U postgres axentra`.
+
+  migrate:
+    <<: *axentra
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      <<: *axentra-env
+      # Migrations run as the schema owner.
+      AXENTRA_DATABASE_URL: postgresql://axentra_owner:${AXENTRA_DB_OWNER_PASSWORD}@db:5432/axentra
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *axentra
+    command: ["serve", "--host", "0.0.0.0", "--port", "8080"]
+    restart: unless-stopped
+    environment:
+      <<: *axentra-env
+      # The API runs as the restricted application role, so row-level security applies.
+      AXENTRA_DATABASE_URL: postgresql://axentra_app:${AXENTRA_DB_APP_PASSWORD}@db:5432/axentra
+    ports:
+      - "${AXENTRA_HTTP_PORT:-8080}:8080"
+    volumes:
+      # Local file storage and other runtime state (./var relative to the working directory).
+      - appdata:/var/lib/axentra/var
+    tmpfs:
+      - /tmp
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+configs:
+  axentra:
+    file: ../config/single.toml
+
+volumes:
+  pgdata:
+  appdata:

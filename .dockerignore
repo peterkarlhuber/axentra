@@ -1,0 +1,29 @@
+# Only pyproject.toml, the docs files named in the Dockerfile, src/ and deploy/constraints.txt
+# are needed for the image. Keep secrets, local state and caches out of the build context.
+.git
+.github
+.venv*
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.coverage
+coverage.xml
+test-results.xml
+dist
+build
+var
+tests
+docs
+openapi
+assets
+node_modules
+.env
+**/.env
+*.local.toml
+deploy/compose
+deploy/config
+Dockerfile
+.dockerignore
