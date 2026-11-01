@@ -14,7 +14,7 @@ Status as of 2026-11-01.
 | 3 | SaaS business services + UI | in progress |
 | 4 | Developer experience + complete Studio | planned |
 | 5 | Hardening and acceptance | planned |
-| 6 | Nodestro integration preparation (analysis only) | planned |
+| 6 | Nodestro integration preparation (analysis only) | plan written |
 
 ## Phase 0: Architecture, branding and foundations (done)
 
@@ -63,8 +63,11 @@ end-to-end, accessibility and responsive tests; screenshots; cross-repository co
 Already started: backup/restore integration test, product-table template test, container build
 and compose validation in CI, dependency audit and bandit in CI.
 
-## Phase 6: Nodestro integration preparation (planned, analysis only)
+## Phase 6: Nodestro integration preparation (plan written, analysis only)
 
-A migration plan (`docs/integrations/NODESTRO_MIGRATION_PLAN.md`) describing how Nodestro could
-adopt Axentra, based on [NODESTRO_REUSE.md](architecture/NODESTRO_REUSE.md). No code changes in
-Nodestro, and no dependency of Axentra on Nodestro.
+The migration plan [integrations/NODESTRO_MIGRATION_PLAN.md](integrations/NODESTRO_MIGRATION_PLAN.md)
+describes how Nodestro could adopt Axentra, based on
+[NODESTRO_REUSE.md](architecture/NODESTRO_REUSE.md). No code changes in Nodestro, and no
+dependency of Axentra on Nodestro. The migration itself is a separate, optional future project,
+not a prerequisite for any Axentra release; the generic Axentra gaps it lists (G-1 to G-8) are
+tracked like any other Axentra work.

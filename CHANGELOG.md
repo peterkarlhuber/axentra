@@ -69,3 +69,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   (HMAC-SHA256, SSRF protection, retries, redelivery, test ping, secret rotation with grace), SSE
   streams for events and job changes with `Last-Event-ID` resume, retention purge. See
   docs/modules/EVENTS_AND_JOBS.md.
+- Docs: Nodestro migration plan (Phase 6, analysis only, nothing implemented):
+  `docs/integrations/NODESTRO_MIGRATION_PLAN.md` - functions Nodestro could take from Axentra,
+  modules that become adapters, table-by-table data mapping (one product `nodestro`, legacy
+  `ndk_` keys, `nodestro:enc:v1` secrets, session hashes), compatibility, version pins, tests,
+  phased order, rollback, risks and open questions. The migration is a separate future project and
+  not a prerequisite for Axentra; Axentra keeps no dependency on Nodestro.
