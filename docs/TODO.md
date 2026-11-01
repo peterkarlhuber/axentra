@@ -44,7 +44,6 @@ Last reviewed: 2026-11-01 (`0.1.0.dev0`).
 | P1 | sdk | Python SDK generated from `openapi/axentra-v1.json` |
 | P1 | sdk | TypeScript SDK generated from the same document (Studio currently generates types only) |
 | P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
-| P2 | demo | Demo SaaS application using Axentra as a library with its own product tables |
 | P2 | studio | Backend support for Studio Phase 2/3 views (files, jobs/events, usage charts, audit/monitoring, plans, subscriptions, notifications) as those modules land |
 
 ## Hardening (Phase 5)
@@ -54,7 +53,7 @@ Last reviewed: 2026-11-01 (`0.1.0.dev0`).
 | P1 | operations | Backup/restore of file storage together with the database (test exists for the database only) |
 | P1 | build | Reproducible container builds: pin the base image by digest, build hatchling from pinned versions, compare digests of two builds |
 | P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
-| P2 | tests | Deployment tests that start both compose stacks in CI and run smoke tests |
+| P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
 | P2 | tests | Concurrency tests for `If-Match` races and migration runners started in parallel |
 | P2 | tests | Cross-repository compatibility test: Studio contract tests against each Axentra commit |
 

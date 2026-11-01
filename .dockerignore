@@ -27,3 +27,9 @@ deploy/compose
 deploy/config
 Dockerfile
 .dockerignore
+# examples/taskboard/Dockerfile needs only examples/taskboard/{pyproject.toml,taskboard/}.
+examples/*/tests
+examples/**/var
+examples/common
+examples/multi-product
+examples/single-product

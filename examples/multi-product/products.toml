@@ -1,0 +1,39 @@
+# Two independent products on ONE Axentra installation (mode = "multi").
+# Used by provision.py and by tests/integration/test_deployment_models.py.
+# Passwords are never written here: they come from the environment variables named below.
+
+[admin]
+email = "admin@example.com"
+password_env = "AXENTRA_DEMO_ADMIN_PASSWORD"
+# Only needed on a fresh installation (output of `axentra admin setup-token`).
+setup_token_env = "AXENTRA_SETUP_TOKEN"
+
+[operators]
+# Every operator account gets this password (demo only).
+password_env = "AXENTRA_DEMO_OPERATOR_PASSWORD"
+
+[[products]]
+slug = "taskboard"
+name = "Taskboard"
+tenants = ["acme", "globex"]
+operators = [
+    { email = "ops@taskboard.example", name = "Taskboard Ops", role = "product_admin" },
+    { email = "support@taskboard.example", name = "Taskboard Support", role = "product_support" },
+]
+api_keys = [
+    # The Taskboard backend: product-wide (all tenants).
+    { name = "taskboard-backend", permissions = ["tenants:read", "records:read", "records:write", "usage:record"] },
+    # An integration of one customer: bound to the tenant "acme".
+    { name = "acme-integration", tenant = "acme", permissions = ["records:read"] },
+]
+
+[[products]]
+slug = "invoicing"
+name = "Invoicing"
+tenants = ["acme", "initech"]   # tenant slugs are per product: "acme" here is a different tenant
+operators = [
+    { email = "ops@invoicing.example", name = "Invoicing Ops", role = "product_admin" },
+]
+api_keys = [
+    { name = "invoicing-backend", permissions = ["tenants:read", "records:read", "records:write"] },
+]
