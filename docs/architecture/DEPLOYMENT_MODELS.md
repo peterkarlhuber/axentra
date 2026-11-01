@@ -35,6 +35,12 @@ slug is configured.
 - Isolation between products in multi mode rests on the same authorization rules and RLS
   policies as isolation between tenants; see [SECURITY_MODEL](SECURITY_MODEL.md).
 - Users are global in both modes: one account can work in several products.
+- Operational hardening is identical in both modes: `environment = "production"` disables
+  `/v1/docs` and `/v1/openapi.json` (`security.api_docs`), every request body is capped
+  (`security.max_body_bytes`), the optional rate limit (`security.rate_limit_*`) applies per
+  process, and `axentra migrate` applies Axentra's schema plus every product namespace listed in
+  `database.extra_migrations` or published through the `axentra.migrations` entry point group
+  (in multi mode: all products' namespaces in one run).
 
 ## Axentra Studio in each mode
 

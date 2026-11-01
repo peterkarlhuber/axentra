@@ -29,8 +29,9 @@ from axentra.config.secrets import SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
 from axentra.core.errors import ConfigurationError
 from axentra.data.database import Database
-from axentra.data.migrations import Migration, MigrationRunner
+from axentra.data.migrations import Migration, MigrationRunner, discover_migrations
 from axentra.data.record_service import RecordService
+from axentra.data.reencrypt import EncryptedColumn, ReencryptReport, builtin_encrypted_columns, reencrypt
 from axentra.identity.service import IdentityService
 from axentra.notify.service import NotifyService
 from axentra.observability.metrics import MetricsRegistry, register_db_pool_metrics
@@ -52,6 +53,15 @@ def _database_url(settings: Settings) -> str:
 
         return resolve_secret(settings.database.url_ref)
     return settings.database.url
+
+
+def _migration_url(settings: Settings) -> str:
+    """``database.migration_url_ref`` > ``database.migration_url`` > the application URL."""
+    if settings.database.migration_url_ref:
+        from axentra.config.secrets import resolve_secret
+
+        return resolve_secret(settings.database.migration_url_ref)
+    return settings.database.migration_url or _database_url(settings)
 
 
 def _dev_keyring_spec(settings: Settings) -> str | None:
@@ -139,6 +149,8 @@ class Axentra:
             self.db, settings, self.authz, self.audit, self.secrets, self.jobs.queue, self.events
         )
         self._extra_migrations: list[Migration] = []
+        #: Columns re-encrypted by ``axentra secrets reencrypt`` (products add theirs).
+        self.encrypted_columns: list[EncryptedColumn] = builtin_encrypted_columns()
         self._started = False
         self._init_modules()
 
@@ -157,11 +169,31 @@ class Axentra:
         """Product backends add their own schema (namespace != 'axentra')."""
         self._extra_migrations.extend(migrations)
 
-    def migrate(self) -> list[str]:
-        url = self.settings.database.migration_url or _database_url(self.settings)
-        runner = MigrationRunner(url)
+    def migration_runner(self) -> MigrationRunner:
+        """A runner with Axentra's schema, registered product migrations and discovered sources
+        (``database.extra_migrations`` and the ``axentra.migrations`` entry point group)."""
+        runner = MigrationRunner(_migration_url(self.settings))
         runner.register(self._extra_migrations)
-        return runner.migrate()
+        runner.register(
+            discover_migrations(
+                self.settings.database.extra_migrations,
+                entry_points=self.settings.database.migration_entry_points,
+            )
+        )
+        return runner
+
+    def migrate(self) -> list[str]:
+        return self.migration_runner().migrate()
+
+    def register_encrypted_column(self, column: EncryptedColumn) -> None:
+        """Product backends declare their SecretBox columns so key rotation covers them."""
+        self.encrypted_columns.append(column)
+
+    def reencrypt_secrets(self, *, dry_run: bool = False, batch_size: int = 500) -> ReencryptReport:
+        """Re-encrypt stored values under the active key (``axentra secrets reencrypt``)."""
+        return reencrypt(
+            self.db, self.secrets, self.encrypted_columns, dry_run=dry_run, batch_size=batch_size
+        )
 
     def start(self) -> None:
         if self._started:

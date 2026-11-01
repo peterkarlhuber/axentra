@@ -222,18 +222,23 @@ grace period (at most 7 days). `last_used_at` is updated at most once a minute. 
   (32-byte keys, alphanumeric key ids). `SecretBox` encrypts with AES-256-GCM using the first key
   and decrypts with any key in the ring. Ciphertexts look like `axs1.<kid>.<nonce>.<ct+tag>`; the
   associated data binds the key id and a caller-supplied context (for example table and row id),
-  so a ciphertext copied to another row does not decrypt. In Phase 1 no column is encrypted yet;
-  the planned modules (OIDC client data, webhook secrets, provider credentials) use `SecretBox`.
+  so a ciphertext copied to another row does not decrypt. Encrypted columns: OIDC login states
+  (`nonce`, `code_verifier`, `invitation_token`), webhook signing secrets (current and previous),
+  rendered notification content and the local mailbox. Product backends register theirs with
+  `ax.register_encrypted_column(EncryptedColumn(...))` so rotation covers them.
   Development without a configured keyring writes `./var/dev-keyring`; tests use ephemeral keys.
 - **Rotation procedure** ([ADR 0011](../adr/0011-keyring-rotation.md)):
   1. Generate a key: `axentra keys generate --kid k2`.
   2. Put it **in front**: `k2:...,k1:...`. Back up the new keyring (see
      [BACKUP_RESTORE](../operations/BACKUP_RESTORE.md)).
   3. Restart every process. New values are encrypted with `k2`; values under `k1` still decrypt.
-  4. Re-encrypt stored values with the active key. A bulk command (`axentra secrets reencrypt`)
-     is planned and not available yet ([TODO](../TODO.md)); until it exists, values are
-     re-encrypted only when they are rewritten, so **keep old keys in the ring**.
-  5. Remove `k1` only when no stored value references it, then restart again.
+  4. Re-encrypt stored values with the active key: `axentra secrets reencrypt --dry-run` reports,
+     per column, the number of values per key id; `axentra secrets reencrypt` rewrites every value
+     not under the active key in batches (one transaction per batch, compare-and-swap per row, so
+     it is safe while the API runs and can be re-run after an interruption). Values that cannot be
+     decrypted are counted as `failed` and left unchanged (exit code 2).
+  5. Remove `k1` only when the dry run shows no value under `k1` (and no backup you may still
+     restore needs it), then restart again.
   Decrypting a value whose key id is not in the ring fails with a configuration error naming the
   missing key id; losing a key means losing the values encrypted with it.
 - **Hashes, not ciphertexts, for credentials** that are only compared: session tokens, API key
@@ -254,8 +259,26 @@ Only authentication is throttled in this version: failed password logins count p
 (`security.login_rate_per_minute`, default 10) and per client IP (three times that), and failed
 setup-token attempts per IP, in fixed one-minute windows stored in PostgreSQL (shared by all API
 processes). Exceeding a budget returns `429` with `Retry-After: 60`. Fixed windows allow up to
-twice the budget across a window boundary. There is no general request rate limiting; use the
-reverse proxy for that.
+twice the budget across a window boundary.
+
+General request rate limiting is optional and **off by default** (`security.rate_limit_per_minute`
+per credential, `security.rate_limit_ip_per_minute` per client IP, `security.rate_limit_burst`).
+It is an in-memory token bucket per process: a request is charged to a hash of its credential
+(bearer token, API key or session cookie; the client IP for anonymous requests) and independently
+to its client IP, before authentication runs. An empty bucket answers `429` (`rate_limited`) with
+a computed `Retry-After`. Health checks and `/metrics` are never limited.
+
+Trade-off: the in-memory buckets cost nothing per request (no database write) but are not shared;
+N API processes allow N times the configured rate and a restart refills them. The database-backed
+fixed windows (`axentra_rate_limits`) remain for logins, where a shared budget matters. For a hard
+global limit use the reverse proxy or an API gateway.
+
+## Request body size
+
+`security.max_body_bytes` (default 10 MiB) caps every request body: a larger `Content-Length` is
+answered with `413` (`payload_too_large`, problem+json) before the body is read, and a chunked body
+is aborted with `413` as soon as it passes the limit. File uploads are exempt and use
+`storage.max_file_bytes` (checked while streaming). Records are additionally capped at 256 KiB.
 
 ## Proxy headers
 
@@ -272,7 +295,10 @@ Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-r
 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` (not on `/v1/docs`, the
 Swagger UI), `Strict-Transport-Security` when the public URL is HTTPS, and `Cache-Control:
 no-store` on `/v1/auth/*` and `/v1/me*`. The OpenAPI document (`/v1/openapi.json`) and Swagger UI
-(`/v1/docs`) are public. Route protection is checked at startup (`check_routes`).
+(`/v1/docs`) follow `security.api_docs`: `public`, `authenticated` (session or API key) or
+`disabled` (404). Default: `disabled` in production, `public` otherwise. `axentra openapi export`
+works in every mode. Route protection is checked at startup (`check_routes`; the two docs routes are
+listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mode).
 
 ## Threat model
 
@@ -289,7 +315,7 @@ no-store` on `/v1/auth/*` and `/v1/me*`. The OpenAPI document (`/v1/openapi.json
 | Secret leakage | Hash-only credentials, secrets shown once, secret references, AES-GCM with context binding, redaction in logs/problems/audit, startup refusal of inline secrets in production | Database dumps contain hashes and ciphertexts; the keyring must be stored separately |
 | RLS bypass via misconfiguration | Startup check for superuser/BYPASSRLS; separate owner and app roles in compose | `allow_superuser = true` disables this protection |
 | Spoofed client IP | `X-Forwarded-For` only from `trusted_proxies` | Wrong proxy configuration makes throttling per IP ineffective |
-| Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits | No global request body limit or request rate limit: configure them in the reverse proxy |
+| Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits, request body limit (`security.max_body_bytes`), optional per-credential/per-IP rate limits | Rate limits are per process and off by default; use the reverse proxy for global limits and slow-client (slowloris) protection |
 
 ## EU hosting and GDPR
 

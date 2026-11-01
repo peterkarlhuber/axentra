@@ -887,6 +887,11 @@
             "title": "Features",
             "type": "object"
           },
+          "limits": {
+            "additionalProperties": true,
+            "title": "Limits",
+            "type": "object"
+          },
           "login_rate_per_minute": {
             "title": "Login Rate Per Minute",
             "type": "integer"

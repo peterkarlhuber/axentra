@@ -191,7 +191,11 @@ outside production), `scopes` (default `openid email profile`), `allow_signup` (
 
 Provider notes: Entra ID v2 ID tokens usually carry no `email_verified` claim. Axentra then
 neither links nor creates a user by email, so a first Entra login is refused with
-`email_not_verified` unless the claim is emitted (optional claims / claims mapping). Keycloak,
+`email_not_verified` unless the claim is emitted (optional claims / claims mapping). There is
+deliberately no setting that trusts an unverified `email` claim: in multi-tenant Entra apps the
+claim is user-editable, and trusting it enables account takeover by email ("nOAuth"). An opt-in
+for single-tenant directories (or a mapping to `xms_edov`/`verified_primary_email`) is an open item
+in [TODO](../TODO.md). Keycloak,
 Google and Auth0 send `email_verified` by default. The
 issuer must be written exactly as in the discovery document (Auth0: trailing slash; Keycloak and
 Google: none).

@@ -5,48 +5,40 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last reviewed: 2026-11-01 (`0.1.0.dev0`).
+Last reviewed: 2026-11-01 (`0.1.0.dev0`, after the Phase 5 hardening change).
 
-## Work in progress (parallel branches)
+## Release
 
 | Pri | Area | Item |
 |---|---|---|
-| P0 | identity | OIDC login endpoints (`/v1/auth/oidc/{provider}/start`, `/callback`); settings, tables and `link_external_identity` exist |
-| P0 | storage | File storage module (local, S3-compatible), `/v1/files/download/{token}` |
-| P0 | events | Events, background jobs and webhooks (including SSRF protection for webhook targets) |
-| P0 | usage | Meters, usage recording, quotas |
-| P0 | billing | Plans, subscriptions, entitlements, provider adapters (manual/fake/Stripe), billing webhooks |
-| P0 | notify | Templates, email delivery (local/SMTP), preferences |
-| P0 | observability | `/metrics`, OpenTelemetry tracing, audit/job retention |
-| P0 | release | Fill in `docs/COMPATIBILITY.md` with the merged Axentra and Studio commits |
+| P0 | release | Fill in `docs/COMPATIBILITY.md` with the merged Axentra and Studio commits (still "to be filled at merge") |
 
 ## Backend
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | security | `axentra secrets reencrypt`: bulk re-encryption with the active key (needed before old keys can be removed once modules store ciphertexts) |
-| P1 | operations | Scheduled retention: call `IdentityService.purge_expired` and `AuditLog.purge(observability.audit_retention_days)` (methods exist, nothing runs them) |
-| P1 | data | Records: write audit events for create and replace (only delete is audited today) |
-| P1 | migrations | `axentra migrate` cannot apply product namespaces; add discovery (entry points or config) so one command migrates everything |
-| P1 | config | `database.migration_url` has no `_ref` variant; add `migration_url_ref` |
-| P1 | security | General request rate limiting and a request body size limit (today: login/setup throttling only; rely on the reverse proxy) |
-| P1 | access | Product-defined permissions (the catalog is fixed in code; product tables reuse `records:*`) |
+| P1 | access | Product-defined permissions: the permission catalog is closed (`CATALOG` in code; `validate_permissions` refuses other names), so product tables reuse `records:*` and custom roles/API keys cannot carry product permissions (Nodestro plan G-1) |
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
-| P2 | security | Option to disable or protect `/v1/docs` and `/v1/openapi.json` in production (public today) |
-| P2 | realtime | Server-sent events with an async path that does not hold pooled connections (Phase 2) |
-| P2 | identity | Password reset and email verification flows (need the notify module) |
+| P1 | identity | Users without an email address: `axentra_users.email` is `NOT NULL` (unique on `lower(email)`), so external-identity-only users (no verified email claim) cannot exist (Nodestro plan G-3) |
+| P1 | library | `AxentraError` is mapped to problem+json only by the HTTP app; library embedders with their own web layer get no handler or mapping helper (an escaping `AxentraError` becomes a 500 there). Provide a documented mapping (status, code, extras) usable outside `axentra.api` |
+| P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
+| P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
+| P2 | storage | Content-type policy per product: `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` and other blocked types are refused installation-wide, or stored inert with the global `storage.store_blocked_as_inert`; the blocklist itself is fixed in code (Nodestro plan G-7) |
+| P2 | migrations | Runner features from Nodestro (plan G-2): pre-migration backup hook, refusal when the schema is newer than the code, a serving gate for a compatible schema range, optional non-transactional steps |
+| P2 | security | Shared rate limiting across API processes (the general limit is an in-memory token bucket per process; only login throttling is shared through PostgreSQL) |
+| P2 | release | Version checks against the package metadata: Axentra uses `dynamic = ["version"]` (hatch reads `src/axentra/_version.py`), so tools that read `project.version` from `pyproject.toml` (e.g. Nodestro's `check_versions.py`) see none; document/offer a supported way (`axentra --version`, `importlib.metadata.version("axentra")`, or a static version) |
 
 ## Developer experience (Phase 4)
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | sdk | After the events/jobs/webhooks merge: `npm run generate` in `sdk/typescript`; typed Python methods for jobs, events and webhooks |
+| P1 | sdk | Python SDK: typed methods for jobs, events and webhooks (reachable today through `request_json()`) |
 | P1 | api | Document `application/problem+json` error responses in the OpenAPI (today only FastAPI's default 422 `HTTPValidationError` is listed, which does not match the real body) |
 | P2 | sdk | Publish `@axentra/sdk` (npm) and `axentra-client` (PyPI); release process and provenance |
 | P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin) |
 | P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
-| P2 | studio | Backend support for Studio Phase 2/3 views (files, jobs/events, usage charts, audit/monitoring, plans, subscriptions, notifications) as those modules land |
+| P2 | studio | Backend support for Studio Phase 2/3 views (files, jobs/events, usage charts, audit/monitoring, plans, subscriptions, notifications): the modules are merged; add endpoints or fields as the views need them |
 
 ## Hardening (Phase 5)
 
@@ -63,7 +55,7 @@ Last reviewed: 2026-11-01 (`0.1.0.dev0`).
 
 | Pri | Area | Item |
 |---|---|---|
-| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002) |
+| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002). Generic gaps from its section 9 are listed above (G-1, G-2, G-3, G-7); G-6 (re-encryption registry) is done |
 
 ## Known limitations
 
@@ -76,7 +68,14 @@ These are current, deliberate or accepted properties; some have an item above.
   existence through conflict errors.
 - Login throttling uses fixed one-minute windows (bursts up to twice the budget at a window
   boundary); no lockout, no CAPTCHA.
+- The general rate limit is off by default and per process (N processes allow N times the rate);
+  the request body limit does not protect against slow clients (use the reverse proxy).
+- `pg_dump` needs a superuser or a `BYPASSRLS` backup role (forced RLS); see
+  `operations/BACKUP_RESTORE.md`.
 - No total counts in list responses (by design).
 - Records support only top-level JSON containment filters and sorting by id/created/updated.
-- Services are synchronous; long-lived streaming (SSE) is not available yet.
+- Services are synchronous; SSE streams poll the database every `events.sse_poll_seconds` through
+  the thread pool (no push, no connection held between polls).
+- `axentra migrate` applies migrations of every installed package that declares the
+  `axentra.migrations` entry point group (disable with `database.migration_entry_points = false`).
 - Migrations are forward-only; rollback means restore from backup.
