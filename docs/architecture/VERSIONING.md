@@ -26,12 +26,33 @@ response fields and unknown open enum values, so adding them is not breaking.
   ("drift check"). Every API change therefore shows up in review as a diff of this file.
 - **SDKs are generated from the committed file**, never from a running server: Studio generates
   its TypeScript types with `openapi-typescript` from a vendored copy (`api/openapi.json`, with its
-  origin recorded in `api/SOURCE`). The Python and TypeScript SDKs (Phase 4, planned) follow the
-  same rule.
+  origin recorded in `api/SOURCE`). The SDKs in `sdk/` follow the same rule (see below).
 - **Contract tests on both sides.** Axentra: `tests/unit/test_openapi.py` (drift, unique
   operation ids) and the HTTP integration tests, which exercise the documented status codes and
   shapes. Studio: tests against the vendored contract and
   its compatibility check (`src/api/compat.ts`).
+
+## SDKs: generation and synchronization
+
+Both SDKs live in this repository (`sdk/typescript`, `sdk/python`) and are versioned with it.
+Each declares the API version it was built for and refuses an incompatible server with the rule
+above (same major, server minor >= SDK minor) in `checkCompatibility()` / `check_compatibility()`.
+
+| | TypeScript (`@axentra/sdk`) | Python (`axentra-client`) |
+|---|---|---|
+| Source of truth | The committed `openapi/axentra-v1.json` | Hand-written resource methods (`_async/client.py`; the sync client is generated from it by `scripts/unasync.py`) |
+| Generation | `npm run generate`: openapi-typescript (pinned) writes `src/schema.d.ts` and `src/generated.ts` (`GENERATED_API_VERSION` from `info.version`, contract SHA-256). The client is generic over the generated `paths`, so there is no per-endpoint code | None for the API surface; models in `models.py` follow the contract by hand |
+| Staleness check | CI `sdk-typescript` runs `npm run generate:check`, which fails when the generated files differ from what the committed OpenAPI produces | Unit tests: every path the client calls must exist in the committed OpenAPI; `API_VERSION` must equal `info.version`; the sync client must match `unasync` output |
+| Contract tests | `npm run test:e2e` against a live server | `tests/integration` (in-process server, real PostgreSQL) and `tests/e2e` (live server) |
+| New endpoints | Picked up by regenerating: `axentra openapi export`, then `npm run generate`, commit both | Reachable at once via `request_json()`; typed methods are added by hand with a contract test |
+
+`scripts/sdk-e2e.sh` (CI job `sdk-e2e`) starts a PostgreSQL-backed `axentra serve` with a
+temporary database, bootstraps an admin, a product, a tenant and an API key through the API and
+runs both SDKs' e2e suites against it, so every change to the server is checked against both
+clients. An API change therefore touches, in one pull request: the code, `openapi/axentra-v1.json`,
+the regenerated TypeScript types, and (if the Python client should expose it) the Python client.
+When `API_VERSION` gets a new minor, the SDKs that start relying on the new endpoints bump the
+minor they require (TypeScript: automatically through regeneration).
 
 ## Compatibility with Axentra Studio
 

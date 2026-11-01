@@ -41,8 +41,10 @@ Last reviewed: 2026-11-01 (`0.1.0.dev0`).
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | sdk | Python SDK generated from `openapi/axentra-v1.json` |
-| P1 | sdk | TypeScript SDK generated from the same document (Studio currently generates types only) |
+| P1 | sdk | After the events/jobs/webhooks merge: `npm run generate` in `sdk/typescript`; typed Python methods for jobs, events and webhooks |
+| P1 | api | Document `application/problem+json` error responses in the OpenAPI (today only FastAPI's default 422 `HTTPValidationError` is listed, which does not match the real body) |
+| P2 | sdk | Publish `@axentra/sdk` (npm) and `axentra-client` (PyPI); release process and provenance |
+| P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin) |
 | P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
 | P2 | demo | Demo SaaS application using Axentra as a library with its own product tables |
 | P2 | studio | Backend support for Studio Phase 2/3 views (files, jobs/events, usage charts, audit/monitoring, plans, subscriptions, notifications) as those modules land |
