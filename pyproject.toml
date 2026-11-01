@@ -123,7 +123,7 @@ name = "Domain modules do not depend on the HTTP layer or web frameworks"
 type = "forbidden"
 source_modules = [
     "axentra.core", "axentra.config", "axentra.data", "axentra.identity", "axentra.tenancy",
-    "axentra.access", "axentra.audit", "axentra.platform",
+    "axentra.access", "axentra.audit", "axentra.platform", "axentra.storage",
 ]
 forbidden_modules = ["axentra.api", "axentra.cli", "fastapi", "starlette", "uvicorn"]
 

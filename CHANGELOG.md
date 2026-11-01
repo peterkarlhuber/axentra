@@ -18,6 +18,12 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   oracle), product/tenant-scoped API keys with rotation (grace period) and revocation.
 - Data: tenant-owned JSON records with filtering, sorting, cursor pagination and optimistic concurrency.
 - Audit: append-only, redacted audit trail written in the same transaction as each change.
+- Storage: generic tenant files with local (atomic, fsync) and S3 backends (optional extra `s3`),
+  streaming uploads with size limit enforced while reading, SHA-256, content type sniffing and a
+  blocklist for executable/HTML/SVG types, attachment-only downloads, exact per-tenant quotas under
+  concurrency (bytes and files, defaults from product settings), HMAC-signed short-lived download
+  URLs (optional presigned S3 URLs), expiry, purge of expired/abandoned/orphaned objects
+  (`axentra storage purge`), migration `0003_storage`. See docs/modules/STORAGE.md.
 - HTTP API `/v1` (FastAPI) with RFC 9457 problem details, request ids, security headers, CORS for
   configured origins, route-protection registry; committed OpenAPI contract `openapi/axentra-v1.json`.
 - CLI: `axentra serve | migrate | admin setup-token | openapi export | keys generate`.
