@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/branding/axentra-logo.png" alt="Axentra" width="560">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/axentra-logo-on-dark.png">
+    <img src="assets/branding/axentra-logo.png" alt="Axentra" width="480">
+  </picture>
 </p>
 
 # Axentra

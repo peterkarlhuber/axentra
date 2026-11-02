@@ -6,8 +6,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+### Changed
+- New official Axentra logo. `assets/branding/` now holds the two logo masters
+  (`axentra-logo-transparent.png`, `axentra-logo-white.png`), the vendored derivation script
+  `derive_branding.py` and the derived `axentra-logo.png` (light surfaces),
+  `axentra-logo-on-dark.png` (dark surfaces) and `axentra-mark.png` (symbol). The README logo
+  switches between light and dark with the GitHub color scheme. The old `axentra-logo.png` was
+  replaced; provenance and the regenerate command are in `assets/branding/README.md`.
 - Docs: Roadmap Phase 6 (Nodestro integration) marked done on the Axentra side; the "last start wins" limitation
   now names versioned access definitions as the deterministic way.
+- `IdentityService.resolve_session` reads the user in the session's transaction (one transaction per
+  resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Fixed
 - Product operators can read a suspended tenant's record again, so they can reactivate it:
