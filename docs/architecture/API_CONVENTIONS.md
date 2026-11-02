@@ -21,7 +21,7 @@ SDK and Axentra Studio) must rely only on what that document describes.
 Opaque, prefixed, URL-safe strings: `prd_` product, `ten_` tenant, `usr_` user, `mem_` membership,
 `inv_` invitation, `rol_` custom role, `key_` API key, `ses_` session, `aud_` audit event,
 `rec_` record, `fil_` file, `job_` job, `evt_` event, `whk_` webhook, `dlv_` delivery,
-`pln_` plan, `sub_` subscription, `tpl_` template, `msg_` message. Clients must not parse them.
+`pln_` plan, `sub_` subscription, `tpl_` template, `msg_` message, `sdoc_` search document. Clients must not parse them.
 
 ## Authentication
 

@@ -7,6 +7,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 ## [Unreleased]
 
 ### Added
+- Search module (`axentra.search`, order section 4 L): tenant-scoped PostgreSQL full-text index
+  (migration `0006_search`, table `axentra_search_documents` with forced RLS, generated weighted
+  `tsvector` over title and body, GIN index). Products index documents by kind + ref id through
+  `ax.search.upsert/delete` or `PUT`/`DELETE /v1/products/{pid}/tenants/{tid}/search/documents/{kind}/{ref_id}`
+  (new permission `search:index`, audited without content); users query with
+  `GET /v1/products/{pid}/tenants/{tid}/search?q&kind&limit&cursor` (new permission `search:query`):
+  web search syntax, `ts_rank` ranking, HTML-escaped `ts_headline` highlights, kind filter, cursor
+  paging. Pluggable `SearchAdapter` protocol with `PostgresSearchAdapter` as default. New settings
+  section `[search]` (`language`, default `simple`; `max_body_chars`, `max_offset`,
+  `audit_index_writes`). Role defaults: all built-in roles may query; owners/admins (tenant and
+  product) and platform admins may index. No vector search. See docs/modules/SEARCH.md.
 - Implementation report `docs/AXENTRA_IMPLEMENTATION_REPORT.md`: architecture, actual module
   scope (implemented + tested vs. planned; the search module is not implemented), Nodestro
   provenance, API/SDK overview, verified install and start commands, test and CI evidence,

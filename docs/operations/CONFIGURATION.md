@@ -172,6 +172,15 @@ These sections are accepted and validated now; they take effect when the corresp
 | `audit_retention_days` | `365` | no scheduler applies it yet ([TODO](../TODO.md)) |
 | `job_retention_days` | `30` | module in development |
 
+`[search]` (module `search`, see [modules/SEARCH.md](../modules/SEARCH.md))
+
+| Key | Default |
+|---|---|
+| `language` | `"simple"` (PostgreSQL text search configuration, e.g. `english`, `german`; re-index after a change) |
+| `max_body_chars` | `100000` (1000-1000000) |
+| `max_offset` | `1000` (deepest result position reachable by paging) |
+| `audit_index_writes` | `true` |
+
 ## Effective configuration
 
 `GET /v1/settings` (platform admins and viewers with `platform:settings`, read-only for product

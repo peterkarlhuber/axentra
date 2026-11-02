@@ -28,11 +28,14 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
 | P1 | identity | Users without an email address: `axentra_users.email` is `NOT NULL` (unique on `lower(email)`), so external-identity-only users (no verified email claim) cannot exist (Nodestro plan G-3) |
 | P1 | library | `AxentraError` is mapped to problem+json only by the HTTP app; library embedders with their own web layer get no handler or mapping helper (an escaping `AxentraError` becomes a 500 there). Provide a documented mapping (status, code, extras) usable outside `axentra.api` |
-| P1 | search | Search module (order section 4 L) is not implemented: no PostgreSQL full-text search, no tenant-scoped search API, no search adapters, no vector search; list endpoints have substring `q` filters only. `search` is still listed in `MODULES` and reported in `GET /v1/meta` `modules` without code behind it |
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
+| P2 | search | Optional vector/semantic search through an adapter (e.g. pgvector with an embedding step; order section 4 L) |
+| P2 | search | External search adapters (OpenSearch, Meilisearch, ...) implementing `SearchAdapter`; only `PostgresSearchAdapter` exists, and an external engine's audit event cannot be atomic with its write |
+| P2 | search | Prefix (search-as-you-type) and fuzzy matching, accent folding (`unaccent`), per-tenant or per-document language |
+| P3 | search | Bulk index/delete API (e.g. delete all documents of a kind), a reindex job, product-wide search across tenants, filters on `metadata` |
 | P2 | identity | Identity providers are managed only through configuration (`[[oidc]]`); no API (and therefore no Studio view) to list, add or disable providers |
 | P2 | tenancy | Product-level invitations for operators: `POST /v1/products/{id}/members` resolves only users the caller can see, so a product owner who is not a platform admin cannot add an operator without a visible account (Studio TODO, marked backend) |
 | P2 | events | List the job kinds a tenant caller may enqueue (declared `enqueue_permission`), so clients can offer them (Studio TODO, marked backend) |
@@ -51,6 +54,7 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | Pri | Area | Item |
 |---|---|---|
 | P1 | sdk | Python SDK: typed methods for jobs, events and webhooks (reachable today through `request_json()`) |
+| P2 | sdk | Python SDK: typed methods for the search endpoints (reachable today through `request_json()`) |
 | P1 | api | Document `application/problem+json` error responses in the OpenAPI (today only FastAPI's default 422 `HTTPValidationError` is listed, which does not match the real body) |
 | P2 | sdk | Publish `@axentra/sdk` (npm) and `axentra-client` (PyPI); release process and provenance |
 | P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin) |

@@ -17,6 +17,7 @@ from axentra.api.routes import (
     observability,
     products,
     records,
+    search,
     storage,
     tenants,
     usage,
@@ -45,4 +46,5 @@ ROUTERS: list[ModuleRouter] = [
     ModuleRouter(usage.router, "usage"),
     ModuleRouter(billing.router, "billing"),
     ModuleRouter(events.router, "events"),
+    ModuleRouter(search.router, "search"),
 ]

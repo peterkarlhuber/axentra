@@ -688,6 +688,30 @@
         "title": "DeliveryStats",
         "type": "object"
       },
+      "DocumentUpsert": {
+        "properties": {
+          "body": {
+            "default": "",
+            "description": "Plain text; the limit is search.max_body_chars",
+            "title": "Body",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Returned with hits (at most 16 KB); not searched",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "title": "DocumentUpsert",
+        "type": "object"
+      },
       "DownloadUrl": {
         "properties": {
           "expires_at": {
@@ -3205,6 +3229,33 @@
         "title": "Page[Schedule]",
         "type": "object"
       },
+      "Page_SearchHit_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[SearchHit]",
+        "type": "object"
+      },
       "Page_Subscription_": {
         "properties": {
           "items": {
@@ -5134,6 +5185,158 @@
           }
         },
         "title": "ScheduleUpdate",
+        "type": "object"
+      },
+      "SearchDocument": {
+        "description": "One indexed document. ``kind`` + ``ref_id`` identify the source object in the product.",
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "ref_id": {
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "product_id",
+          "tenant_id",
+          "kind",
+          "ref_id",
+          "title",
+          "body",
+          "metadata",
+          "language",
+          "version",
+          "created_by",
+          "updated_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SearchDocument",
+        "type": "object"
+      },
+      "SearchHit": {
+        "description": "A query result. Highlights are HTML-escaped text in which matches are wrapped in ``<mark>``.",
+        "properties": {
+          "body_highlight": {
+            "title": "Body Highlight",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "number"
+          },
+          "ref_id": {
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_highlight": {
+            "title": "Title Highlight",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "ref_id",
+          "title",
+          "metadata",
+          "rank",
+          "title_highlight",
+          "body_highlight",
+          "updated_at"
+        ],
+        "title": "SearchHit",
         "type": "object"
       },
       "SecretRotate": {
@@ -13974,6 +14177,364 @@
         "summary": "Replace Record",
         "tags": [
           "records"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search": {
+      "get": {
+        "operationId": "search_v1_products__product_id__tenants__tenant_id__search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Web search syntax: words (all must match), \"quoted phrase\", or, -excluded",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Web search syntax: words (all must match), \"quoted phrase\", or, -excluded",
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only these kinds (repeat the parameter for several)",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 20,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only these kinds (repeat the parameter for several)",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "Page size (1-200, default 50)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (1-200, default 50)",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque cursor from a previous page's next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page's next_cursor",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SearchHit_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Full-text search in the tenant's index (ranked, highlighted)",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}/{ref_id}": {
+      "delete": {
+        "operationId": "delete_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document kind, e.g. `invoice`",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "Document kind, e.g. `invoice`",
+              "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Id of the source object in the product",
+            "in": "path",
+            "name": "ref_id",
+            "required": true,
+            "schema": {
+              "description": "Id of the source object in the product",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$",
+              "title": "Ref Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove a document from the index",
+        "tags": [
+          "search"
+        ]
+      },
+      "get": {
+        "operationId": "get_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document kind, e.g. `invoice`",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "Document kind, e.g. `invoice`",
+              "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Id of the source object in the product",
+            "in": "path",
+            "name": "ref_id",
+            "required": true,
+            "schema": {
+              "description": "Id of the source object in the product",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$",
+              "title": "Ref Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "An indexed document",
+        "tags": [
+          "search"
+        ]
+      },
+      "put": {
+        "operationId": "upsert_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document kind, e.g. `invoice`",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "Document kind, e.g. `invoice`",
+              "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Id of the source object in the product",
+            "in": "path",
+            "name": "ref_id",
+            "required": true,
+            "schema": {
+              "description": "Id of the source object in the product",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$",
+              "title": "Ref Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchDocument"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index a document (create or replace by kind and ref_id)",
+        "tags": [
+          "search"
         ]
       }
     },

@@ -255,6 +255,21 @@ class EventsSettings(_Section):
     """A stream ends after this time; clients reconnect with ``Last-Event-ID``."""
 
 
+class SearchSettings(_Section):
+    """Full-text search (module ``search``), see docs/modules/SEARCH.md."""
+
+    language: str = Field("simple", pattern=r"^[a-z_][a-z0-9_]{0,62}(\.[a-z_][a-z0-9_]{0,62})?$")
+    """PostgreSQL text search configuration (``regconfig``) for indexing and queries, e.g.
+    ``simple`` (no stemming, language independent), ``english`` or ``german``. Documents store the
+    configuration they were indexed with; after a change, re-index them (upsert again)."""
+    max_body_chars: int = Field(100_000, ge=1_000, le=1_000_000)
+    """Longest document body accepted by the index (characters)."""
+    max_offset: int = Field(1_000, ge=0, le=100_000)
+    """Deepest result position reachable by paging (bounds the cost of deep pages)."""
+    audit_index_writes: bool = True
+    """Write an audit event for every index upsert/delete (without document content)."""
+
+
 class Settings(_Section):
     environment: Environment = Environment.DEVELOPMENT
     mode: DeploymentMode = DeploymentMode.SINGLE
@@ -268,6 +283,7 @@ class Settings(_Section):
     billing: BillingSettings = Field(default_factory=BillingSettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     events: EventsSettings = Field(default_factory=EventsSettings)
+    search: SearchSettings = Field(default_factory=SearchSettings)
     features: dict[str, bool] = Field(default_factory=dict)
     """Optional feature flags (``features.<name> = true``), readable via :meth:`feature`."""
 

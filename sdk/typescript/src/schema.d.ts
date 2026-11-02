@@ -1443,6 +1443,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Full-text search in the tenant's index (ranked, highlighted) */
+        get: operations["search_v1_products__product_id__tenants__tenant_id__search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}/{ref_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An indexed document */
+        get: operations["get_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__get"];
+        /** Index a document (create or replace by kind and ref_id) */
+        put: operations["upsert_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__put"];
+        post?: never;
+        /** Remove a document from the index */
+        delete: operations["delete_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/tenants/{tenant_id}/storage/quota": {
         parameters: {
             query?: never;
@@ -2146,6 +2182,27 @@ export interface components {
             /** Tenant Id */
             tenant_id: string | null;
             total: components["schemas"]["StatusCounts"];
+        };
+        /** DocumentUpsert */
+        DocumentUpsert: {
+            /**
+             * Body
+             * @description Plain text; the limit is search.max_body_chars
+             * @default
+             */
+            body?: string;
+            /**
+             * Metadata
+             * @description Returned with hits (at most 16 KB); not searched
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Title
+             * @default
+             */
+            title?: string;
         };
         /** DownloadUrl */
         DownloadUrl: {
@@ -3047,6 +3104,13 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /** Page[SearchHit] */
+        Page_SearchHit_: {
+            /** Items */
+            items: components["schemas"]["SearchHit"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
         /** Page[Subscription] */
         Page_Subscription_: {
             /** Items */
@@ -3715,6 +3779,77 @@ export interface components {
             } | null;
             /** Priority */
             priority?: number | null;
+        };
+        /**
+         * SearchDocument
+         * @description One indexed document. ``kind`` + ``ref_id`` identify the source object in the product.
+         */
+        SearchDocument: {
+            /** Body */
+            body: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by: string | null;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Language */
+            language: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Product Id */
+            product_id: string;
+            /** Ref Id */
+            ref_id: string;
+            /** Tenant Id */
+            tenant_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Updated By */
+            updated_by: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * SearchHit
+         * @description A query result. Highlights are HTML-escaped text in which matches are wrapped in ``<mark>``.
+         */
+        SearchHit: {
+            /** Body Highlight */
+            body_highlight: string;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Rank */
+            rank: number;
+            /** Ref Id */
+            ref_id: string;
+            /** Title */
+            title: string;
+            /** Title Highlight */
+            title_highlight: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** SecretRotate */
         SecretRotate: {
@@ -8181,6 +8316,166 @@ export interface operations {
                 collection: string;
                 product_id: string;
                 record_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_v1_products__product_id__tenants__tenant_id__search_get: {
+        parameters: {
+            query: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Only these kinds (repeat the parameter for several) */
+                kind?: string[] | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                /** @description Web search syntax: words (all must match), "quoted phrase", or, -excluded */
+                q: string;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_SearchHit_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Document kind, e.g. `invoice` */
+                kind: string;
+                product_id: string;
+                /** @description Id of the source object in the product */
+                ref_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Document kind, e.g. `invoice` */
+                kind: string;
+                product_id: string;
+                /** @description Id of the source object in the product */
+                ref_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchDocument"];
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchDocument"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Document kind, e.g. `invoice` */
+                kind: string;
+                product_id: string;
+                /** @description Id of the source object in the product */
+                ref_id: string;
                 tenant_id: string;
             };
             cookie?: never;

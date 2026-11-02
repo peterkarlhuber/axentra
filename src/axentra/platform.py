@@ -36,6 +36,7 @@ from axentra.identity.service import IdentityService
 from axentra.notify.service import NotifyService
 from axentra.observability.metrics import MetricsRegistry, register_db_pool_metrics
 from axentra.observability.tracing import setup_tracing
+from axentra.search.service import SearchService
 from axentra.storage.service import StorageService
 from axentra.tenancy.models import Product
 from axentra.tenancy.service import TenancyService
@@ -147,6 +148,12 @@ class Axentra:
         self.schedules = ScheduleService(self.db, self.authz, self.audit, self.jobs.queue)
         self.webhooks = WebhookService(
             self.db, settings, self.authz, self.audit, self.secrets, self.jobs.queue, self.events
+        )
+        # Search (tenant-scoped full-text index; ax.search.set_adapter(...) swaps the backend).
+        self.search: SearchService | None = (
+            SearchService(self.db, settings, self.authz, self.audit)
+            if settings.module_enabled("search")
+            else None
         )
         self._extra_migrations: list[Migration] = []
         #: Columns re-encrypted by ``axentra secrets reencrypt`` (products add theirs).
