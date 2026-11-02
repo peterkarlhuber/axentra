@@ -6,6 +6,10 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+### Changed
+- `IdentityService.resolve_session` reads the user in the session's transaction (one transaction per
+  resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
+
 ### Fixed
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an
