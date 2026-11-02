@@ -24,7 +24,6 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | access | Product-defined permissions: the permission catalog is closed (`CATALOG` in code; `validate_permissions` refuses other names), so product tables reuse `records:*` and custom roles/API keys cannot carry product permissions (Nodestro plan G-1) |
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
 | P1 | identity | Users without an email address: `axentra_users.email` is `NOT NULL` (unique on `lower(email)`), so external-identity-only users (no verified email claim) cannot exist (Nodestro plan G-3) |
 | P1 | library | `AxentraError` is mapped to problem+json only by the HTTP app; library embedders with their own web layer get no handler or mapping helper (an escaping `AxentraError` becomes a 500 there). Provide a documented mapping (status, code, extras) usable outside `axentra.api` |
@@ -39,7 +38,6 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | P2 | identity | Identity providers are managed only through configuration (`[[oidc]]`); no API (and therefore no Studio view) to list, add or disable providers |
 | P2 | tenancy | Product-level invitations for operators: `POST /v1/products/{id}/members` resolves only users the caller can see, so a product owner who is not a platform admin cannot add an operator without a visible account (Studio TODO, marked backend) |
 | P2 | events | List the job kinds a tenant caller may enqueue (declared `enqueue_permission`), so clients can offer them (Studio TODO, marked backend) |
-| P2 | storage | Content-type policy per product: `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` and other blocked types are refused installation-wide, or stored inert with the global `storage.store_blocked_as_inert`; the blocklist itself is fixed in code (Nodestro plan G-7) |
 | P2 | migrations | Runner features from Nodestro (plan G-2): pre-migration backup hook, refusal when the schema is newer than the code, a serving gate for a compatible schema range, optional non-transactional steps |
 | P3 | notify | SMS and push adapters (email is the only channel) |
 | P2 | notify | Per-tenant send rate limits for `POST .../notify/send` (review 2026-11-01, F6 follow-up; the relay itself is closed by `notify:send_external` and system-only templates) |
@@ -75,7 +73,7 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 
 | Pri | Area | Item |
 |---|---|---|
-| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002). Generic gaps from its section 9 are listed above (G-1, G-2, G-3, G-7); G-6 (re-encryption registry) is done |
+| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002). Generic gaps from its section 9 are listed above (G-2, G-3); G-1 (product-defined permissions), G-6 (re-encryption registry) and G-7 (per-product content-type policy) are done |
 | P3 | integration | Remaining plan gaps, needed only if Nodestro adopts Axentra: G-4 (login without membership, access decided by the product; DB-clock session checks), G-5 (claim token for ownerless tenants), G-8 (verify the merged jobs module against Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss") |
 
 ## Known limitations
@@ -92,6 +90,9 @@ These are current, deliberate or accepted properties; some have an item above.
   logins of that account for up to a minute (accepted trade-off, see SECURITY_MODEL.md).
 - Job kinds and their handler permissions are declared in process (`ax.jobs.register`/`declare`);
   an API process that does not declare a kind refuses it to tenant callers (fail closed).
+- Product permissions registered in process are mirrored at start; with several processes of one
+  product the last start wins (a rolling deployment may briefly flip a definition). Retired
+  permissions stay listed in custom roles and API keys (without effect) until removed there.
 - The general rate limit is off by default and per process (N processes allow N times the rate);
   the request body limit does not protect against slow clients (use the reverse proxy).
 - `pg_dump` needs a superuser or a `BYPASSRLS` backup role (forced RLS); see

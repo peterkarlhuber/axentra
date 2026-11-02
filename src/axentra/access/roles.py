@@ -6,16 +6,35 @@ from psycopg import errors as pg_errors
 
 from axentra.access.authorizer import Authorizer
 from axentra.access.models import PermissionInfo, Role
-from axentra.access.permissions import BUILTIN_ROLES, CATALOG, PRODUCT, TENANT, validate_permissions
+from axentra.access.permissions import (
+    BUILTIN_ROLES,
+    CATALOG,
+    PRODUCT,
+    READS,
+    TENANT,
+    TENANT_READ_LIKE,
+    validate_permissions,
+)
+from axentra.access.product_permissions import ProductCatalog, load_catalog
 from axentra.audit.log import AuditLog
 from axentra.core.context import Principal
 from axentra.core.errors import Conflict, NotFound, PreconditionFailed, ValidationFailed
 from axentra.core.ids import new_id
-from axentra.data.database import Database, DbScope
+from axentra.data.database import Database, DbScope, Tx
 
 
-def permission_catalog() -> list[PermissionInfo]:
-    return [PermissionInfo(name=p.name, scope=p.scope, description=p.description) for p in CATALOG]
+def permission_catalog(*, include_platform: bool = True) -> list[PermissionInfo]:
+    """The built-in catalog (``GET /v1/permissions``)."""
+    return [
+        PermissionInfo(
+            name=p.name,
+            scope=p.scope,
+            description=p.description,
+            read_like=p.name in READS or p.name in TENANT_READ_LIKE,
+        )
+        for p in CATALOG
+        if include_platform or p.scope != "platform"
+    ]
 
 
 class RoleService:
@@ -26,6 +45,10 @@ class RoleService:
 
     def list_roles(self, principal: Principal, product_id: str) -> list[Role]:
         self.authz.require(principal, "roles:read", product_id)
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            catalog = load_catalog(tx, product_id)
+            rows = tx.all("SELECT * FROM axentra_roles WHERE product_id = %s ORDER BY key", (product_id,))
+        # Built-in roles as they apply in this product (including product-defined permissions).
         roles = [
             Role(
                 id=None,
@@ -33,13 +56,11 @@ class RoleService:
                 name=r.name,
                 description=r.description,
                 scope=r.scope,
-                permissions=sorted(r.permissions),
+                permissions=sorted(catalog.builtin_role(r.key)),
                 builtin=True,
             )
             for r in BUILTIN_ROLES.values()
         ]
-        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
-            rows = tx.all("SELECT * FROM axentra_roles WHERE product_id = %s ORDER BY key", (product_id,))
         roles += [
             Role(
                 id=r["id"],
@@ -56,9 +77,11 @@ class RoleService:
         return roles
 
     @staticmethod
-    def _check(scope: str, permissions: list[str]) -> list[str]:
-        perms = validate_permissions(permissions)
-        allowed = (PRODUCT | TENANT) if scope == "product" else TENANT
+    def _check(tx: Tx, product_id: str, scope: str, permissions: list[str]) -> list[str]:
+        """Built-in names plus the product's active permissions; tenant roles only tenant-scoped ones."""
+        catalog: ProductCatalog = load_catalog(tx, product_id)
+        perms = validate_permissions(permissions, product_permissions=catalog.scopes)
+        allowed = (PRODUCT | TENANT | catalog.names) if scope == "product" else catalog.tenant_mask
         bad = sorted(perms - allowed)
         if bad:
             raise ValidationFailed(f"permissions not allowed for a {scope} role: {', '.join(bad)}")
@@ -80,10 +103,10 @@ class RoleService:
             raise ValidationFailed("scope must be product or tenant")
         if key in BUILTIN_ROLES:
             raise Conflict("this key belongs to a built-in role")
-        perms = self._check(scope, permissions)
         rid = new_id("rol")
         try:
             with self.db.transaction(DbScope.product(product_id)) as tx:
+                perms = self._check(tx, product_id, scope, permissions)
                 tx.execute(
                     "INSERT INTO axentra_roles (id, product_id, key, name, description, scope, permissions)"
                     " VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -124,7 +147,11 @@ class RoleService:
             )
             if if_match is not None and row["version"] != if_match:
                 raise PreconditionFailed("the role was changed by someone else")
-            perms = self._check(row["scope"], permissions) if permissions is not None else row["permissions"]
+            perms = (
+                self._check(tx, product_id, row["scope"], permissions)
+                if permissions is not None
+                else row["permissions"]
+            )
             tx.execute(
                 "UPDATE axentra_roles SET name = %s, description = %s, permissions = %s, version = version + 1,"
                 " updated_at = now() WHERE id = %s",

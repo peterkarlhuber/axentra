@@ -1273,6 +1273,17 @@
             "title": "Name",
             "type": "string"
           },
+          "original_content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Content Type"
+          },
           "product_id": {
             "title": "Product Id",
             "type": "string"
@@ -1300,6 +1311,11 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "stored_inert": {
+            "default": false,
+            "title": "Stored Inert",
+            "type": "boolean"
           },
           "tenant_id": {
             "title": "Tenant Id",
@@ -3460,6 +3476,28 @@
       },
       "PermissionInfo": {
         "properties": {
+          "declared_by": {
+            "anyOf": [
+              {
+                "enum": [
+                  "code",
+                  "api"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared By"
+          },
+          "default_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Default Roles",
+            "type": "array"
+          },
           "description": {
             "title": "Description",
             "type": "string"
@@ -3468,6 +3506,23 @@
             "title": "Name",
             "type": "string"
           },
+          "read_like": {
+            "default": false,
+            "title": "Read Like",
+            "type": "boolean"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
           "scope": {
             "enum": [
               "platform",
@@ -3475,6 +3530,15 @@
               "tenant"
             ],
             "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "default": "builtin",
+            "enum": [
+              "builtin",
+              "product"
+            ],
+            "title": "Source",
             "type": "string"
           }
         },
@@ -4165,6 +4229,50 @@
           "denied_events_24h"
         ],
         "title": "ProductOverview",
+        "type": "object"
+      },
+      "ProductPermissionDeclare": {
+        "properties": {
+          "default_roles": {
+            "description": "Built-in roles that hold it beyond the automatic grants (e.g. member, viewer)",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Default Roles",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "read_like": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only reads data (viewer/support roles hold it); default: name ends in :read",
+            "title": "Read Like"
+          },
+          "scope": {
+            "enum": [
+              "product",
+              "tenant"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "ProductPermissionDeclare",
         "type": "object"
       },
       "ProductStorageUsage": {
@@ -5565,6 +5673,146 @@
           }
         },
         "title": "StatusCounts",
+        "type": "object"
+      },
+      "StoragePolicy": {
+        "description": "The effective content-type policy of a product (``settings.storage`` of the product).",
+        "properties": {
+          "allowed_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Content Types",
+            "type": "array"
+          },
+          "blocked_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Content Types",
+            "type": "array"
+          },
+          "blocked_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocked Extensions",
+            "type": "array"
+          },
+          "blocked_types": {
+            "enum": [
+              "refuse",
+              "store_inert"
+            ],
+            "title": "Blocked Types",
+            "type": "string"
+          },
+          "blocked_types_source": {
+            "enum": [
+              "product",
+              "installation"
+            ],
+            "title": "Blocked Types Source",
+            "type": "string"
+          },
+          "builtin_blocked_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Builtin Blocked Content Types",
+            "type": "array"
+          },
+          "builtin_blocked_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Builtin Blocked Extensions",
+            "type": "array"
+          },
+          "inert_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inert Extensions",
+            "type": "array"
+          },
+          "installation_blocked_types": {
+            "enum": [
+              "refuse",
+              "store_inert"
+            ],
+            "title": "Installation Blocked Types",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "product_version": {
+            "title": "Product Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product_id",
+          "blocked_types",
+          "blocked_types_source",
+          "installation_blocked_types",
+          "blocked_extensions",
+          "blocked_content_types",
+          "inert_extensions",
+          "builtin_blocked_extensions",
+          "builtin_blocked_content_types",
+          "allowed_content_types",
+          "product_version"
+        ],
+        "title": "StoragePolicy",
+        "type": "object"
+      },
+      "StoragePolicySet": {
+        "properties": {
+          "blocked_content_types": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Blocked Content Types",
+            "type": "array"
+          },
+          "blocked_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Blocked Extensions",
+            "type": "array"
+          },
+          "blocked_types": {
+            "anyOf": [
+              {
+                "enum": [
+                  "refuse",
+                  "store_inert"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null: inherit the installation setting (storage.store_blocked_as_inert)",
+            "title": "Blocked Types"
+          },
+          "inert_extensions": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Inert Extensions",
+            "type": "array"
+          }
+        },
+        "title": "StoragePolicySet",
         "type": "object"
       },
       "Subscription": {
@@ -8016,7 +8264,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "The permission catalog",
+        "summary": "The built-in permission catalog",
         "tags": [
           "access"
         ]
@@ -10905,6 +11153,167 @@
         ]
       }
     },
+    "/v1/products/{product_id}/permissions": {
+      "get": {
+        "operationId": "product_permissions_v1_products__product_id__permissions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Also list retired product permissions",
+            "in": "query",
+            "name": "include_retired",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also list retired product permissions",
+              "title": "Include Retired",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PermissionInfo"
+                  },
+                  "title": "Response Product Permissions V1 Products  Product Id  Permissions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Permissions that can be granted in the product (built-in and product-defined)",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/permissions/{name}": {
+      "delete": {
+        "operationId": "retire_permission_v1_products__product_id__permissions__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retire a product permission declared over the API",
+        "tags": [
+          "access"
+        ]
+      },
+      "put": {
+        "operationId": "declare_permission_v1_products__product_id__permissions__name__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductPermissionDeclare"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Declare (create, change or re-activate) a product permission",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/products/{product_id}/restore": {
       "post": {
         "operationId": "restore_product_v1_products__product_id__restore_post",
@@ -11496,6 +11905,118 @@
         "summary": "Update Schedule",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/storage/policy": {
+      "get": {
+        "operationId": "get_policy_v1_products__product_id__storage_policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoragePolicy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "The product's effective content-type policy for blocked file types",
+        "tags": [
+          "files",
+          "storage"
+        ]
+      },
+      "put": {
+        "operationId": "set_policy_v1_products__product_id__storage_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Expected resource version",
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Expected resource version",
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StoragePolicySet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoragePolicy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set the product's content-type policy (stored in the product's settings.storage)",
+        "tags": [
+          "files",
+          "storage"
         ]
       }
     },

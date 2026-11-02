@@ -55,6 +55,7 @@ from axentra_client.models import (
     NewApiKey,
     NewInvitation,
     Page,
+    PermissionInfo,
     Plan,
     Product,
     ProductMember,
@@ -70,6 +71,7 @@ from axentra_client.models import (
 )
 
 M = TypeVar("M", bound=BaseModel)
+PermissionList = list[PermissionInfo]
 Json = dict[str, Any]
 FileContent = bytes | IO[bytes] | str | os.PathLike[str]
 
@@ -542,6 +544,15 @@ class AsyncInvitations(_Resource):
 class AsyncRoles(_Resource):
     async def list(self, product_id: str) -> list[Role]:
         result: list[Role] = await self._c._get(_product(product_id, "roles"), list[Role])
+        return result
+
+    async def permissions(self, product_id: str, *, include_retired: bool = False) -> PermissionList:
+        """Permissions grantable in the product: built-in ones, then the product's own."""
+        result: PermissionList = await self._c._get(
+            _product(product_id, "permissions"),
+            PermissionList,
+            {"include_retired": include_retired or None},
+        )
         return result
 
     async def create(

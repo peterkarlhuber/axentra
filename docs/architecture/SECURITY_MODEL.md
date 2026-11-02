@@ -12,6 +12,7 @@ erDiagram
     axentra_products ||--o{ axentra_product_members : "operators"
     axentra_products ||--o{ axentra_tenants : "has"
     axentra_products ||--o{ axentra_roles : "custom roles"
+    axentra_products ||--o{ axentra_product_permissions : "product-defined permissions"
     axentra_products ||--o{ axentra_api_keys : "keys"
     axentra_tenants ||--o{ axentra_memberships : "members"
     axentra_tenants ||--o{ axentra_invitations : "invitations"
@@ -32,6 +33,7 @@ erDiagram
     axentra_memberships { text id PK "mem_" text product_id FK text tenant_id FK text user_id FK text role }
     axentra_invitations { text id PK "inv_" text tenant_id FK text email text token_hash UK timestamptz expires_at }
     axentra_roles { text id PK "rol_" text product_id FK text key "UK per product" text scope "product|tenant" text_arr permissions }
+    axentra_product_permissions { text product_id PK text name PK "ns.resource:action" text scope "product|tenant" text_arr default_roles text declared_by "code|api" timestamptz retired_at }
     axentra_api_keys { text id PK "key_" text product_id FK text tenant_id "nullable" text secret_hash text_arr permissions timestamptz revoked_at }
     axentra_sessions { text id PK "ses_" text user_id FK text token_hash UK text csrf_token timestamptz expires_at }
     axentra_user_identities { text id PK text user_id FK text provider text subject "UK with provider" }
@@ -44,7 +46,8 @@ used by the OIDC login flow that is being added), `axentra_setup_tokens` (hashed
 tokens), `axentra_rate_limits` (login throttling counters), `axentra_schema_migrations`.
 
 Row-level security is enabled and forced on: products, product_members, tenants, memberships,
-invitations, roles, api_keys, audit_events, records. It is **not** enabled on users,
+invitations, roles, product_permissions, api_keys, audit_events, records (and the module tables,
+see the module docs). It is **not** enabled on users,
 user_identities, platform_roles, sessions, login_states, setup_tokens, rate_limits and
 schema_migrations (see [Limits of RLS](#limits-of-row-level-security)).
 
@@ -64,11 +67,71 @@ tenants in several products. A user sees a product only through a relation to it
 platform admin is created with a one-time setup token (`axentra admin setup-token`, valid
 `security.setup_token_ttl_minutes`, stored hashed, usable only while no platform admin exists).
 
-The permission catalog (`GET /v1/permissions`, `axentra.access.permissions.CATALOG`) has three
-scopes: `platform` (granted only by platform roles, never by API keys or product/tenant roles),
-`product` and `tenant`. Custom product roles may hold product and tenant permissions, custom
-tenant roles only tenant permissions; platform permissions are never allowed. The catalog is fixed
-in code in this version.
+The built-in permission catalog (`GET /v1/permissions`, `axentra.access.permissions.CATALOG`) has
+three scopes: `platform` (granted only by platform roles, never by API keys or product/tenant
+roles), `product` and `tenant`. Custom product roles may hold product and tenant permissions,
+custom tenant roles only tenant permissions; platform permissions are never allowed. Products add
+their own permissions next to the built-in ones (see "Product-defined permissions" below);
+`GET /v1/products/{id}/permissions` lists everything that can be granted in one product.
+
+### Product-defined permissions
+
+A product declares its own permissions, for example `crm.deals:approve` (an example consumer:
+Nodestro's `nodestro.runs:start`). Code in `axentra.access.product_permissions` and
+`axentra.access.product_permission_service`, table `axentra_product_permissions` (migration
+`0008`, forced RLS on `product_id`).
+
+- **Names** are `<namespace>.<resource>:<action>` (regex `PRODUCT_PERMISSION_RE`: lowercase
+  letters, digits and underscores, the namespace may contain dashes, the resource may have up to
+  four dot-separated parts; at most 128 characters). Built-in names contain no dot, so a product
+  permission can never collide with or shadow one. Use the product slug as namespace.
+- **Scope** is `product` or `tenant`, never `platform`. Each has a description, a `read_like` flag
+  (default: the name ends in `:read`) and optional `default_roles` (built-in roles only; tenant
+  roles only for tenant-scoped permissions).
+- **Per product.** Definitions belong to one product (primary key `product_id, name`). Custom
+  roles and API keys are validated against the built-in catalog plus *that* product's active
+  permissions: unknown names, retired names and another product's names are refused with `422`.
+  The authorizer additionally intersects stored role and key permissions with the same set, so a
+  name that reached a row in any other way grants nothing.
+- **Built-in roles.** `platform_admin`, `product_owner` and `product_admin` hold every active
+  product permission, `tenant_owner` and `tenant_admin` every tenant-scoped one (owners and admins
+  keep full control and can hand the new permissions out under the role ceiling).
+  `platform_viewer`, `product_viewer` and `product_support` hold the `read_like` ones. `member`
+  and `viewer` hold only what a definition lists in `default_roles`. `GET .../roles` shows the
+  built-in roles with these additions.
+- **Tenant mask.** A tenant role confers built-in tenant permissions and tenant-scoped product
+  permissions (in its tenant only); product-scoped product permissions need a product role or a
+  product-level API key.
+- **Declaring.** Embedding products register definitions in process
+  (`ax.permissions.register(product_id_or_slug, [ProductPermission(...)])`); `Axentra.start()`
+  mirrors them into the table (`declared_by = code`, audit event `access.permission.sync`), and
+  a registration after start is mirrored at once. Products that do not embed Axentra declare
+  permissions over HTTP (`PUT/DELETE /v1/products/{id}/permissions/{name}`, audit events
+  `access.permission.declare` / `access.permission.retire`). This needs the new product
+  permission `permissions:manage`, held by `product_owner` (and platform admins), not by
+  `product_admin`: a definition changes what built-in roles (for example `member`) hold. Rows
+  registered by code cannot be changed or retired over HTTP (`409`); code takes over rows that
+  were declared over HTTP.
+- **Retirement, never deletion.** A code registration that no longer lists a permission retires
+  it (`retired_at`); `DELETE` does the same for API-declared ones. Retiring never grants anything:
+  a retired name is ignored wherever it is still stored (custom roles, API keys, job kind
+  permission sets) exactly like an unknown name, so holders silently lose its effect. Stored role
+  and key lists are not rewritten, which makes re-declaring the name restore the effect for the
+  same holders; rotating a key drops retired names from the replacement (audit detail
+  `dropped_permissions`). Removing a permission for good therefore means: retire it, then remove
+  it from roles and keys.
+- **Concurrency.** Declarations of one product serialize on an advisory transaction lock. With
+  several processes per product (API, workers), all must register the same definitions: the last
+  process that starts wins, so during a rolling deployment a definition may briefly flip between
+  versions.
+- **Reading the catalog** (`GET /v1/products/{id}/permissions`) needs `roles:read`,
+  `api_keys:read` or `permissions:manage` (the role and key editors); unrelated callers get `404`.
+- **Job kinds** are not bound to one product, so `jobs.declare(enqueue_permission=...,
+  permissions=...)` accepts any syntactically valid product permission name; it takes effect
+  only in products that declare it. Undeclared kinds' handlers hold the built-in product and
+  tenant permissions only.
+- `Authorizer.has/require` are unchanged: they test membership in the effective grant, which now
+  includes active product permissions.
 
 ## Authorization rules
 
@@ -349,6 +412,18 @@ answered with `413` (`payload_too_large`, problem+json) before the body is read,
 is aborted with `413` as soon as it passes the limit. File uploads are exempt and use
 `storage.max_file_bytes` (checked while streaming). Records are additionally capped at 256 KiB.
 
+## Uploaded file types
+
+Executable, HTML, SVG and script files are *blocked* by declared type, file name extension and
+sniffed content (including any `#!` shebang). Each product chooses in its settings whether
+blocked uploads are refused (`415`, the installation default unless
+`storage.store_blocked_as_inert`) or stored inert (`application/octet-stream`, flagged
+`stored_inert`, the declared type kept in `original_content_type` for display only). Products can
+block more extensions and types, and list extensions to accept as inert even when refusing, but
+can never shorten the built-in blocklist. Whatever the policy, a blocked file is never served with
+its real type: downloads are always attachments with `nosniff`, a sandboxing CSP and a safe
+`Content-Type`. Details: docs/modules/STORAGE.md, "Content-type policy".
+
 ## Proxy headers
 
 uvicorn's proxy header handling is disabled. Axentra honours `X-Forwarded-For` only when the TCP
@@ -374,7 +449,7 @@ listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mo
 | Threat | Mitigation | Residual risk / notes |
 |---|---|---|
 | IDOR / BOLA (foreign ids in the path) | Authorizer checks every product/tenant id against the principal; unrelated scopes return `404`; queries filter by product and tenant; RLS confines unfiltered queries; cross-tenant and cross-product tests | Platform-scope queries rely on code review; global users table is not under RLS |
-| Privilege escalation | Deny by default; platform permissions never granted to keys or product roles; key creators cannot grant what they lack; role ceiling on member and operator changes; owner rank; derived keys capped by the parent's expiry and revoked with it; job handlers confined to declared and enqueuer permissions; last-owner/admin guards with row locks | Product roles hold tenant permissions in all tenants by design; keys created by users outlive the user's membership |
+| Privilege escalation | Deny by default; platform permissions never granted to keys or product roles; product-defined permissions validated per product, ignored when retired, declared over HTTP only with `permissions:manage` (owners); key creators cannot grant what they lack; role ceiling on member and operator changes; owner rank; derived keys capped by the parent's expiry and revoked with it; job handlers confined to declared and enqueuer permissions; last-owner/admin guards with row locks | Product roles hold tenant permissions in all tenants by design; keys created by users outlive the user's membership |
 | CSRF | SameSite=Lax cookie, CSRF header token for unsafe cookie requests, Origin allow-list, login CSRF check | Browsers that send no `Origin` rely on the CSRF token alone (sufficient) |
 | XSS | The API returns JSON only (`application/json`, `application/problem+json`) with `nosniff` and a `default-src 'none'` CSP; cookies are HttpOnly | Frontends (product UIs, Studio) must escape data themselves; `/v1/docs` loads Swagger UI assets from a CDN without the strict CSP |
 | SQL injection | Parameterized queries only (psycopg placeholders); dynamic identifiers come from fixed allow-lists (sort fields, regex-checked field names); JSON filters passed as bound `jsonb` | Product code using `ax.db` must follow the same rule |

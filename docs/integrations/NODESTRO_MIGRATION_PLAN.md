@@ -595,13 +595,13 @@ Axentra's jobs module does not exist yet. M7 (notifications/metrics) is additive
 
 | Id | Gap | Why Nodestro needs it | Effort |
 | --- | --- | --- | --- |
-| G-1 | Product-registered permissions (e.g. `nodestro.runs:start`) usable in custom roles and API keys; today `validate_permissions` refuses names outside the static `CATALOG` | Nodestro's `read/edit/run/admin` and key scopes as real Axentra permissions | M |
+| G-1 | Product-registered permissions (e.g. `nodestro.runs:start`) usable in custom roles and API keys. **Done:** `ax.permissions.register(...)`, see SECURITY_MODEL.md "Product-defined permissions" | Nodestro's `read/edit/run/admin` and key scopes as real Axentra permissions | M |
 | G-2 | Migration runner: pre-migration backup hook, "schema too new" refusal, a serving gate (`require_current_schema` equivalent with a compatible range), optional non-transactional steps | Nodestro's runner has these; unification (M9) must not lose them | M |
 | G-3 | Users without e-mail (external identity only) | Nodestro users without verified e-mail | S/M |
 | G-4 | Provider-level option "login allowed without membership, access decided by product" (or keep `allow_signup=true`) and DB-clock comparisons for sessions | Same login semantics as Nodestro | S |
 | G-5 | "Claim an ownerless tenant" one-time token (tenant bootstrap), or accept it stays Nodestro | Nodestro's bootstrap links | S |
 | G-6 | Re-encryption task registry (`axentra secrets reencrypt` with product-registered fields); the CLI command named in `config/secrets.py` does not exist yet | Nodestro's encrypted document fields | S |
-| G-7 | Per-product content-type policy in storage (store code/HTML as inert attachments instead of refusing) | Nodestro accepts `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` inputs (`file_formats.CODE_EXTENSIONS`) | S |
+| G-7 | Per-product content-type policy in storage (store code/HTML as inert attachments instead of refusing). **Done:** `settings.storage.blocked_types = "store_inert"` (or `inert_extensions`), see modules/STORAGE.md | Nodestro accepts `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` inputs (`file_formats.CODE_EXTENSIONS`) | S |
 | G-8 | Jobs module with Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss", lease fencing, cancel request, leader lock, idempotent schedule slots, event streams | M11 | L (planned anyway, P0 in TODO) |
 
 ## 10. Risk register

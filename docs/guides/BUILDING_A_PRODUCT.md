@@ -137,9 +137,29 @@ def get_task(self, principal, tenant_id, task_id):
 
 - `require` raises `NotFound` for callers without any relation to the tenant (no existence oracle)
   and `Forbidden` for related callers without the permission.
-- Product tables reuse `records:read`/`records:write`, because the catalog is fixed for now.
-  Business rules map to existing permissions. Taskboard lets `members:manage` (workspace
-  owner/admin) change the plan.
+- Product tables can reuse `records:read`/`records:write`, or the product declares its own
+  permissions (see below). Taskboard reuses the built-in ones and lets `members:manage`
+  (workspace owner/admin) change the plan.
+- Own permissions: register them once per process, before or after `ax.start()`:
+
+  ```python
+  from axentra.access import ProductPermission
+
+  ax.permissions.register("taskboard", [   # product slug or id
+      ProductPermission("taskboard.tasks:assign", "tenant", "Assign tasks to members",
+                        default_roles=("member",)),
+      ProductPermission("taskboard.boards:read", "tenant", "View boards"),
+      ProductPermission("taskboard.reports:export", "product", "Export product reports"),
+  ])
+  ax.authz.require(principal, "taskboard.tasks:assign", product_id, tenant_id)
+  ```
+
+  Names are `<namespace>.<resource>:<action>` (use the product slug as namespace). Owners and
+  admins hold them automatically (tenant owners/admins the tenant-scoped ones), viewer/support
+  roles the read-like ones, `member`/`viewer` what `default_roles` lists; custom roles and API
+  keys made in Studio can carry them. A permission that a later registration no longer lists is
+  retired and grants nothing anymore. Rules: docs/architecture/SECURITY_MODEL.md,
+  "Product-defined permissions".
 - When the product, not the user, decides an action is allowed (for example creating the
   workspace at signup, or recording usage), act as `Principal.system("taskboard")` *after*
   checking the user. Never pass a system principal for something the user asked for without such a check.

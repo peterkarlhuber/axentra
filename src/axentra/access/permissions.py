@@ -12,11 +12,18 @@ Access is denied unless a role or API key grants the permission explicitly.
 Holding ``members:manage`` / ``product_members:manage`` does not let a principal hand out more
 than it holds: role assignment is capped by the caller's own permissions (the "role ceiling", see
 :mod:`axentra.tenancy.service`).
+
+Besides this built-in catalog, products declare their own permissions
+(:mod:`axentra.access.product_permissions`). Their names are namespaced,
+``<namespace>.<resource>:<action>`` (for example ``crm.deals:approve``), so they can never collide
+with a built-in name (built-in names contain no dot).
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+import re
 from typing import Literal
 
 PermScope = Literal["platform", "product", "tenant"]
@@ -42,6 +49,9 @@ CATALOG: tuple[PermissionDef, ...] = (
     PermissionDef("product:manage", "product", "Edit product details and settings"),
     PermissionDef("product_members:read", "product", "View product operators"),
     PermissionDef("product_members:manage", "product", "Add, change and remove product operators"),
+    PermissionDef(
+        "permissions:manage", "product", "Declare and retire the product's own permissions over the API"
+    ),
     PermissionDef("product_users:read", "product", "View users who belong to the product's tenants"),
     PermissionDef("tenants:read", "product", "List tenants"),
     PermissionDef("tenants:create", "product", "Create tenants"),
@@ -89,6 +99,22 @@ PLATFORM = frozenset(p.name for p in CATALOG if p.scope == "platform")
 PRODUCT = frozenset(p.name for p in CATALOG if p.scope == "product")
 TENANT = frozenset(p.name for p in CATALOG if p.scope == "tenant")
 READS = frozenset(p for p in ALL if p.endswith(":read"))
+
+#: Product-defined permission names: ``<namespace>.<resource>:<action>``; the resource may have
+#: further dot-separated parts (``crm.deals.notes:edit``). At most 128 characters.
+PRODUCT_PERMISSION_RE = re.compile(
+    r"^[a-z][a-z0-9_-]{0,39}\.[a-z][a-z0-9_]{0,39}(?:\.[a-z][a-z0-9_]{0,39}){0,3}:[a-z][a-z0-9_]{0,39}$"
+)
+MAX_PRODUCT_PERMISSION_LENGTH = 128
+
+
+def is_product_permission_name(name: str) -> bool:
+    """Whether ``name`` has the syntax of a product-defined permission (never a built-in name)."""
+    return (
+        len(name) <= MAX_PRODUCT_PERMISSION_LENGTH
+        and PRODUCT_PERMISSION_RE.match(name) is not None
+        and name not in ALL
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,8 +168,9 @@ BUILTIN_ROLES: dict[str, BuiltinRole] = {
             "product_admin",
             "Product admin",
             "product",
-            "Manages tenants, roles, keys and data; cannot manage product operators",
-            (PRODUCT - {"product_members:manage"}) | TENANT,
+            "Manages tenants, roles, keys and data; cannot manage product operators or declare"
+            " product permissions",
+            (PRODUCT - {"product_members:manage", "permissions:manage"}) | TENANT,
         ),
         BuiltinRole(
             "product_support",
@@ -182,11 +209,24 @@ PLATFORM_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 
 
 def validate_permissions(
-    perms: list[str] | set[str] | frozenset[str], *, allow_platform: bool = False
+    perms: list[str] | set[str] | frozenset[str],
+    *,
+    allow_platform: bool = False,
+    product_permissions: Mapping[str, str] | None = None,
+    any_product_name: bool = False,
 ) -> frozenset[str]:
+    """Refuse unknown names (422) and, unless ``allow_platform``, platform permissions.
+
+    ``product_permissions`` (name -> scope) are the active product-defined permissions of the
+    product the names are used in; they count as known. ``any_product_name`` accepts every
+    syntactically valid product permission name (for definitions that are not bound to one product,
+    such as job kinds; the authorizer still grants only names the product has declared)."""
     from axentra.core.errors import ValidationFailed
 
-    unknown = sorted(set(perms) - ALL)
+    known = ALL | frozenset(product_permissions or ())
+    unknown = sorted(
+        p for p in set(perms) if p not in known and not (any_product_name and is_product_permission_name(p))
+    )
     if unknown:
         raise ValidationFailed(f"unknown permissions: {', '.join(unknown)}")
     if not allow_platform and set(perms) & PLATFORM:
