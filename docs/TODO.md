@@ -71,7 +71,7 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 
 | Pri | Area | Item |
 |---|---|---|
-| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md`: generic gaps G-1 (product-defined permissions), G-3, G-4, G-6 (re-encryption registry) and G-7 (per-product content-type policy) are done; G-2 follow-ups are listed above. Nodestro uses Axentra as a library in its server profile (Python 3.11+ only via an extra marker; see nodestro-runtime docs/AXENTRA.md) |
+| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md`: generic gaps G-1 (product-defined permissions), G-3, G-4, G-6 (re-encryption registry) and G-7 (per-product content-type policy) are done; G-2 follow-ups are listed above. Phase 6 is done on the Axentra side (see ROADMAP.md). Nodestro uses Axentra as a library in its server profile (Python 3.11+ only via an extra marker; see nodestro-runtime docs/AXENTRA.md) |
 | Rejected | integration | G-5 (claim token for ownerless tenants): rejected for now. Nodestro's setup links must keep working in every identity mode and across a rollback, so they stay in Nodestro's table and travel through Axentra's OIDC login as host context (`start(context=...)`); a generic claim token is worth adding only for a product without its own store |
 | Rejected | jobs | G-8 "jobs module with Nodestro's semantics" (configurable at-most-once delivery, unique active key per `(tenant, kind, ref)`, interrupt-on-lease-loss callbacks, product capacity gates): rejected by architecture decision 2026-11-02. Nodestro's no-duplicate guarantee lives in its run fence, interrupted state, tool journal and approval checkpoints, not in the queue, so these options would be Nodestro semantics in a generic module that no other product needs; Nodestro keeps its run queue permanently (M11 closed; nodestro-runtime `docs/AXENTRA.md`). Axentra jobs stay at least once (`max_attempts=1` for no retry); evidence: `tests/integration/test_job_delivery_semantics.py` |
 | P3 | notify | Inbox channel: HTTP routes and an Axentra Studio page (today a host serves it through its own API, as Nodestro does) |
@@ -90,8 +90,11 @@ These are current, deliberate or accepted properties; some have an item above.
   logins of that account for up to a minute (accepted trade-off, see SECURITY_MODEL.md).
 - Job kinds and their handler permissions are declared in process (`ax.jobs.register`/`declare`);
   an API process that does not declare a kind refuses it to tenant callers (fail closed).
-- Product permissions registered in process are mirrored at start; with several processes of one
-  product the last start wins (a rolling deployment may briefly flip a definition). Retired
+- Product permissions registered in process without versioned access definitions are mirrored at
+  start, and with several processes of one product the last start wins (a rolling deployment may
+  briefly flip a definition). A product that applies `ax.access_definitions` (migration `0009`) is
+  deterministic instead: an older revision is skipped (an old process never downgrades) and the
+  same revision with other content is refused (409). Retired
   permissions stay listed in custom roles and API keys (without effect) until removed there.
 - The general rate limit is off by default and per process (N processes allow N times the rate);
   the request body limit does not protect against slow clients (use the reverse proxy).

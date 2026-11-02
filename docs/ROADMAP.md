@@ -68,11 +68,13 @@ and compose validation in CI, dependency audit and bandit in CI. Backend hardeni
 rotation with `axentra secrets reencrypt`, record audit events, request body and rate limits,
 production default for API docs, product migration discovery for `axentra migrate`.
 
-## Phase 6: Nodestro integration preparation (plan written, analysis only)
+## Phase 6: Nodestro integration (done on the Axentra side, 2026-11-02)
 
 The migration plan [integrations/NODESTRO_MIGRATION_PLAN.md](integrations/NODESTRO_MIGRATION_PLAN.md)
-describes how Nodestro could adopt Axentra, based on
-[NODESTRO_REUSE.md](architecture/NODESTRO_REUSE.md). No code changes in Nodestro, and no
-dependency of Axentra on Nodestro. The migration itself is a separate, optional future project,
-not a prerequisite for any Axentra release; the generic Axentra gaps it lists (G-1 to G-8) are
-tracked like any other Axentra work.
+(based on [NODESTRO_REUSE.md](architecture/NODESTRO_REUSE.md)) is carried out: Nodestro's server profile uses
+Axentra as a library, every part behind its own switch and off by default (see nodestro-runtime `docs/AXENTRA.md`).
+Axentra still does not depend on Nodestro. The generic gaps are closed: G-1, G-3, G-4, G-6 and G-7 done, G-2 done
+with the follow-ups in [TODO.md](TODO.md), G-5 rejected, G-8 rejected by architecture decision (Nodestro keeps its
+run queue). Axentra-side additions of this phase: versioned access definitions (`0009`), the inbox channel
+(`0010`), metrics helpers, embedding in a host transaction and a host connection pool. Enabling any of it in a
+Nodestro production environment is a separate decision and not part of this phase.
