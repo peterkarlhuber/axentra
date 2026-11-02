@@ -35,7 +35,7 @@ import logging
 import threading
 import time
 from typing import Any
-from urllib.parse import quote_plus, urlencode, urlsplit
+from urllib.parse import quote_plus, urlencode, urlsplit, urlunsplit
 
 import httpx
 import jwt
@@ -144,6 +144,13 @@ def login_error_url(login_page: str, return_to: str | None, code: str) -> str:
             page = origin + path + (f"?{page_parts.query}" if page_parts.query else "")
     sep = "&" if "?" in page else "?"
     return f"{page}{sep}{urlencode({'login_error': code})}"
+
+
+def with_query_param(url: str, key: str, value: str) -> str:
+    """``url`` with ``key=value`` added to its query (path or absolute URL; the fragment is kept)."""
+    parts = urlsplit(url)
+    extra = urlencode({key: value})
+    return urlunsplit(parts._replace(query=f"{parts.query}&{extra}" if parts.query else extra))
 
 
 def _b64url(data: bytes) -> str:
@@ -423,6 +430,8 @@ class LoginResult:
     user_id: str
     return_to: str
     invitation_accepted: bool = False
+    #: The tenant of the invitation accepted right after the login (``invitation`` on start), if any.
+    invitation_tenant_id: str | None = None
     #: The host context given to :meth:`OidcService.start` (empty when none was given).
     context: dict[str, str] = field(default_factory=dict)
     identity: ExternalIdentity | None = None
@@ -686,6 +695,7 @@ class OidcService:
             else None
         )
         accepted = False
+        tenant_id: str | None = None
         if invitation and self.accept_invitation is not None:
             principal = Principal(
                 actor=Actor(
@@ -699,8 +709,9 @@ class OidcService:
                 ip=ip,
             )
             try:
-                self.accept_invitation(principal, invitation)
+                membership = self.accept_invitation(principal, invitation)
                 accepted = True
+                tenant_id = getattr(membership, "tenant_id", None)
             except AxentraError as exc:
                 # The login stands; the invitation can still be accepted explicitly.
                 logger.info("invitation not accepted after OIDC login: %s", exc.detail)
@@ -709,6 +720,7 @@ class OidcService:
             user_id=user_id,
             return_to=row["return_to"],
             invitation_accepted=accepted,
+            invitation_tenant_id=tenant_id if isinstance(tenant_id, str) else None,
             context=context,
             identity=identity,
         )
