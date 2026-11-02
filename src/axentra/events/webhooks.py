@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import random
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +24,7 @@ from psycopg.types.json import Jsonb
 from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
 from axentra.config.secrets import SecretBox
-from axentra.config.settings import Settings
+from axentra.config.settings import EventsSettings, Settings
 from axentra.core.clock import utcnow
 from axentra.core.context import Principal
 from axentra.core.errors import Conflict, NotFound, PreconditionFailed, ValidationFailed
@@ -46,6 +47,18 @@ SIGNATURE_HEADER = "Axentra-Signature"
 PING_TYPE = "axentra.ping"
 MAX_EVENT_TYPES = 50
 MAX_GRACE_SECONDS = 7 * 86400
+
+
+def webhook_retry_delay(attempt: int, events: EventsSettings, *, rng: random.Random | None = None) -> float:
+    """Seconds to wait after failed attempt ``attempt`` (1-based) before the next delivery attempt.
+
+    Webhooks use their own schedule (``events.webhook_backoff_base_seconds`` doubling per attempt,
+    capped at ``events.webhook_backoff_max_seconds``, with the job queue's "equal jitter"), not the
+    short job backoff: a receiver that is down for a while must not lose its events after minutes.
+    """
+    return backoff_delay(
+        attempt, events.webhook_backoff_base_seconds, events.webhook_backoff_max_seconds, rng=rng
+    )
 
 
 def sign(secret: str, timestamp: int, body: bytes) -> str:
@@ -593,11 +606,7 @@ class WebhookService:
         final = refused or ctx.job.attempts >= ctx.job.max_attempts
         delay = None
         if not ok and not final:
-            delay = backoff_delay(
-                ctx.job.attempts,
-                self.settings.events.backoff_base_seconds,
-                self.settings.events.backoff_max_seconds,
-            )
+            delay = webhook_retry_delay(ctx.job.attempts, self.settings.events)
         status = self._record(ctx.scope, delivery_id, result, error, final=final, next_attempt_in=delay)
         if ok:
             return {"status": result.status if result else None, "delivery_id": delivery_id}
@@ -616,4 +625,5 @@ __all__ = [
     "sign",
     "signature_header",
     "verify_signature",
+    "webhook_retry_delay",
 ]
