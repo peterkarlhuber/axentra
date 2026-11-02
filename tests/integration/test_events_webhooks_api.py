@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
@@ -24,6 +25,8 @@ ALLOW_LOCAL = {
         "webhook_allow_http": True,
         "backoff_base_seconds": 0.01,
         "backoff_max_seconds": 0.02,
+        "webhook_backoff_base_seconds": 0.01,
+        "webhook_backoff_max_seconds": 0.02,
         "listen_notify": False,
         "webhook_timeout_seconds": 3,
         "webhook_max_attempts": 3,
@@ -178,6 +181,38 @@ def test_webhook_retries_then_dead_and_redeliver(lworld, receiver):
     assert dl["status"] == "succeeded" and dl["attempts"] == 4
     # All four requests carried the same event id (receivers deduplicate on it).
     assert len({r["headers"]["Axentra-Event-Id"] for r in receiver.requests}) == 1
+
+
+def test_failed_delivery_waits_by_the_webhook_schedule_not_the_job_backoff(ax_factory, receiver):
+    """A failing delivery is retried after ``webhook_backoff_*`` (minutes to hours), while the job
+    backoff (here 10 ms) stays in force for ordinary jobs."""
+    events = {
+        **ALLOW_LOCAL["events"],
+        "webhook_backoff_base_seconds": 600,
+        "webhook_backoff_max_seconds": 900,
+    }
+    ax = ax_factory(events=events)
+    app = create_app(axentra=ax, start=False)
+    w = World(ax=ax, app=app, admin=bootstrap_admin(ax, app))
+    pid, t1, _ = _product(w)
+    receiver.statuses = [503, 503, 503]
+    wid = w.admin.post(
+        f"/v1/products/{pid}/webhooks", json={"url": receiver.url, "event_types": ["*"]}
+    ).json()["endpoint"]["id"]
+    ax.events.publish(SYS, pid, t1, "order.created", {"n": 1})
+    before = time.time()
+    _drain(ax, rounds=5)
+    after = time.time()
+    # Only the first attempt ran: the retry is 300-600 s away (equal jitter of the 600 s step).
+    assert len(receiver.requests) == 1
+    dl = w.admin.get(f"/v1/products/{pid}/webhooks/{wid}/deliveries").json()["items"][0]
+    assert dl["status"] == "failed" and dl["attempts"] == 1 and dl["response_code"] == 503
+    next_at = datetime.fromisoformat(dl["next_attempt_at"]).timestamp()
+    assert before + 300 - 1 <= next_at <= after + 600 + 1
+    job = w.admin.get(f"/v1/products/{pid}/jobs/{dl['job_id']}").json()
+    assert job["status"] == "queued" and job["attempts"] == 1
+    run_after = datetime.fromisoformat(job["run_after"]).timestamp()
+    assert abs(run_after - next_at) < 2
 
 
 def test_ssrf_refusals(ax_factory, receiver, monkeypatch):

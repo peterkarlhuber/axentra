@@ -64,10 +64,28 @@ RFC 9457 problem details, `application/problem+json`:
  "code": "not_found", "detail": "...", "request_id": "req_..."}
 ```
 
-`code` is stable and machine readable (`validation_failed`, `unauthenticated`, `forbidden`,
-`not_found`, `conflict`, `precondition_failed`, `rate_limited`, `quota_exceeded`,
-`mode_not_supported`, `internal`). Validation errors add `errors: [{loc, msg}]`. Details never
-contain secrets, tokens, SQL or stack traces.
+`code` is stable and machine readable. The codes a client can receive:
+
+| Status | Codes |
+| ------ | ----- |
+| 400 | `bad_request` (unreadable request), `validation_failed`, `invalid_signature` (billing provider webhook) |
+| 401 | `unauthenticated` |
+| 403 | `forbidden`, `reauthentication_required` |
+| 404 | `not_found`, `module_disabled` |
+| 405 | `method_not_allowed` |
+| 409 | `conflict`, `setup_already_completed`, `email_taken`, `mode_not_supported`, `payment_provider_not_configured` |
+| 412 | `precondition_failed` |
+| 413 | `payload_too_large` |
+| 415 | `unsupported_media_type` |
+| 422 | `validation_failed` |
+| 429 | `rate_limited`, `quota_exceeded` |
+| 5xx | `internal` (never with details) |
+| other | `error` (a framework-level HTTP error without a more specific code) |
+
+More specific codes may be added within a status (for example `setup_already_completed` and
+`email_taken` are conflicts); a client that does not know a code handles it by its HTTP status.
+Validation errors add `errors: [{loc, msg}]`. Details never contain secrets, tokens, SQL or stack
+traces.
 
 ## Correlation
 

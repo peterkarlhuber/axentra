@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from axentra.api.app import create_app
+from axentra.core.errors import Conflict, EmailTaken, SetupAlreadyCompleted
+from axentra.data.database import DbScope
 from tests.integration.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, Browser
 
 
@@ -21,6 +24,8 @@ def test_setup_token_is_single_use(world):
         json={"setup_token": token, "email": "x@example.com", "password": "another long password"},
     )
     assert r.status_code == 409  # an admin exists already
+    assert r.json()["code"] == "setup_already_completed"
+    assert r.json()["type"].endswith("/setup_already_completed")
     r = world.browser().post(
         "/v1/auth/setup",
         json={"setup_token": "axsetup_wrong", "email": "y@example.com", "password": "another long password"},
@@ -177,3 +182,27 @@ def test_request_id_is_propagated_or_replaced(world):
     c = world.browser()
     assert c.get("/v1/meta", headers={"X-Request-ID": "abc-123"}).headers["X-Request-ID"] == "abc-123"
     assert c.get("/v1/meta", headers={"X-Request-ID": "bad id\n"}).headers["X-Request-ID"].startswith("req_")
+
+
+def test_setup_with_a_taken_email_is_a_distinct_conflict(ax):
+    """Both setup conflicts stay 409 (and ``Conflict`` subclasses) but carry their own codes."""
+    assert issubclass(SetupAlreadyCompleted, Conflict) and issubclass(EmailTaken, Conflict)
+    assert SetupAlreadyCompleted.status == EmailTaken.status == 409
+    app = create_app(axentra=ax, start=False)
+    # A user without a platform role (for example created by an OIDC sign-in) has the address.
+    with ax.db.transaction(DbScope.platform()) as tx:
+        ax.identity.create_user(tx, email="Taken@Example.com", name="Taken")
+    token = ax.identity.create_setup_token()
+    r = Browser(app).post(
+        "/v1/auth/setup",
+        json={"setup_token": token, "email": "taken@example.com", "password": "another long password"},
+    )
+    assert r.status_code == 409
+    assert r.json()["code"] == "email_taken"
+    assert r.json()["detail"] == "a user with this email address exists"
+    # The token was not used up: setup with another address succeeds.
+    r = Browser(app).post(
+        "/v1/auth/setup",
+        json={"setup_token": token, "email": "admin2@example.com", "password": "another long password"},
+    )
+    assert r.status_code == 200, r.text

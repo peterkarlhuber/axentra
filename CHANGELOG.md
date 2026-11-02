@@ -35,6 +35,19 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   key id over every column) for hosts that check their keyring against stored values. A test scans
   every text column of every Axentra table after a rotation and finds no value under the old key.
 
+### Changed
+- Webhook deliveries retry on their own schedule instead of the job backoff (2 s doubling), which
+  made a delivery `dead` about 2-4 minutes after the first attempt, so a short receiver outage
+  lost events. New `[events]` settings `webhook_backoff_base_seconds` (default 120) and
+  `webhook_backoff_max_seconds` (default 21600, must not be below the base); same jitter as jobs.
+  With the default 8 attempts the retries now span about 2.1 to 4.2 hours
+  (docs/modules/EVENTS_AND_JOBS.md). Ordinary jobs keep `backoff_*`.
+- Setup and user-creation conflicts carry distinct codes (still HTTP 409 and subclasses of
+  `Conflict`, so existing handling keeps working): `setup_already_completed` when a platform
+  admin already exists, `email_taken` when another user has the email address
+  (`axentra.core.errors.SetupAlreadyCompleted`, `EmailTaken`). Clients no longer need to parse the
+  message. docs/architecture/API_CONVENTIONS.md lists every error code a client can receive.
+
 ### Fixed
 - Product operators can read a suspended tenant's record again, so they can reactivate it:
   `GET /v1/products/{p}/tenants/{t}` now accepts `tenants:read` held for the whole product (product
