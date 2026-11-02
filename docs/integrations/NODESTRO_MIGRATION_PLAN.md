@@ -1,7 +1,8 @@
 # Nodestro on Axentra: migration plan
 
-Status: **analysis and plan only (Roadmap Phase 6)**, 2026-11-01. Author: Claude, for the Axentra project.
-Nothing described here is implemented. No Nodestro repository was changed; they were read at the commits below.
+Status: **plan of 2026-11-01, carried out by 2026-11-02** (Roadmap Phase 6). Author: Claude, for the Axentra project.
+The plan text below is kept as written; where the implementation differs, a note says so (sections 4.6 and 8).
+The implemented state, its switches and the legacy-removal preconditions are in nodestro-runtime `docs/AXENTRA.md`.
 
 > **This migration is a separate, future project.** It is *not* a prerequisite for Axentra, for any Axentra
 > release or for Axentra Studio. Axentra stays independent: it never imports, installs, pins or calls Nodestro or
@@ -413,6 +414,15 @@ class has a mapping.
 
 ### 4.6 Feature flags and dual read
 
+> **As implemented (2026-11-02).** The switches differ from this table: `NODESTRO_AXENTRA` (`off`/`on`) opens
+> Axentra at all; `NODESTRO_AXENTRA_AUDIT`, `_USAGE`, `_RUN_USAGE` and `_NOTIFY` turn on one mirror or channel
+> each; `NODESTRO_SECRETS_FORMAT` (`v1`/`axs1`) picks the format new secrets are written in (both are always
+> read); `NODESTRO_IDENTITY_BACKEND` (`nodestro`/`mirror`/`axentra`) and `NODESTRO_FILES_BACKEND`
+> (`volume`/`axentra`) pick the primary store. There are no `shadow` modes and no `only` values: the mirror runs
+> in application code in the same transaction, and removing a legacy path is a code change under the M12
+> preconditions, not a flag value. API keys (M6) and jobs (M11) have no switch: M6 waits for published APIs on
+> the server, and M11 was closed by decision (Nodestro keeps its run queue).
+
 One flag per function, read at start-up (Nodestro settings are immutable per process; a flag change is a rolling
 restart):
 
@@ -576,6 +586,11 @@ corpus; jobs last because they carry side effects and cost (a duplicate or lost 
 Axentra's jobs module does not exist yet. M7 (notifications/metrics) is additive and can move earlier.
 
 ## 8. Rollback and parallel operation
+
+> **As implemented (2026-11-02).** No database triggers were built; mirrors are written by Nodestro's adapters in
+> the same transaction, and `reconcile`/`reconcile-identity` report drift. The way back is the switch back to its
+> default (identity `axentra -> mirror -> nodestro`, files with `files export-volume`, secrets keep both formats
+> readable and a start check refuses a rollback that would leave values unreadable). Jobs were never moved.
 
 - **Strangler pattern.** Nodestro's interfaces (`IdentityStore`, `SessionResolver`, `ApiKeys`, `SecretBox`,
   `_Blobs`, `JobQueue`) stay; implementations are swapped behind them, chosen by flag at start-up. The old

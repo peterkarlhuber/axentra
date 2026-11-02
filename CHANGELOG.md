@@ -6,6 +6,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+- Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
+  rollback differ from the plan (sections 4.6 and 8).
+
 ### Changed
 - New official Axentra logo. `assets/branding/` now holds the two logo masters
   (`axentra-logo-transparent.png`, `axentra-logo-white.png`), the vendored derivation script
