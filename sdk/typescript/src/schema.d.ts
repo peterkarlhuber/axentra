@@ -119,15 +119,17 @@ export interface paths {
         /**
          * Start an OpenID Connect login (redirects to the identity provider)
          * @description ``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``);
-         *     query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed.
-         *     ``invitation``: deprecated, use the ``POST`` start for logins with an invitation.
+         *     query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed
+         *     and never used as an invitation. ``invitation``: refused, use the ``POST`` start.
          */
         get: operations["oidc_start_v1_auth_oidc__provider__start_get"];
         put?: never;
         /**
          * Start an OpenID Connect login with the invitation in the body (no secret in any URL)
-         * @description The ``GET`` start with the same fields as a JSON body, for logins that carry an invitation
-         *     token: a URL query ends up in proxy access logs and ``Referer`` headers, a request body does not.
+         * @description The ``GET`` start with the same fields as a JSON body, and the only start that takes an
+         *     invitation token: it checks ``Origin`` (a cross-site page cannot start a login with an
+         *     invitation), and a URL query ends up in proxy access logs and ``Referer`` headers, a request
+         *     body does not.
          *     Sets the same login cookie (send it with credentials) and answers the URL to navigate to.
          */
         post: operations["oidc_start_post_v1_auth_oidc__provider__start_post"];
@@ -3112,7 +3114,7 @@ export interface components {
         OidcStartRequest: {
             /**
              * Invitation
-             * @description An invitation token: lets the invited email sign up and accepts the invitation right after the login. Stored encrypted with the login state, never in a URL.
+             * @description An invitation token: lets the invited email sign up and accepts the invitation right after the login. Stored encrypted with the login state, never in a URL. The only way to carry an invitation into a login (the `GET` start refuses one, and a token in `return_to` is removed, never used).
              */
             invitation?: string | null;
             /**
@@ -4875,7 +4877,7 @@ export interface operations {
             query?: {
                 /**
                  * @deprecated
-                 * @description Deprecated: a URL query is recorded by proxies that log full URLs. Send the invitation token in the body of `POST /v1/auth/oidc/{provider}/start`.
+                 * @description Refused: a start with an invitation token goes to the login page with `?login_error=invitation_requires_post`, without a login. This link has no `Origin` check, and a URL query is recorded by proxies that log full URLs. Send the invitation in the body of `POST /v1/auth/oidc/{provider}/start`.
                  */
                 invitation?: string | null;
                 return_to?: string | null;

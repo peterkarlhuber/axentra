@@ -89,8 +89,12 @@ Authorization code flow with PKCE (`S256`), `state` and `nonce`.
    `{"return_to": ..., "invitation": "<token>"}` instead (Origin checked like the password login):
    same login state and login cookie, answered with `200 {"redirect_url": ...}` (the provider URL,
    or the login page with `?login_error=`) for the frontend to navigate to, so the token is in no
-   URL that a proxy log, the browser history or a `Referer` could record. `invitation=` on the
-   `GET` start still works but is deprecated for that reason. The login state holds a random
+   URL that a proxy log, the browser history or a `Referer` could record. The `GET` start refuses
+   an invitation (security review round 4, R4-1): it is a plain link without an `Origin` check, so
+   a cross-site page could otherwise make a browser with an identity provider session accept an
+   invitation it never saw. `GET .../start?invitation=<token>` (any non-blank value) starts no
+   login (no state, no login cookie, no provider redirect) and redirects to the login page with
+   `?login_error=invitation_requires_post`; an empty `invitation=` is ignored. The login state holds a random
    `state` (256 bit), `nonce` (192 bit) and PKCE `code_verifier` (384 bit). The database stores the
    SHA-256 hash of `state`; nonce, verifier and invitation token are encrypted with the secret box
    (context bound to the state hash). The browser gets the login cookie (`__Host-axentra-login`
@@ -134,8 +138,8 @@ redirects and accept at most 1 MiB.
   has both `allow_signup = true` and `allow_signup_without_email = true` (not combinable with
   `allowed_email_domains`); otherwise the login is refused with `email_not_verified`.
 - An unknown verified email creates a user when the provider has `allow_signup = true`, or when an
-  open invitation exists for that email. With an invitation token on `start` (the `POST` body's
-  `invitation`, or the deprecated `invitation=` query), the invitation is
+  open invitation exists for that email. With an invitation token on `start` (only the `POST`
+  body's `invitation`), the invitation is
   also accepted right after the login (tenant membership with the invited role), and the callback
   adds `invitation_accepted=<tenant id>` to the `return_to` query so the frontend does not ask for
   a second confirmation (Studio checks that `/v1/me` lists that tenant before it shows "accepted").
@@ -156,8 +160,9 @@ in any encoding (an `axinv_`/`axk_` token, a JWT, or a nested URL with such a pa
 `return_to=%2Fx%3Ftoken%3D...`) are removed, whatever the path and its spelling (case, trailing
 or repeated slashes, percent-encoding), other parameters keep their exact spelling; a fragment
 holding a secret is dropped, a path holding one makes `return_to` its origin's `/`. An Axentra
-invitation token removed from a `token`/`invitation` parameter is treated like the `invitation`
-field (kept encrypted, accepted after the login of the invited address) unless one was given.
+invitation token removed from a `token`/`invitation` parameter is dropped and never used as the
+login's invitation (security review round 4, R4-1): only the `POST` start's `invitation` field
+carries one.
 
 **Errors** never echo provider text. The browser is redirected to the login page with
 `?login_error=<code>`: `security.login_page` (default `/login`) on the origin of `return_to` when
@@ -175,6 +180,7 @@ an absolute URL). Codes:
 | `signup_disabled` | no account and no open invitation, `allow_signup = false` |
 | `account_disabled` | the user is disabled |
 | `rate_limited` | too many login starts from this IP (6 x `login_rate_per_minute` per minute) |
+| `invitation_requires_post` | the `GET` start got an `invitation`; send it in the body of the `POST` start |
 
 Refused callbacks (after a state was found) are audited as `identity.login` with
 `outcome = denied`, `details = {method: "oidc", provider, reason}`. Details go to the server log.
