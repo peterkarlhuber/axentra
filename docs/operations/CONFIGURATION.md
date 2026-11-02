@@ -136,7 +136,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `s3_access_key_ref`, `s3_secret_key_ref` | none |
 | `max_file_bytes` | `52428800` (50 MiB) |
 | `allowed_content_types` | `[]` (all except always-blocked executable/HTML types) |
-| `store_blocked_as_inert` | `false` (`true`: store executable/HTML/SVG/script uploads as inert `application/octet-stream` attachments instead of refusing them with 415) |
+| `store_blocked_as_inert` | `false` (`true`: store executable/HTML/SVG/script uploads as inert `application/octet-stream` attachments instead of refusing them with 415; the installation default, products override it in `settings.storage.blocked_types`, see modules/STORAGE.md) |
 | `signed_url_ttl_seconds` | `300` (10-86400) |
 
 `[notify]`

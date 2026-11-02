@@ -49,9 +49,23 @@ summary. Permission names in brackets.
 - `GET /v1/users/{uid}/sessions`, `POST /v1/users/{uid}/sessions/revoke` [users:manage]
 
 ## Access
-- `GET /v1/permissions` -> permission catalog `{name, scope, description}`
+- `GET /v1/permissions` -> built-in permission catalog `{name, scope, description, source, read_like, ...}`
+- `GET /v1/products/{pid}/permissions?include_retired=` -> everything grantable in the product: built-in
+  product and tenant permissions (`source: builtin`), then the product's own (`source: product`,
+  with `default_roles`, `declared_by: code|api`, `retired_at`) [roles:read, api_keys:read or permissions:manage]
+- `PUT /v1/products/{pid}/permissions/{name}` `{scope: product|tenant, description, default_roles[], read_like?}`
+  declares (creates, changes, re-activates) a product permission; `DELETE` retires it (`204`,
+  idempotent) [permissions:manage; `409` for permissions registered by the product's code; `422`
+  for names that are not `<namespace>.<resource>:<action>`]. See SECURITY_MODEL.md, "Product-defined permissions"
 - `GET /v1/products/{pid}/roles` (built-in + custom), `POST`, `PATCH/DELETE /v1/products/{pid}/roles/{role_id}` [roles:manage]
 - `GET/POST /v1/products/{pid}/api-keys`, `GET .../{kid}`, `POST .../{kid}/rotate`, `POST .../{kid}/revoke` [api_keys:manage]
+- Custom roles and API keys accept built-in names and the product's active permissions; anything
+  else (unknown, retired, another product's) is `422`
+
+## Storage
+Files, download URLs, usage and quotas: see docs/modules/STORAGE.md.
+- `GET /v1/products/{pid}/storage/policy` -> the effective content-type policy for blocked file types [product:read]
+- `PUT /v1/products/{pid}/storage/policy` `{blocked_types: refuse|store_inert|null, blocked_extensions[], blocked_content_types[], inert_extensions[]}`, `If-Match` (product version) [product:manage]
 
 ## Data (records)
 - `GET /v1/products/{pid}/collections` -> collection stats [records:read]

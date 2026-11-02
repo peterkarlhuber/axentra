@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
+from axentra.access.product_permission_service import ProductPermissionService
 from axentra.access.roles import RoleService
 from axentra.audit.log import AuditLog
 from axentra.billing.service import BillingService
@@ -115,6 +116,8 @@ class Axentra:
         self.identity = IdentityService(self.db, settings, self.audit)
         self.tenancy = TenancyService(self.db, settings, self.authz, self.audit)
         self.roles = RoleService(self.db, self.authz, self.audit)
+        #: Product-defined permissions: ``ax.permissions.register(product, [ProductPermission(...)])``.
+        self.permissions = ProductPermissionService(self.db, self.authz, self.audit)
         self.api_keys = ApiKeyService(self.db, self.authz, self.audit)
         self.records = RecordService(self.db, self.authz, self.audit)
         self.oidc: OidcService | None = None
@@ -133,6 +136,10 @@ class Axentra:
             if settings.module_enabled("storage")
             else None
         )
+        if self.storage is not None:
+            from axentra.storage.policy import check_product_settings
+
+            self.tenancy.product_settings_validators.append(check_product_settings)
         # Observability: metrics registry (ax.metrics.counter(...)) and optional tracing.
         self.metrics = MetricsRegistry()
         register_db_pool_metrics(self.metrics, self.db)
@@ -261,6 +268,8 @@ class Axentra:
                 raise
         if self.settings.mode is DeploymentMode.SINGLE:
             self.tenancy.ensure_single_product()
+        # Mirror product permissions registered in process (later registrations sync at once).
+        self.permissions.sync()
         self._started = True
 
     def single_product(self) -> Product | None:

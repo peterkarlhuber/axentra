@@ -202,6 +202,17 @@ class Role(AxentraModel):
     version: int = 0
 
 
+class PermissionInfo(AxentraModel):
+    name: str
+    scope: str
+    description: str = ""
+    source: str = "builtin"
+    read_like: bool = False
+    default_roles: list[str] = Field(default_factory=list)
+    declared_by: str | None = None
+    retired_at: datetime | None = None
+
+
 class ApiKey(AxentraModel):
     id: str
     product_id: str
@@ -246,6 +257,8 @@ class FileInfo(AxentraModel):
     tenant_id: str
     name: str
     content_type: str
+    stored_inert: bool = False
+    original_content_type: str | None = None
     size: int
     sha256: str | None = None
     status: str

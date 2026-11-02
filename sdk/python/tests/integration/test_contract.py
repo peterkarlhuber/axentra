@@ -126,6 +126,10 @@ def test_operators_members_invitations_and_roles(
     )
     assert set(role.permissions) == {"records:read", "files:read"}
     assert any(r.key == "tenant_owner" and r.builtin for r in admin.roles.list(product))
+    catalog = admin.roles.permissions(product)
+    assert {"records:read", "tenant:read"} <= {p.name for p in catalog}
+    assert all(p.source == "builtin" and p.scope != "platform" for p in catalog)
+    assert len(admin.roles.permissions(product, include_retired=True)) == len(catalog)
     assert role.id is not None
     admin.roles.delete(product, role.id)
 

@@ -3,10 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Query, Response
 from pydantic import BaseModel, Field
 
 from axentra.access.models import ApiKey, NewApiKey, PermissionInfo, Role
+from axentra.access.product_permissions import ProductPermission
 from axentra.access.roles import permission_catalog
 from axentra.api.context import Ax, CurrentPrincipal
 from axentra.api.routes.common import IfMatch, parse_if_match
@@ -39,9 +40,67 @@ class ApiKeyRotate(BaseModel):
     grace_seconds: int = Field(default=0, ge=0, le=604800)
 
 
-@router.get("/permissions", response_model=list[PermissionInfo], summary="The permission catalog")
+class ProductPermissionDeclare(BaseModel):
+    scope: Literal["product", "tenant"]
+    description: str = Field(default="", max_length=500)
+    default_roles: list[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Built-in roles that hold it beyond the automatic grants (e.g. member, viewer)",
+    )
+    read_like: bool | None = Field(
+        default=None,
+        description="Only reads data (viewer/support roles hold it); default: name ends in :read",
+    )
+
+
+@router.get("/permissions", response_model=list[PermissionInfo], summary="The built-in permission catalog")
 def permissions(principal: CurrentPrincipal) -> list[PermissionInfo]:
     return permission_catalog()
+
+
+P = "/products/{product_id}/permissions"
+
+
+@router.get(
+    P,
+    response_model=list[PermissionInfo],
+    summary="Permissions that can be granted in the product (built-in and product-defined)",
+)
+def product_permissions(
+    product_id: str,
+    principal: CurrentPrincipal,
+    ax: Ax,
+    include_retired: bool = Query(False, description="Also list retired product permissions"),
+) -> list[PermissionInfo]:
+    return ax.permissions.catalog(principal, product_id, include_retired=include_retired)
+
+
+@router.put(
+    P + "/{name}",
+    response_model=PermissionInfo,
+    summary="Declare (create, change or re-activate) a product permission",
+)
+def declare_permission(
+    product_id: str, name: str, body: ProductPermissionDeclare, principal: CurrentPrincipal, ax: Ax
+) -> PermissionInfo:
+    return ax.permissions.declare(
+        principal,
+        product_id,
+        ProductPermission(
+            name=name,
+            scope=body.scope,
+            description=body.description,
+            default_roles=tuple(body.default_roles),
+            read_like=body.read_like,
+        ),
+    )
+
+
+@router.delete(P + "/{name}", status_code=204, summary="Retire a product permission declared over the API")
+def retire_permission(product_id: str, name: str, principal: CurrentPrincipal, ax: Ax) -> Response:
+    ax.permissions.retire(principal, product_id, name)
+    return Response(status_code=204)
 
 
 R = "/products/{product_id}/roles"

@@ -3,13 +3,23 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PermissionInfo(BaseModel):
     name: str
     scope: Literal["platform", "product", "tenant"]
     description: str
+    source: Literal["builtin", "product"] = "builtin"
+    """``builtin``: Axentra's catalog; ``product``: declared by the product."""
+    read_like: bool = False
+    """Only reads data; viewer and support roles hold read-like product permissions."""
+    default_roles: list[str] = Field(default_factory=list)
+    """Product permissions: built-in roles that hold it beyond the automatic grants."""
+    declared_by: Literal["code", "api"] | None = None
+    """Product permissions: registered by the embedding product's code or declared over the API."""
+    retired_at: datetime | None = None
+    """Product permissions: when it was retired (it grants nothing while retired)."""
 
 
 class Role(BaseModel):

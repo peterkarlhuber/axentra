@@ -20,7 +20,13 @@ from axentra.core.errors import ModuleDisabled, ValidationFailed
 from axentra.core.pagination import Page
 from axentra.platform import Axentra
 from axentra.storage import safety
-from axentra.storage.models import DownloadUrl, FileInfo, ProductStorageUsage, TenantStorageUsage
+from axentra.storage.models import (
+    DownloadUrl,
+    FileInfo,
+    ProductStorageUsage,
+    StoragePolicy,
+    TenantStorageUsage,
+)
 from axentra.storage.service import StorageService
 
 router = APIRouter(prefix="/v1", tags=["files"])
@@ -65,6 +71,15 @@ class DownloadUrlRequest(BaseModel):
 class QuotaSet(BaseModel):
     quota_bytes: int | None = Field(default=None, ge=0, description="null: inherit the product default")
     quota_files: int | None = Field(default=None, ge=0, description="null: inherit the product default")
+
+
+class StoragePolicySet(BaseModel):
+    blocked_types: Literal["refuse", "store_inert"] | None = Field(
+        default=None, description="null: inherit the installation setting (storage.store_blocked_as_inert)"
+    )
+    blocked_extensions: list[str] = Field(default_factory=list, max_length=100)
+    blocked_content_types: list[str] = Field(default_factory=list, max_length=100)
+    inert_extensions: list[str] = Field(default_factory=list, max_length=100)
 
 
 def _svc(ax: Axentra) -> StorageService:
@@ -259,6 +274,36 @@ def product_usage(
     product_id: str, principal: CurrentPrincipal, ax: Ax, limit: Limit = None, cursor: Cursor = None
 ) -> ProductStorageUsage:
     return _svc(ax).product_usage(principal, product_id, limit=limit, cursor=cursor)
+
+
+@router.get(
+    "/products/{product_id}/storage/policy",
+    response_model=StoragePolicy,
+    tags=["storage"],
+    summary="The product's effective content-type policy for blocked file types",
+)
+def get_policy(product_id: str, principal: CurrentPrincipal, ax: Ax) -> StoragePolicy:
+    return _svc(ax).get_policy(principal, product_id)
+
+
+@router.put(
+    "/products/{product_id}/storage/policy",
+    response_model=StoragePolicy,
+    tags=["storage"],
+    summary="Set the product's content-type policy (stored in the product's settings.storage)",
+)
+def set_policy(
+    product_id: str, body: StoragePolicySet, principal: CurrentPrincipal, ax: Ax, if_match: IfMatch = None
+) -> StoragePolicy:
+    return _svc(ax).set_policy(
+        principal,
+        product_id,
+        blocked_types=body.blocked_types,
+        blocked_extensions=body.blocked_extensions,
+        blocked_content_types=body.blocked_content_types,
+        inert_extensions=body.inert_extensions,
+        if_match=parse_if_match(if_match),
+    )
 
 
 @router.get(
