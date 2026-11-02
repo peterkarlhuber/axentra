@@ -76,6 +76,10 @@ class DatabaseSettings(_Section):
     statement_timeout_ms: int = Field(30_000, ge=0)
     allow_superuser: bool = False
     """Superusers bypass row-level security; refused in production unless explicitly allowed."""
+    require_current_schema: bool = False
+    """``Axentra.start()`` refuses to start (``SchemaNotCurrent``) while a registered migration
+    namespace has pending migrations or applied versions unknown to the code; ``/v1/health/ready``
+    then also reports the schema state."""
 
 
 class ProductSettings(_Section):

@@ -26,6 +26,8 @@ def install_observability(app: FastAPI, ax: Axentra) -> None:
         checks = app.state.readiness_checks = {}
     if ax.notify is not None:
         checks["notify_provider"] = ax.notify.check_config
+    if ax.settings.database.require_current_schema:
+        checks["schema"] = ax.schema_ready
 
     tracing = ax.tracing
     if tracing.enabled:

@@ -30,15 +30,26 @@ def _load_modules(ax, names: list[str] | None) -> None:  # type: ignore[no-untyp
 
 def cmd_migrate(args: argparse.Namespace) -> int:
     ax = _ax(args)
-    done = ax.migrate()
+    _load_modules(ax, args.load)
+    done = ax.migrate(allow_newer=args.allow_newer)
     print(json.dumps({"applied": done}))
     return 0
 
 
 def cmd_migrate_status(args: argparse.Namespace) -> int:
     ax = _ax(args)
+    _load_modules(ax, args.load)
     print(json.dumps(ax.migration_runner().status(), indent=2))
     return 0
+
+
+def cmd_migrate_check(args: argparse.Namespace) -> int:
+    """Exit 0 when the schema matches the code, 3 when migrations are pending or unknown."""
+    ax = _ax(args)
+    _load_modules(ax, args.load)
+    result = ax.migration_runner().check(args.namespace or None)
+    print(json.dumps(result.as_dict(), indent=2))
+    return 0 if result.current else 3
 
 
 def cmd_secrets_reencrypt(args: argparse.Namespace) -> int:
@@ -214,7 +225,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     m = sub.add_parser("migrate", help="apply database migrations")
     m.add_argument("--status", action="store_true", help="only show the migration status")
-    m.set_defaults(func=lambda a: cmd_migrate_status(a) if a.status else cmd_migrate(a))
+    m.add_argument(
+        "--check",
+        action="store_true",
+        help="compare schema and code per namespace (pending/unknown versions); exit 3 if not current",
+    )
+    m.add_argument("--namespace", action="append", help="with --check: only these namespaces")
+    m.add_argument(
+        "--allow-newer",
+        action="store_true",
+        help="apply even when the database has migrations this code does not know",
+    )
+    m.add_argument(
+        "--load",
+        action="append",
+        metavar="MODULE",
+        help="import a module that registers migrations (setup(ax))",
+    )
+    m.set_defaults(
+        func=lambda a: (
+            cmd_migrate_check(a) if a.check else cmd_migrate_status(a) if a.status else cmd_migrate(a)
+        )
+    )
 
     w = sub.add_parser("worker", help="run a background job worker (jobs, schedules, webhooks)")
     w.add_argument("--kinds", help="comma-separated job kinds (default: every registered kind)")

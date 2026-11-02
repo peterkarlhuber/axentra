@@ -16,6 +16,7 @@ The HTTP API (``axentra.api``) is a thin layer over exactly these services.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,7 +30,7 @@ from axentra.config.secrets import SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
 from axentra.core.errors import ConfigurationError
 from axentra.data.database import Database
-from axentra.data.migrations import Migration, MigrationRunner, discover_migrations
+from axentra.data.migrations import Migration, MigrationRunner, SchemaCheck, discover_migrations
 from axentra.data.record_service import RecordService
 from axentra.data.reencrypt import EncryptedColumn, ReencryptReport, builtin_encrypted_columns, reencrypt
 from axentra.identity.service import IdentityService
@@ -189,8 +190,40 @@ class Axentra:
         )
         return runner
 
-    def migrate(self) -> list[str]:
-        return self.migration_runner().migrate()
+    def migrate(
+        self,
+        *,
+        allow_newer: bool = False,
+        before_apply: Callable[[list[Migration]], None] | None = None,
+    ) -> list[str]:
+        """Apply pending migrations (see :meth:`MigrationRunner.migrate` for the arguments)."""
+        return self.migration_runner().migrate(allow_newer=allow_newer, before_apply=before_apply)
+
+    def schema_status(self, namespaces: Sequence[str] | None = None) -> SchemaCheck:
+        """Compare the database schema with the code (read through the application pool)."""
+        runner = self.migration_runner()
+        with self.db.pool.connection() as conn:
+            try:
+                return runner.check(namespaces, conn=conn)
+            finally:
+                conn.rollback()
+
+    def require_current_schema(self, namespaces: Sequence[str] | None = None) -> SchemaCheck:
+        """Serving gate: raise ``SchemaNotCurrent`` on pending or unknown migrations."""
+        runner = self.migration_runner()
+        with self.db.pool.connection() as conn:
+            try:
+                return runner.require_current(namespaces, conn=conn)
+            finally:
+                conn.rollback()
+
+    def schema_ready(self) -> bool:
+        """Readiness check: True when the schema is current (False on any error)."""
+        try:
+            return self.schema_status().current
+        except Exception:
+            logger.warning("schema check failed", exc_info=True)
+            return False
 
     def register_encrypted_column(self, column: EncryptedColumn) -> None:
         """Product backends declare their SecretBox columns so key rotation covers them."""
@@ -209,6 +242,12 @@ class Axentra:
         self.db.check_role(
             allow_superuser=self.settings.database.allow_superuser or not self.settings.is_production
         )
+        if self.settings.database.require_current_schema:
+            try:
+                self.require_current_schema()
+            except Exception:
+                self.db.close()
+                raise
         if self.settings.mode is DeploymentMode.SINGLE:
             self.tenancy.ensure_single_product()
         self._started = True
