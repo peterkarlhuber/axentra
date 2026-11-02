@@ -9,6 +9,19 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: Roadmap Phase 6 (Nodestro integration) marked done on the Axentra side; the "last start wins" limitation
   now names versioned access definitions as the deterministic way.
 
+### Changed
+- Webhook deliveries retry on their own schedule instead of the job backoff (2 s doubling), which
+  made a delivery `dead` about 2-4 minutes after the first attempt, so a short receiver outage
+  lost events. New `[events]` settings `webhook_backoff_base_seconds` (default 120) and
+  `webhook_backoff_max_seconds` (default 21600, must not be below the base); same jitter as jobs.
+  With the default 8 attempts the retries now span about 2.1 to 4.2 hours
+  (docs/modules/EVENTS_AND_JOBS.md). Ordinary jobs keep `backoff_*`.
+- Setup and user-creation conflicts carry distinct codes (still HTTP 409 and subclasses of
+  `Conflict`, so existing handling keeps working): `setup_already_completed` when a platform
+  admin already exists, `email_taken` when another user has the email address
+  (`axentra.core.errors.SetupAlreadyCompleted`, `EmailTaken`). Clients no longer need to parse the
+  message. docs/architecture/API_CONVENTIONS.md lists every error code a client can receive.
+
 ### Fixed
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an

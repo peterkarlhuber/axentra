@@ -23,10 +23,12 @@ from axentra.core.clock import utcnow
 from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
 from axentra.core.errors import (
     Conflict,
+    EmailTaken,
     Forbidden,
     NotFound,
     RateLimited,
     ReauthenticationRequired,
+    SetupAlreadyCompleted,
     Unauthenticated,
     ValidationFailed,
 )
@@ -89,7 +91,7 @@ class IdentityService:
             if password is not None:
                 check_policy(password, min_length=self.settings.security.password_min_length, email=email)
             if self.find_user_by_email(tx, email):
-                raise Conflict("a user with this email address exists")
+                raise EmailTaken("a user with this email address exists")
         user_id = new_id("usr")
         tx.execute(
             "INSERT INTO axentra_users (id, email, name, password_hash, locale) VALUES (%s, %s, %s, %s, %s)",
@@ -339,7 +341,7 @@ class IdentityService:
             if row is None:
                 raise Unauthenticated("the setup token is invalid or expired")
             if tx.one("SELECT 1 FROM axentra_platform_roles WHERE role = 'platform_admin' LIMIT 1"):
-                raise Conflict("setup was already completed")
+                raise SetupAlreadyCompleted("setup was already completed")
             user_id = self.create_user(tx, email=email, name=name, password=password)
             tx.execute(
                 "INSERT INTO axentra_platform_roles (user_id, role) VALUES (%s, 'platform_admin')", (user_id,)
