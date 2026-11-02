@@ -5,13 +5,20 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/security/REVIEW-2026-11-01.md).
+Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/security/REVIEW-2026-11-01.md,
+and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 
-## Release
+## Release and verification
 
 | Pri | Area | Item |
 |---|---|---|
-| P0 | release | Fill in `docs/COMPATIBILITY.md` with the merged Axentra and Studio commits (still "to be filled at merge") |
+| P1 | tests | Rerun CI on `master` after the flaky-test fix: `7511a37` had 10/11 jobs green, `test_access.py::test_api_key_lifecycle_and_scope` failed on Python 3.13 (fixed in the report PR; see AXENTRA_IMPLEMENTATION_REPORT.md section 7.3) |
+| P1 | operations | No production deployment has been carried out; no production-like environment exists |
+| P1 | tests | No load or performance tests; no capacity figures for the API, workers, SSE or the job queue |
+| P1 | tests | Provider adapters never exercised against live services: Stripe (only `httpx.MockTransport`), S3 (only moto; no MinIO/AWS), SMTP (only an in-process `aiosmtpd`), OIDC (only an in-process stub IdP). Needs a sandbox run without paid calls |
+| P2 | build | Docker images and compose files are built/validated only in CI (no local Docker in the development environment); the compose stacks are never started (see the deployment-test item below) |
+| P2 | platform | Only Linux is tested (CI `ubuntu-latest`); macOS and Windows are untested for the library, CLI and SDKs |
+| P2 | security | Second independent security review after the fixes of PR #9 (the first review covered `537484f`) |
 
 ## Backend
 
@@ -21,11 +28,17 @@ Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/s
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
 | P1 | identity | Users without an email address: `axentra_users.email` is `NOT NULL` (unique on `lower(email)`), so external-identity-only users (no verified email claim) cannot exist (Nodestro plan G-3) |
 | P1 | library | `AxentraError` is mapped to problem+json only by the HTTP app; library embedders with their own web layer get no handler or mapping helper (an escaping `AxentraError` becomes a 500 there). Provide a documented mapping (status, code, extras) usable outside `axentra.api` |
+| P1 | search | Search module (order section 4 L) is not implemented: no PostgreSQL full-text search, no tenant-scoped search API, no search adapters, no vector search; list endpoints have substring `q` filters only. `search` is still listed in `MODULES` and reported in `GET /v1/meta` `modules` without code behind it |
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
+| P3 | realtime | WebSockets (only SSE exists, polling-based) |
+| P2 | identity | Identity providers are managed only through configuration (`[[oidc]]`); no API (and therefore no Studio view) to list, add or disable providers |
+| P2 | tenancy | Product-level invitations for operators: `POST /v1/products/{id}/members` resolves only users the caller can see, so a product owner who is not a platform admin cannot add an operator without a visible account (Studio TODO, marked backend) |
+| P2 | events | List the job kinds a tenant caller may enqueue (declared `enqueue_permission`), so clients can offer them (Studio TODO, marked backend) |
 | P2 | storage | Content-type policy per product: `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` and other blocked types are refused installation-wide, or stored inert with the global `storage.store_blocked_as_inert`; the blocklist itself is fixed in code (Nodestro plan G-7) |
 | P2 | migrations | Runner features from Nodestro (plan G-2): pre-migration backup hook, refusal when the schema is newer than the code, a serving gate for a compatible schema range, optional non-transactional steps |
+| P3 | notify | SMS and push adapters (email is the only channel) |
 | P2 | notify | Per-tenant send rate limits for `POST .../notify/send` (review 2026-11-01, F6 follow-up; the relay itself is closed by `notify:send_external` and system-only templates) |
 | P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md) |
 | P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up) |
@@ -42,7 +55,6 @@ Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/s
 | P2 | sdk | Publish `@axentra/sdk` (npm) and `axentra-client` (PyPI); release process and provenance |
 | P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin) |
 | P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
-| P2 | studio | Backend support for Studio Phase 2/3 views (files, jobs/events, usage charts, audit/monitoring, plans, subscriptions, notifications): the modules are merged; add endpoints or fields as the views need them |
 
 ## Hardening (Phase 5)
 
@@ -53,13 +65,14 @@ Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/s
 | P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
 | P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
 | P2 | tests | Concurrency tests for `If-Match` races and migration runners started in parallel |
-| P2 | tests | Cross-repository compatibility test: Studio contract tests against each Axentra commit |
+| P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs run only for the commit pinned in Studio's `api/BACKEND_REF`, only on Studio pull requests and only in multi-product mode; nothing on the Axentra side triggers them for a new Axentra commit (a single-product e2e matrix is being added on the Studio side) |
 
 ## Nodestro (Phase 6)
 
 | Pri | Area | Item |
 |---|---|---|
 | P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002). Generic gaps from its section 9 are listed above (G-1, G-2, G-3, G-7); G-6 (re-encryption registry) is done |
+| P3 | integration | Remaining plan gaps, needed only if Nodestro adopts Axentra: G-4 (login without membership, access decided by the product; DB-clock session checks), G-5 (claim token for ownerless tenants), G-8 (verify the merged jobs module against Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss") |
 
 ## Known limitations
 

@@ -17,7 +17,10 @@ build on it instead of rewriting them.
   dependencies are forbidden by import-linter contracts, by an architecture test and by a CI check
   of the installed packages.
 
-Status: **alpha** (`0.1.0.dev0`, HTTP API `v1`, API version `1.0`). See
+Status: **alpha** (`0.1.0.dev0`, HTTP API `v1`, API version `1.0`), not production-ready: no
+production deployment, no load tests, provider adapters tested against local fakes only. What is
+implemented and tested, with evidence and the acceptance criteria status:
+[docs/AXENTRA_IMPLEMENTATION_REPORT.md](docs/AXENTRA_IMPLEMENTATION_REPORT.md). See also
 [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Two ways to use it
@@ -64,19 +67,20 @@ PostgreSQL integration tests. **planned** means it does not exist in this codeba
 | `config` | TOML + `AXENTRA__*` environment settings, secret references, AES-256-GCM keyring | implemented |
 | `data` | Connection pool, scoped transactions, RLS, checksummed migrations, JSON records | implemented |
 | `identity` | Users, Argon2id passwords, server-side sessions, first-run setup, login throttling | implemented |
-| `identity` (OIDC) | Login with OpenID Connect providers (settings and tables exist, endpoints do not yet) | in progress (Phase 1) |
+| `identity` (OIDC) | Login with OpenID Connect providers (code + PKCE, state, nonce) | implemented |
 | `tenancy` | Products, product operators, tenants, memberships, invitations | implemented |
 | `access` | Permission catalog, built-in and custom roles, authorizer, API keys | implemented |
 | `audit` | Append-only, redacted audit trail written in the same transaction | implemented |
 | `api` | FastAPI `/v1`, RFC 9457 errors, security headers, CORS, committed OpenAPI | implemented |
-| `cli` | `axentra serve / migrate / admin setup-token / openapi export / keys generate` | implemented |
-| `storage` | File storage (local, S3-compatible) | planned (Phase 2) |
-| `events` | Events, background jobs, webhooks | planned (Phase 2) |
-| `usage` | Meters, usage recording, quotas | planned (Phase 2) |
-| `observability` | Metrics, OpenTelemetry tracing | planned (Phase 2) |
-| `realtime` | Server-sent events | planned (Phase 2) |
-| `billing` | Plans, subscriptions, entitlements, payment provider adapters | planned (Phase 3) |
-| `notify` | Notification templates, email delivery, preferences | planned (Phase 3) |
+| `cli` | `axentra serve / migrate / worker / admin / openapi / storage / notify-dispatch / maintenance / keys / secrets` | implemented |
+| `storage` | File storage (local, S3-compatible), quotas, signed downloads | implemented (S3 tested against moto only) |
+| `events` | Events, background jobs (at least once), schedules, webhooks | implemented |
+| `usage` | Meters, idempotent usage recording, quotas, reservations | implemented |
+| `observability` | Prometheus metrics, OpenTelemetry tracing, health checks | implemented |
+| `realtime` | Server-sent events for events and jobs (database polling) | implemented; no WebSockets |
+| `billing` | Plans, subscriptions, entitlements, payment provider adapters (manual, fake, Stripe) | implemented (Stripe adapter not tested against Stripe) |
+| `notify` | Email templates, outbox, delivery (local, SMTP), preferences | implemented (email only) |
+| `search` | PostgreSQL full-text search, search adapters | planned (not implemented) |
 
 Endpoint catalog: [docs/architecture/API_V1_ENDPOINTS.md](docs/architecture/API_V1_ENDPOINTS.md);
 the authoritative contract is [openapi/axentra-v1.json](openapi/axentra-v1.json).
@@ -150,7 +154,8 @@ Axentra runs without Studio; Studio is just another client. Tested combinations 
 - Client SDKs: [TypeScript](docs/sdk/TYPESCRIPT.md) (`sdk/typescript`), [Python](docs/sdk/PYTHON.md) (`sdk/python`)
 - Operations: [deployment](docs/operations/DEPLOYMENT.md), [configuration](docs/operations/CONFIGURATION.md),
   [backup and restore](docs/operations/BACKUP_RESTORE.md)
-- Project: [roadmap](docs/ROADMAP.md), [open work](docs/TODO.md), [changelog](CHANGELOG.md),
+- Project: [implementation report](docs/AXENTRA_IMPLEMENTATION_REPORT.md), [roadmap](docs/ROADMAP.md),
+  [open work](docs/TODO.md), [compatibility matrix](docs/COMPATIBILITY.md), [changelog](CHANGELOG.md),
   [Nodestro reuse analysis](docs/architecture/NODESTRO_REUSE.md),
   [Nodestro migration plan](docs/integrations/NODESTRO_MIGRATION_PLAN.md) (analysis only)
 

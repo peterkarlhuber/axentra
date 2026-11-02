@@ -24,7 +24,10 @@ def test_api_key_lifecycle_and_scope(world):
     assert secret.startswith("axk_")
     # The list never contains the secret or its hash.
     listing = world.admin.get(f"/v1/products/{pid}/api-keys").text
-    assert secret.split("_")[-1] not in listing and "secret_hash" not in listing
+    # The secret part may itself contain "_" (urlsafe base64), so cut it by position, not by split.
+    secret_part = secret[len("axk_") + 26 + 1 :]
+    assert len(secret_part) >= 32
+    assert secret_part not in listing and "secret_hash" not in listing
     c = TestClient(world.app, headers={"Authorization": f"Bearer {secret}"})
     assert c.post(f"/v1/products/{pid}/tenants/{t1}/records/items", json={"n": 1}).status_code == 201
     assert c.get(f"/v1/products/{pid}/tenants/{t2}/records/items").status_code == 404
