@@ -221,11 +221,11 @@ class WebhookService:
     ) -> Page[WebhookEndpoint]:
         self.authz.require(principal, "webhooks:read", product_id)
         n = clamp_limit(limit)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
             rows = tx.all(
                 "SELECT * FROM axentra_webhook_endpoints WHERE product_id = %s AND id > %s ORDER BY id LIMIT %s",
-                (product_id, str(after[0]) if after else "", n + 1),
+                (product_id, after[0] if after else "", n + 1),
             )
         items = [_endpoint(r) for r in rows[:n]]
         return Page[WebhookEndpoint](
@@ -364,10 +364,10 @@ class WebhookService:
         if status:
             sql += " AND status = %s"
             params.append(status)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         if after:
             sql += " AND id < %s"
-            params.append(str(after[0]))
+            params.append(after[0])
         sql += " ORDER BY id DESC LIMIT %s"
         params.append(n + 1)
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:

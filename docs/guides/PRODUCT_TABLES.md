@@ -146,7 +146,7 @@ def list_deals(principal: Principal, product_id: str, tenant_id: str, *, limit: 
                cursor: str | None = None) -> Page[dict]:
     ax.authz.require(principal, "records:read", product_id, tenant_id)
     limit = clamp_limit(limit)
-    after = decode_cursor(cursor)
+    after = decode_cursor(cursor, ("str",))  # one id; anything else is a 400 invalid_cursor
     sql = "SELECT * FROM crm_deals WHERE product_id = %s AND tenant_id = %s"
     params: list = [product_id, tenant_id]
     if after:

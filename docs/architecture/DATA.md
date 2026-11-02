@@ -97,8 +97,9 @@ Clients must not parse them ([ADR 0008](../adr/0008-ids-and-pagination.md)).
 
 - Keyset (cursor) pagination: `?limit=` (1-200, default 50) and `?cursor=`; responses are
   `{"items": [...], "next_cursor": "..." | null}`. The cursor is an opaque, URL-safe base64 JSON
-  list of the last row's sort key and id; a tampered cursor gives `422`. Cursors carry no
-  authority: the next page is authorized and scoped like the first.
+  list of the last row's sort key and id; a malformed or tampered cursor gives `400 invalid_cursor`
+  (`decode_cursor(cursor, shape)` checks the number and types of the values before any SQL).
+  Cursors carry no authority: the next page is authorized and scoped like the first.
 - Services fetch `limit + 1` rows to know whether a next page exists; there are no total counts
   (counting is expensive and leaks information). Use `/overview` or collection statistics.
 - Sorting is restricted to documented fields; ties are broken by `id`, so pages are stable.

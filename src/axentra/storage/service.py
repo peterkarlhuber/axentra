@@ -45,7 +45,7 @@ from axentra.core.errors import (
     ValidationFailed,
 )
 from axentra.core.ids import new_id
-from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
+from axentra.core.pagination import CursorPart, Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.storage import safety
 from axentra.storage.backends import CHUNK_SIZE, StorageBackend, backend_from_settings
@@ -70,6 +70,7 @@ _OBJECT_KEY = re.compile(r"^prd_[0-9a-z]{26}/ten_[0-9a-z]{26}/fil_[0-9a-z]{26}$"
 _VISIBLE = "status = 'active' AND (expires_at IS NULL OR expires_at > now())"
 _SORTS = {"created_at": "created_at", "name": "name", "size": "size"}
 _CAST = {"created_at": "timestamptz", "name": "text", "size": "bigint"}
+_CURSOR_PART: dict[str, CursorPart] = {"created_at": "timestamp", "name": "str", "size": "int"}
 SYSTEM = Principal.system("storage.purge")
 
 Source = bytes | bytearray | memoryview | IO[bytes] | Iterable[bytes]
@@ -548,11 +549,9 @@ class StorageService:
         field = _SORTS.get(sort.lstrip("-"))
         if field is None:
             raise ValidationFailed("sort must be created_at, name or size (prefix - for descending)")
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, (_CURSOR_PART[field], "str"))
         op = "<" if desc else ">"
         if after:
-            if len(after) != 2:
-                raise ValidationFailed("invalid cursor")
             clauses.append(f"({field}, id) {op} (%s::{_CAST[field]}, %s)")
             params += [after[0], after[1]]
         direction = "DESC" if desc else "ASC"
@@ -790,12 +789,12 @@ class StorageService:
         """Totals and per-tenant usage (``collections:read``: product operators only)."""
         self.authz.require(principal, "collections:read", product_id)
         limit = clamp_limit(limit)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         params: builtins.list[Any] = [product_id]
         where = "t.product_id = %s"
         if after:
             where += " AND t.id > %s"
-            params.append(str(after[0]))
+            params.append(after[0])
         params.append(limit + 1)
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
             defaults = self._product_defaults(tx, product_id)

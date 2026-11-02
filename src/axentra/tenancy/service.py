@@ -531,7 +531,7 @@ class TenancyService:
         if status:
             where.append("t.status = %s")
             params.append(status)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         if after:
             where.append("t.id > %s")
             params.append(after[0])

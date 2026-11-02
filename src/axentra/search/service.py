@@ -9,7 +9,7 @@ from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
 from axentra.core.context import Principal
-from axentra.core.errors import ValidationFailed
+from axentra.core.errors import InvalidCursor, ValidationFailed
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, Tx
 from axentra.search.adapters import PostgresSearchAdapter, SearchAdapter, WriteHook
@@ -153,7 +153,7 @@ def _offset(values: list[Any] | None) -> int:
     if values is None:
         return 0
     if len(values) != 2 or values[0] != "o" or not isinstance(values[1], int) or isinstance(values[1], bool):
-        raise ValidationFailed("invalid cursor")
+        raise InvalidCursor()
     if values[1] < 0:
-        raise ValidationFailed("invalid cursor")
+        raise InvalidCursor()
     return values[1]

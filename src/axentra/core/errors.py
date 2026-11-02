@@ -48,6 +48,17 @@ class ValidationFailed(AxentraError):
     title = "Validation failed"
 
 
+class InvalidCursor(ValidationFailed):
+    """A pagination ``cursor`` that Axentra did not issue or that was altered (always the same detail)."""
+
+    code = "invalid_cursor"
+    status = 400
+    title = "Invalid cursor"
+
+    def __init__(self, detail: str | None = None, **kwargs: Any) -> None:
+        super().__init__(detail or "invalid cursor", **kwargs)
+
+
 class Unauthenticated(AxentraError):
     code = "unauthenticated"
     status = 401

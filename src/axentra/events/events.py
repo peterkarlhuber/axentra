@@ -244,10 +244,10 @@ class EventService:
             else:
                 sql += " AND type = %s"
                 params.append(check_type(type))
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         if after:
             sql += " AND id < %s"
-            params.append(str(after[0]))
+            params.append(after[0])
         sql += " ORDER BY id DESC LIMIT %s"
         params.append(n + 1)
         with self.db.transaction(job_scope(product_id, tenant_id), read_only=True) as tx:

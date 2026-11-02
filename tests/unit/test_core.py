@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
+from datetime import UTC, datetime
+
 import pytest
 
 from axentra.config.secrets import Keyring, SecretBox, generate_key, resolve_secret
 from axentra.config.settings import load_settings
-from axentra.core.errors import ConfigurationError, ValidationFailed
+from axentra.core.errors import ConfigurationError, InvalidCursor, ValidationFailed
 from axentra.core.ids import is_id, new_id
-from axentra.core.pagination import clamp_limit, decode_cursor, encode_cursor
+from axentra.core.pagination import MAX_CURSOR_CHARS, clamp_limit, decode_cursor, encode_cursor
 from axentra.core.redaction import REDACTED, redact, redact_text
 
 
@@ -24,6 +27,47 @@ def test_cursor_roundtrip_and_validation():
         decode_cursor("%%%")
     with pytest.raises(ValidationFailed):
         clamp_limit(500)
+
+
+def test_cursor_shapes():
+    issued = datetime(2026, 11, 2, 10, 0, 0, 123456, tzinfo=UTC)
+    cursor = encode_cursor([issued.isoformat(), "msg_1"])
+    assert decode_cursor(cursor, ("timestamp", "str")) == [issued, "msg_1"]
+    assert decode_cursor(None, ("str",)) is None and decode_cursor("", ("str",)) is None
+    # Any offset becomes UTC; "Z" is accepted.
+    assert decode_cursor(encode_cursor(["2026-11-02T12:30:00+02:30", "x"]), ("timestamp", "str")) == [
+        datetime(2026, 11, 2, 10, 0, tzinfo=UTC),
+        "x",
+    ]
+    assert decode_cursor(encode_cursor(["2026-11-02T10:00:00Z", "x"]), ("timestamp", "str"))
+    assert decode_cursor(encode_cursor([2**63 - 1, "x"]), ("int", "str")) == [2**63 - 1, "x"]
+    for values, shape in [
+        (["x"], ("timestamp", "str")),
+        (["2026-11-02T10:00:00+00:00", "x", "y"], ("timestamp", "str")),
+        ([True], ("int",)),
+        ([1.0], ("int",)),
+        ([2**63], ("int",)),
+        ([1], ("str",)),
+        ([""], ("str",)),
+        (["a\x00b"], ("str",)),
+        (["\ud800"], ("str",)),
+        (["2026-W45-1T10:00:00+00:00"], ("timestamp",)),
+        (["2026-11-02T10:00:00,5+00:00"], ("timestamp",)),
+        (["2026-11-02T10:00:00+05:30:15.123456"], ("timestamp",)),
+        (["2026-11-02T10:00:00"], ("timestamp",)),
+        (["0001-01-01T00:00:00+14:00"], ("timestamp",)),
+    ]:
+        with pytest.raises(InvalidCursor) as ei:
+            decode_cursor(encode_cursor(values), shape)
+        assert (ei.value.status, ei.value.code, ei.value.detail) == (400, "invalid_cursor", "invalid cursor")
+    # Without a shape: still a list of safe values only.
+    for bad in (encode_cursor(["a\x00"]), encode_cursor([{"k": "\ud800"}]), "A" * (MAX_CURSOR_CHARS + 1)):
+        with pytest.raises(InvalidCursor):
+            decode_cursor(bad)
+    # The detail never carries decoder text.
+    with pytest.raises(InvalidCursor) as ei:
+        decode_cursor(base64.urlsafe_b64encode(b"\xff\xfe").decode())
+    assert ei.value.__cause__ is None and str(ei.value) == "invalid cursor"
 
 
 def test_redaction():

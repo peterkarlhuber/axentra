@@ -68,7 +68,7 @@ RFC 9457 problem details, `application/problem+json`:
 
 | Status | Codes |
 | ------ | ----- |
-| 400 | `bad_request` (unreadable request), `validation_failed`, `invalid_signature` (billing provider webhook) |
+| 400 | `bad_request` (unreadable request), `validation_failed`, `invalid_cursor` (malformed or tampered `cursor`), `invalid_signature` (billing provider webhook) |
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `reauthentication_required` |
 | 404 | `not_found`, `module_disabled` |
