@@ -227,7 +227,7 @@ def test_strip_secret_params(url: str, expected: str) -> None:
     assert bool(removed) == (out != url)
 
 
-def test_stored_return_to_adopts_only_invitation_tokens() -> None:
+def test_strip_secret_params_reports_the_removed_values() -> None:
     assert carries_secret(f"/a?b={quote(quote(TOKEN, safe=''), safe='')}")
     assert not carries_secret("/a?b=c&state=open")
     _, removed = strip_secret_params(f"/i/a/?token={quote(TOKEN, safe='')}&x=1")

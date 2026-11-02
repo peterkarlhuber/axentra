@@ -161,8 +161,15 @@ class OidcWorld(World):
         **claims: Any,
     ) -> tuple[Browser, httpx.Response]:
         b = browser or self.browser()
-        r = self.start(b, **(params or {}))
-        callback = self.idp.authorize(r.headers["location"], subject, **claims)
+        params = params or {}
+        if "invitation" in params:
+            # Only the Origin-checked POST start carries an invitation (the GET start refuses one).
+            started = b.post("/v1/auth/oidc/test/start", json=params)
+            assert started.status_code == 200, started.text
+            location = started.json()["redirect_url"]
+        else:
+            location = self.start(b, **params).headers["location"]
+        callback = self.idp.authorize(location, subject, **claims)
         return b, b.get(callback, follow_redirects=False)
 
 

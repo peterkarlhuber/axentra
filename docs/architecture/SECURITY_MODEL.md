@@ -345,6 +345,14 @@ policies are really exercised.
 - **Origin check.** For the same cookie requests, and for login and setup (login CSRF), an
   `Origin` header, if present, must be `security.public_url` or one of
   `security.allowed_origins`; otherwise `403`.
+- **OIDC starts and invitations.** `GET /v1/auth/oidc/{provider}/start` is a plain link, so any
+  site can navigate a browser to it and it has no `Origin` check; a browser with an identity
+  provider session then completes the login without a prompt. It therefore never carries an
+  invitation: an `invitation` query is refused (`?login_error=invitation_requires_post`, no login
+  started), and an invitation token in `return_to` is removed and never used. Only
+  `POST /v1/auth/oidc/{provider}/start` (Origin checked like the password login) takes an
+  invitation, so a cross-site page cannot make a victim join a tenant it was invited to
+  (security review round 4, R4-1).
 - **CORS.** Only the configured `allowed_origins` get credentialed CORS responses; `*` is
   rejected at startup.
 
@@ -462,7 +470,7 @@ are replaced with `[redacted]`, and token-like strings (Axentra API keys and inv
 and the percent-encoded spelling (`%3Ftoken%3D`, `axinv%5F...`, also encoded more than once), so a
 URL that is itself a query value (`return_to=...`) is covered. URLs that are stored rather than
 logged, such as the OIDC `return_to`, lose secret-carrying parameters entirely
-(`strip_secret_params`). The JSON log formatter and the
+(`strip_secret_params`; a removed invitation token is dropped, never used). The JSON log formatter and the
 problem renderer apply it to every message; the audit log applies it to `details` before
 storing. Redaction is a safety net; code must still avoid logging secrets.
 

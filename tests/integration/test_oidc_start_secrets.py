@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 
 import pytest
 
@@ -215,12 +215,15 @@ def test_return_to_variants_never_store_the_token(world, how: str) -> None:  # t
         "/invitations/accept/?token={t}",
         "/INVITATIONS/accept?token={t}",
         "/invitations/accept?token={enc}",
+        "/invitations/accept?invitation={t}",
         "http://studio.test/accept-invitation?token={t}",
     ],
 )
-def test_token_from_return_to_is_kept_encrypted_and_accepted(world, how: str, path: str) -> None:  # type: ignore[no-untyped-def]
-    """A frontend that still put the invitation link into return_to: the token is removed from it,
-    kept encrypted like the ``invitation`` field and accepted after the login of the invited address."""
+def test_token_in_return_to_is_removed_and_never_adopted(world, how: str, path: str) -> None:  # type: ignore[no-untyped-def]
+    """Security review round 4, R4-1: a token in ``return_to`` is only removed, never used as the
+    invitation. Otherwise a cross-site link to the ``GET`` start (no ``Origin`` check) with an
+    attacker's invitation in ``return_to`` would make a browser with an identity provider session
+    join the attacker's tenant without the person ever seeing the invitation."""
     w = world(allow_signup=False)
     tid, token = _invite(w, "kim@example.com")
     return_to = path.format(t=token, enc=quote(token, safe=""))
@@ -231,14 +234,85 @@ def test_token_from_return_to_is_kept_encrypted_and_accepted(world, how: str, pa
         location = _post_start(w, b, return_to=return_to).json()["redirect_url"]
     with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
         row = tx.one("SELECT return_to, invitation_token FROM axentra_login_states")
-    assert row is not None and row["invitation_token"] is not None
+    assert row is not None and row["invitation_token"] is None
     _assert_nowhere(w, token, location)
     done = b.get(w.idp.authorize(location, "kim-sub", email="kim@example.com"), follow_redirects=False)
-    assert _error(done) is None, done.headers["location"]
-    target = urlsplit(done.headers["location"])
-    assert target.query == f"invitation_accepted={tid}"
-    assert target.path.lower().rstrip("/") in ("/invitations/accept", "/accept-invitation")
+    # The invitation does not open sign-up (allow_signup is off) ...
+    assert _error(done) is None or _error(done) == "signup_disabled"
+    assert "invitation_accepted" not in done.headers["location"]
     _assert_nowhere(w, token, done.headers["location"])
+    # ... and is not accepted: it stays open for an explicit acceptance.
+    _assert_invitation_open(w, tid)
+
+
+def _assert_invitation_open(w: OidcWorld, tid: str) -> None:
+    with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        assert tx.scalar("SELECT count(*) FROM axentra_invitations WHERE accepted_at IS NULL") == 1
+        assert tx.scalar("SELECT count(*) FROM axentra_memberships WHERE tenant_id = %s", (tid,)) == 0
+
+
+# -- GET start: never with an invitation (security review round 4, R4-1) ------------------------------
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},  # the test browser's own Origin: refused whatever the origin
+        {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"},
+        {"Origin": "http://studio.test", "Sec-Fetch-Site": "same-site"},
+    ],
+)
+def test_get_start_with_invitation_is_refused(world, headers: dict[str, str]) -> None:  # type: ignore[no-untyped-def]
+    """The ``GET`` start has no ``Origin`` check (it is a link), so it must not act on an
+    invitation: it answers the login page with ``login_error=invitation_requires_post``, starts no
+    login (no state, no login cookie, no identity provider redirect) and accepts nothing."""
+    w = world()
+    tid, token = _invite(w, "victim@example.com")
+    b = w.browser()
+    r = b.get(
+        START,
+        params={"invitation": token, "return_to": f"http://studio.test/invitations/accept?token={token}"},
+        headers=headers,
+        follow_redirects=False,
+    )
+    assert r.status_code == 302, r.text
+    assert r.headers["location"] == "http://studio.test/login?login_error=invitation_requires_post"
+    assert "set-cookie" not in r.headers
+    with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        assert tx.scalar("SELECT count(*) FROM axentra_login_states") == 0
+    _assert_nowhere(w, token, r.headers["location"])
+    assert b.get("/v1/auth/oidc/nope/start", params={"invitation": token}).status_code == 404
+    # The victim's identity provider session alone gets the browser nowhere near the tenant: a
+    # plain login afterwards (same browser) does not accept the invitation either.
+    location = w.start(b, return_to="/").headers["location"]
+    done = b.get(w.idp.authorize(location, "victim-sub", email="victim@example.com"), follow_redirects=False)
+    assert _error(done) is None and done.headers["location"] == "/"
+    assert b.get("/v1/me").json()["products"] == []
+    _assert_invitation_open(w, tid)
+
+
+def test_get_start_with_empty_invitation_is_a_plain_login(world) -> None:  # type: ignore[no-untyped-def]
+    w = world()
+    b = w.browser()
+    location = w.start(b, return_to="/x", invitation="").headers["location"]
+    assert location.startswith("https://idp.test/authorize?")
+    done = b.get(w.idp.authorize(location, "e-sub", email="e@example.com"), follow_redirects=False)
+    assert _error(done) is None and done.headers["location"] == "/x"
+
+
+def test_post_start_with_invitation_still_accepts_it(world) -> None:  # type: ignore[no-untyped-def]
+    """The Origin-checked ``POST`` start is the one way to carry an invitation into a login."""
+    w = world()
+    tid, token = _invite(w, "kim@example.com")
+    b = w.browser()
+    r = b.post(
+        START, json={"return_to": "/in", "invitation": token}, headers={"Origin": "http://studio.test"}
+    )
+    assert r.status_code == 200, r.text
+    done = b.get(
+        w.idp.authorize(r.json()["redirect_url"], "kim-sub", email="kim@example.com"), follow_redirects=False
+    )
+    assert done.headers["location"] == f"/in?invitation_accepted={tid}"
 
 
 def test_explicit_invitation_wins_over_one_in_return_to(world) -> None:  # type: ignore[no-untyped-def]

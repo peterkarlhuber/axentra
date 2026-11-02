@@ -25,20 +25,32 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- The `GET` OIDC start no longer acts on an invitation (security review round 4, R4-1, login-CSRF-like). It is
+  a plain link without an `Origin` check, so a cross-site link to
+  `GET /v1/auth/oidc/{provider}/start?invitation=<token>` (or with the token inside `return_to`) made a browser
+  with an identity provider session join the inviter's tenant without a prompt, when the invitation was
+  addressed to that browser's user. Now, failing closed:
+  - `GET .../start` with a non-blank `invitation` query starts no login (no login state, no login cookie, no
+    provider redirect) and redirects to the login page with the new code `login_error=invitation_requires_post`
+    (on the origin of `return_to`, as other login errors); an empty `invitation=` is ignored. The parameter
+    stays declared (deprecated) in the OpenAPI contract to document this. **Breaking** for clients that still
+    sent the token there: use `POST /v1/auth/oidc/{provider}/start`, the only start that takes an invitation
+    (Origin checked). Axentra Studio uses the `POST` start since its last release.
+  - An Axentra invitation token in `return_to` (as `token`/`invitation`) is removed and no longer adopted as
+    the login's invitation. `OidcService.stored_return_to` returns the stored `return_to` only (it returned a
+    `(return_to, adopted invitation)` pair).
 - Invitation tokens never end up in a stored or logged URL (security review round 3, NF-2/NF-3, the rest of
   AX-R2):
   - New `POST /v1/auth/oidc/{provider}/start` with the JSON body `{return_to?, invitation?}` (Origin checked):
     same login state and login cookie as the `GET` start, answered with `{redirect_url}` (the provider URL, or
     the login page with `?login_error=`). The invitation token travels only in the body, never in a URL that
-    a proxy log, the browser history or a `Referer` records. `invitation=` on the `GET` start is deprecated
-    (still accepted); the `GET` start without an invitation is unchanged.
+    a proxy log, the browser history or a `Referer` records. The `GET` start without an invitation is
+    unchanged; with one it is refused (entry below).
   - `return_to` loses every query parameter that carries a secret before it is stored in
     `axentra_login_states.return_to` and sent back as the redirect, whatever the path and its spelling
     (`/invitations/accept/`, other casing, percent-encoding): parameters named like a secret (`token`,
     `*_token`, `invitation`, `setup`, `password`, ...) after percent-decoding, and parameters whose value holds
-    a token or a nested URL with one in any encoding. A fragment with a secret is dropped. An Axentra
-    invitation token found as `token`/`invitation` there is used like the `invitation` field (kept encrypted,
-    accepted for the invited address). New helpers `strip_secret_params`, `carries_secret` and
+    a token or a nested URL with one in any encoding. A fragment with a secret is dropped. New helpers `strip_secret_params`, `carries_secret` and
     `fully_unquote` in `axentra.core.redaction`, `OidcService.stored_return_to`.
   - Redaction matches the percent-encoded form too: the `uvicorn.access` filter (`redact_auth_query`, now in
     `axentra.core.redaction` and re-exported from `axentra.audit.logging`) redacts `code`, `state`, `*token`,
@@ -46,7 +58,7 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
     case) and also applies `redact_text`; `redact_text` (logs, problems, audit details) masks
     `axinv_`/`axk_` tokens with an encoded `_` and the values of `*token`, `invitation` and `setup` query
     parameters, literal or encoded.
-- OIDC callback: when the `invitation` given on `GET /v1/auth/oidc/{provider}/start` was accepted during
+- OIDC callback: when the `invitation` given on `POST /v1/auth/oidc/{provider}/start` was accepted during
   the login, the redirect to `return_to` carries `invitation_accepted=<tenant id>` (re-review AX-R2), so a
   frontend can show the accepted invitation instead of asking for a confirmation that would fail with
   `404`. `LoginResult.invitation_tenant_id` gives embedding hosts the same information. A failed

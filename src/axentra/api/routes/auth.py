@@ -148,21 +148,34 @@ def oidc_start(
         Query(
             max_length=200,
             deprecated=True,
-            description="Deprecated: a URL query is recorded by proxies that log full URLs."
-            " Send the invitation token in the body of `POST /v1/auth/oidc/{provider}/start`.",
+            description="Refused: a start with an invitation token goes to the login page with"
+            " `?login_error=invitation_requires_post`, without a login. This link has no `Origin`"
+            " check, and a URL query is recorded by proxies that log full URLs. Send the invitation"
+            " in the body of `POST /v1/auth/oidc/{provider}/start`.",
         ),
     ] = None,
 ) -> Response:
     """``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``);
-    query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed.
-    ``invitation``: deprecated, use the ``POST`` start for logins with an invitation."""
+    query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed
+    and never used as an invitation. ``invitation``: refused, use the ``POST`` start."""
     from axentra.identity.oidc import OidcLoginError, login_error_url
 
     oidc = _oidc(ax)
-    try:
-        started = oidc.start(
-            provider, return_to=return_to, invitation=invitation or None, ip=client_ip(request)
+    if invitation and invitation.strip():
+        oidc.provider(provider)  # NotFound for unknown providers, as without an invitation
+        # Security review round 4, R4-1: a top-level navigation from any site reaches this route
+        # without an Origin check, so it must never carry an invitation into a login (a browser
+        # with an identity provider session would join the inviter's tenant unasked). Fail
+        # closed: no login state, no provider redirect; the Origin-checked POST start is the way.
+        logger.warning(
+            "OIDC login for %s refused: invitation on the GET start (use the POST start)", provider
         )
+        target = login_error_url(
+            ax.settings.security.login_page, oidc.stored_return_to(return_to), "invitation_requires_post"
+        )
+        return RedirectResponse(target, status_code=302)
+    try:
+        started = oidc.start(provider, return_to=return_to, ip=client_ip(request))
     except OidcLoginError as exc:
         logger.warning("OIDC login for %s could not start: %s", provider, exc)
         target = login_error_url(ax.settings.security.login_page, exc.return_to, exc.code)
@@ -183,7 +196,9 @@ class OidcStartRequest(BaseModel):
         default=None,
         max_length=200,
         description="An invitation token: lets the invited email sign up and accepts the invitation"
-        " right after the login. Stored encrypted with the login state, never in a URL.",
+        " right after the login. Stored encrypted with the login state, never in a URL. The only way"
+        " to carry an invitation into a login (the `GET` start refuses one, and a token in"
+        " `return_to` is removed, never used).",
     )
 
 
@@ -202,8 +217,10 @@ class OidcStartAnswer(BaseModel):
 def oidc_start_post(
     provider: ProviderId, body: OidcStartRequest, request: Request, response: Response, ax: Ax
 ) -> OidcStartAnswer:
-    """The ``GET`` start with the same fields as a JSON body, for logins that carry an invitation
-    token: a URL query ends up in proxy access logs and ``Referer`` headers, a request body does not.
+    """The ``GET`` start with the same fields as a JSON body, and the only start that takes an
+    invitation token: it checks ``Origin`` (a cross-site page cannot start a login with an
+    invitation), and a URL query ends up in proxy access logs and ``Referer`` headers, a request
+    body does not.
     Sets the same login cookie (send it with credentials) and answers the URL to navigate to."""
     from axentra.identity.oidc import OidcLoginError, login_error_url
 
