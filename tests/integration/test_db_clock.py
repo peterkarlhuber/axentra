@@ -70,3 +70,40 @@ def test_invitations_use_the_database_clock(world, monkeypatch):  # type: ignore
     uid = world.user("inv@example.com")
     with pytest.raises(NotFound):
         ax.tenancy.accept_invitation(Principal(actor=Actor(ActorKind.USER, uid, "inv")), inv.token)
+
+
+def test_resolving_a_session_is_one_transaction(world, monkeypatch):  # type: ignore[no-untyped-def]
+    # Session resolution runs on every request of a host application: the session, its user and a due touch are
+    # read and written in one transaction (one snapshot; no second BEGIN/scope/COMMIT for the user).
+    ax = world.ax
+    world.user("one-tx@example.com")
+    new = ax.identity.login_password("one-tx@example.com", "user password 12345", ip=None, user_agent="t")
+    opened: list[str] = []
+    original = type(ax.db).transaction
+
+    def counting(self, scope, *, read_only=False):  # type: ignore[no-untyped-def]
+        opened.append(scope.kind)
+        return original(self, scope, read_only=read_only)
+
+    monkeypatch.setattr(type(ax.db), "transaction", counting)
+    _principal, info = ax.identity.resolve_session(new.token)
+    assert opened == ["platform"]
+    assert info.user.email == "one-tx@example.com" and info.session_id == new.info.session_id
+    # A due touch is written in the same transaction.
+    monkeypatch.setattr(type(ax.db), "transaction", original)
+    with ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute(
+            "UPDATE axentra_sessions SET last_seen_at = now() - interval '5 minutes' WHERE id = %s",
+            (new.info.session_id,),
+        )
+    monkeypatch.setattr(type(ax.db), "transaction", counting)
+    opened.clear()
+    ax.identity.resolve_session(new.token)
+    assert opened == ["platform"]
+    monkeypatch.setattr(type(ax.db), "transaction", original)
+    with ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        seen = tx.scalar(
+            "SELECT now() - last_seen_at < interval '1 minute' FROM axentra_sessions WHERE id = %s",
+            (new.info.session_id,),
+        )
+    assert seen is True
