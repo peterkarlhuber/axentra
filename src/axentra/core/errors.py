@@ -3,11 +3,24 @@
 Every error has a stable machine-readable ``code`` and an HTTP ``status`` so that the HTTP layer
 can render RFC 9457 problem details without knowing the module that raised it. ``detail`` is
 shown to clients and must never contain secrets, tokens, SQL or stack traces.
+
+:func:`problem_details` maps any exception to a framework-independent :class:`ProblemInfo`
+(status, code, title, detail, extra members and response headers). Axentra's own HTTP API renders
+its errors through it, and applications that embed Axentra as a library and have their own web
+layer use it to answer the way the Axentra API would (see docs/architecture/EMBEDDING.md).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, ClassVar
+
+from axentra.core.redaction import redact_text
+
+#: Base URI of the ``type`` member of problem details (``PROBLEM_BASE + code``).
+PROBLEM_BASE = "https://axentra.dev/problems/"
+#: ``Retry-After`` (seconds) sent with a 429 when the error names no delay of its own.
+DEFAULT_RETRY_AFTER_SECONDS = 60
 
 
 class AxentraError(Exception):
@@ -15,10 +28,18 @@ class AxentraError(Exception):
     status: ClassVar[int] = 500
     title: ClassVar[str] = "Internal error"
 
-    def __init__(self, detail: str | None = None, *, extra: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        detail: str | None = None,
+        *,
+        extra: dict[str, Any] | None = None,
+        retry_after: int | None = None,
+    ) -> None:
         super().__init__(detail or self.title)
         self.detail = detail or self.title
         self.extra = extra or {}
+        #: Seconds a client should wait before retrying (``Retry-After``); only used for 429/503.
+        self.retry_after = retry_after
 
 
 class ValidationFailed(AxentraError):
@@ -105,3 +126,78 @@ class ConfigurationError(AxentraError):
     code = "configuration_error"
     status = 500
     title = "Configuration error"
+
+
+@dataclass(frozen=True, slots=True)
+class ProblemInfo:
+    """A framework-independent RFC 9457 problem: what a web layer needs to answer an error."""
+
+    status: int
+    code: str
+    title: str
+    detail: str
+    extra: dict[str, Any] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+    #: True for server-side failures (status >= 500): log the original exception, and never show
+    #: anything but the generic detail to the client.
+    internal: bool = False
+
+    @property
+    def type(self) -> str:
+        return PROBLEM_BASE + self.code
+
+    def body(self, *, request_id: str | None = None) -> dict[str, Any]:
+        """The ``application/problem+json`` body, as the Axentra HTTP API renders it."""
+        return {
+            "type": self.type,
+            "title": self.title,
+            "status": self.status,
+            "code": self.code,
+            "detail": self.detail,
+            "request_id": request_id,
+            **self.extra,
+        }
+
+
+_INTERNAL = ProblemInfo(
+    status=500, code="internal", title="Internal error", detail="An internal error occurred.", internal=True
+)
+
+
+def problem(
+    status: int,
+    code: str,
+    title: str,
+    detail: str,
+    *,
+    extra: dict[str, Any] | None = None,
+    retry_after: int | None = None,
+) -> ProblemInfo:
+    """Build a :class:`ProblemInfo`; redacts ``detail`` and adds ``Retry-After`` to a 429/503."""
+    headers: dict[str, str] = {}
+    if status == 429 or (status == 503 and retry_after is not None):
+        headers["Retry-After"] = str(max(1, retry_after or DEFAULT_RETRY_AFTER_SECONDS))
+    return ProblemInfo(
+        status=status,
+        code=code,
+        title=title,
+        detail=redact_text(detail),
+        extra=dict(extra or {}),
+        headers=headers,
+        internal=status >= 500,
+    )
+
+
+def problem_details(exc: BaseException) -> ProblemInfo:
+    """Map an exception to the problem details the Axentra HTTP API would answer with.
+
+    - An :class:`AxentraError` with a 4xx status keeps its ``status``, ``code``, ``title``,
+      ``detail`` (redacted) and ``extra`` members; a 429 carries ``Retry-After``.
+    - Any :class:`AxentraError` with a 5xx status, and every other exception, becomes a generic
+      ``500 internal`` problem without details (``internal=True``: the caller logs ``exc``).
+    """
+    if isinstance(exc, AxentraError) and exc.status < 500:
+        return problem(
+            exc.status, exc.code, exc.title, exc.detail, extra=exc.extra, retry_after=exc.retry_after
+        )
+    return _INTERNAL
