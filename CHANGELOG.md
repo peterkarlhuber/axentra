@@ -10,6 +10,14 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   now names versioned access definitions as the deterministic way.
 
 ### Fixed
+- Product operators can read a suspended tenant's record again, so they can reactivate it:
+  `GET /v1/products/{p}/tenants/{t}` now accepts `tenants:read` held for the whole product (product
+  roles, product-wide API keys, platform roles), whatever the tenant's status, exactly as the tenant
+  list already showed it. Everyone else still needs `tenant:read` in the tenant, which a suspended
+  tenant refuses. The tenant's data (members, invitations, records, files, usage, billing, ...) stays
+  closed to everyone but platform roles; unrelated principals still get `404`; archived products
+  stay closed. The `tenancy.tenant.update` audit event of a status change now carries
+  `previous_status`.
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an
   authorization read) inside a `join(conn, scope)` block emptied that block's scope: under

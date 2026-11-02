@@ -597,9 +597,18 @@ class TenancyService:
         return self.get_tenant(principal, product_id, tid)
 
     def get_tenant(self, principal: Principal, product_id: str, tenant_id: str) -> Tenant:
-        grant = self.authz.grant(principal, product_id, tenant_id)
-        if not ({"tenants:read", "tenant:read"} & grant.permissions):
-            raise Forbidden("missing permission tenant:read")
+        """The tenant record (name, slug, status, member count).
+
+        The record is product administration metadata: whoever holds ``tenants:read`` for the whole
+        product (product operators, product-wide API keys, platform roles) reads it whatever the
+        tenant's status, exactly as :meth:`list_tenants` shows it, so a suspended tenant can be
+        inspected and reactivated. Everyone else needs ``tenant:read`` in the tenant itself, which
+        :meth:`Authorizer.grant` refuses while the tenant is suspended (its data stays closed).
+        """
+        if not self.authz.has(principal, "tenants:read", product_id):
+            grant = self.authz.grant(principal, product_id, tenant_id)
+            if not ({"tenants:read", "tenant:read"} & grant.permissions):
+                raise Forbidden("missing permission tenant:read")
         with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
             row = tx.one_or_404(
                 "SELECT t.*, (SELECT count(*) FROM axentra_memberships m WHERE m.tenant_id = t.id) AS member_count"
@@ -654,7 +663,12 @@ class TenancyService:
                     target_id=tenant_id,
                     product_id=product_id,
                     tenant_id=tenant_id,
-                    details={"fields": sorted(changes), "status": status},
+                    details={
+                        "fields": sorted(changes),
+                        "status": status,
+                        # Suspend/reactivate: the status before the change, for the audit trail.
+                        **({"previous_status": row["status"]} if "status" in changes else {}),
+                    },
                 )
         return self.get_tenant(Principal.system("read-back"), product_id, tenant_id)
 
