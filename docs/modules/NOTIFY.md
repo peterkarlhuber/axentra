@@ -110,9 +110,21 @@ member of the tenant or a product operator (else 404, so global users cannot be 
 
 `Axentra` sets `ax.on_invitation = ax.notify.on_invitation`; the tenancy API calls it after
 creating an invitation. It enqueues the `invitation` template (idempotency key
-`invitation:<inv_id>`) with `accept_url` = product setting `invitation_accept_url` (http(s) only;
-`{token}` is replaced, otherwise `?token=`/`&token=` is appended) or
-`<security.public_url>/accept-invitation?token=...`, and sets `accept_url` in the API response.
+`invitation:<inv_id>`) and sets `accept_url` in the API response. The link is the first of:
+
+1. the product setting `invitation_accept_url` (http(s) only; anything else is ignored),
+2. the installation setting `notify.invitation_accept_url` (http(s), https in production; checked
+   at startup),
+3. `<security.public_url>/accept-invitation` (the default).
+
+`{token}` in the link is replaced by the URL-encoded token; otherwise `?token=`/`&token=` is
+appended. Axentra Studio serves `/accept-invitation` (it forwards to its accept page
+`/invitations/accept`), so the default works when Studio is served on the API origin. When the
+frontend that accepts invitations has its own origin (for example Studio on
+`https://studio.example.com`, the API on `https://api.example.com`), set
+`notify.invitation_accept_url` (for Studio: `https://studio.example.com/invitations/accept`) or the
+product's own setting; otherwise the link points to the API origin. `GET /v1/settings` reports the
+installation-wide base as `notify.invitation_accept_url`.
 The hook never raises (the invitation exists either way) and never logs the token or the link.
 The built-in invitation template is `sensitive`.
 

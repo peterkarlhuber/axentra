@@ -73,6 +73,52 @@ def test_tenant_member_flow_and_invitations(world):
     assert owner.delete(f"/v1/products/{pid}/tenants/{tid}/members/{owner_id}").status_code == 409
 
 
+def test_invitation_accept_refusals_are_one_404_and_scoped_to_the_invited_tenant(world):
+    from axentra.data.database import DbScope
+
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    other_tid = _tenant(world, pid, "globex")
+    pid2 = _product(world, "erp")
+    tid2 = _tenant(world, pid2, "initech")
+
+    def invite(email, tenant=tid, product=pid):
+        r = world.admin.post(f"/v1/products/{product}/tenants/{tenant}/invitations", json={"email": email})
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    world.user("kim@example.com")
+    kim = world.login_as("kim@example.com")
+    unknown = kim.post("/v1/invitations/accept", json={"token": "axinv_doesnotexist"})
+    assert unknown.status_code == 404
+    revoked = invite("kim@example.com")
+    assert (
+        world.admin.delete(f"/v1/products/{pid}/tenants/{tid}/invitations/{revoked['invitation']['id']}")
+    ).status_code == 204
+    r_revoked = kim.post("/v1/invitations/accept", json={"token": revoked["token"]})
+    expired = invite("kim@example.com", tenant=other_tid)
+    with world.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute(
+            "UPDATE axentra_invitations SET expires_at = now() - interval '1 second' WHERE id = %s",
+            (expired["invitation"]["id"],),
+        )
+    r_expired = kim.post("/v1/invitations/accept", json={"token": expired["token"]})
+    # Unknown, revoked and expired look the same (no oracle for which one it was).
+    for r in (r_revoked, r_expired):
+        assert r.status_code == 404
+        assert r.json()["detail"] == unknown.json()["detail"] and r.json()["code"] == unknown.json()["code"]
+    # Accepting joins exactly the invited tenant of the invited product, nothing else.
+    ok = invite("kim@example.com", tenant=tid2, product=pid2)
+    r = kim.post("/v1/invitations/accept", json={"token": ok["token"]})
+    assert r.status_code == 200 and r.json()["tenant_id"] == tid2 and r.json()["product_id"] == pid2
+    assert kim.post("/v1/invitations/accept", json={"token": ok["token"]}).status_code == 404
+    me = kim.get("/v1/me").json()
+    tenants = {t["tenant"]["id"] for p in me["products"] for t in p["tenants"]}
+    assert tenants == {tid2}
+    # Without a session the endpoint answers 401 and does not consume anything.
+    assert world.browser().post("/v1/invitations/accept", json={"token": ok["token"]}).status_code == 401
+
+
 def test_tenant_isolation_between_tenants(world):
     pid = _product(world)
     t1 = _tenant(world, pid, "acme")

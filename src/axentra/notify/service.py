@@ -1205,9 +1205,12 @@ class NotifyService:
     # -- invitation hook -----------------------------------------------------------------------------
 
     def invitation_accept_url(self, product_settings: dict[str, Any], token: str) -> str:
+        """The link in the invitation email, first match wins: the product setting
+        ``invitation_accept_url`` (http(s) only), the installation setting
+        ``notify.invitation_accept_url``, ``<security.public_url>/accept-invitation``."""
         base = product_settings.get("invitation_accept_url")
         if not isinstance(base, str) or not base.startswith(("https://", "http://")):
-            base = self.settings.security.public_url.rstrip("/") + "/accept-invitation"
+            base = self.settings.invitation_accept_base
         tok = quote(token, safe="")
         if "{token}" in base:
             return base.replace("{token}", tok)
