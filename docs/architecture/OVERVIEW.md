@@ -49,9 +49,11 @@ only on `core`; the authorized record service (`axentra.data.record_service`) si
 uses the authorizer and the audit log, which is why `data` and `access` reference each other at
 package level. `access` uses `identity` only for token hashing.
 
-Modules planned for Phase 2/3 (storage, events/jobs/webhooks, usage, billing, notify,
-observability, realtime) will be added as further domain packages under the same rules; they are
-not part of the code described here. See [ROADMAP](../ROADMAP.md).
+The diagram shows the Phase 1 foundation. The later domain packages (`storage`, `events` with
+jobs, schedules, webhooks and SSE, `usage`, `billing`, `notify`, `observability`) follow the same
+rules (no web framework, `core` at the bottom, `usage` never imports `billing`; enforced by
+import-linter) and are documented in `docs/modules/`. A search module is not implemented. Current
+status: [AXENTRA_IMPLEMENTATION_REPORT.md](../AXENTRA_IMPLEMENTATION_REPORT.md).
 
 ## Layering rules
 

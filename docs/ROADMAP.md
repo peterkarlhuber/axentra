@@ -4,16 +4,16 @@ Every phase covers the backend (this repository) **and** Axentra Studio
 ([peterkarlhuber/axentra-studio](https://github.com/peterkarlhuber/axentra-studio)); Studio grows
 with each backend module. Open items in detail: [TODO.md](TODO.md).
 
-Status as of 2026-11-01.
+Status as of 2026-11-02. Evidence for every phase: [AXENTRA_IMPLEMENTATION_REPORT.md](AXENTRA_IMPLEMENTATION_REPORT.md).
 
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Architecture, branding, foundations | done |
-| 1 | Backend foundation + Studio v1 | in progress (backend PR #1) |
-| 2 | Infrastructure modules + UI | in progress |
-| 3 | SaaS business services + UI | in progress |
-| 4 | Developer experience + complete Studio | planned |
-| 5 | Hardening and acceptance | in progress |
+| 1 | Backend foundation + Studio v1 | done (backend PRs #1, #2) |
+| 2 | Infrastructure modules + UI | done except search (backend PRs #3-#5); no full-text search |
+| 3 | SaaS business services + UI | done (backend PR #4) |
+| 4 | Developer experience + complete Studio | done for the backend (PR #7); open items in TODO.md |
+| 5 | Hardening and acceptance | in progress (PRs #8, #9; open verification items in TODO.md) |
 | 6 | Nodestro integration preparation (analysis only) | plan written |
 
 ## Phase 0: Architecture, branding and foundations (done)
@@ -23,30 +23,31 @@ versioning and compatibility strategy, CI for both repositories, development env
 single/multi-product decision, frontend architecture, design system from the logo, UX and
 navigation, UI test strategy, integration strategy.
 
-## Phase 1: Backend foundation + Studio v1 (in progress)
+## Phase 1: Backend foundation + Studio v1 (done)
 
-Backend: core, identity (users, passwords, sessions, setup, throttling; **OIDC login being added**),
+Backend: core, identity (users, passwords, sessions, setup, throttling, OIDC login),
 tenancy, access (roles, API keys), data (records, migrations, RLS), config and secrets, basic
 audit, FastAPI API `/v1`, local Docker environment (Dockerfile, compose for both modes).
 Studio: login/logout, shell, dashboard, products, tenants/organizations, users and memberships,
 roles and permissions, settings, light/dark mode, branding, responsive layout.
 
-Implemented in this repository: everything listed for the backend except OIDC login endpoints.
+Implemented in this repository: everything listed for the backend.
 
-## Phase 2: Infrastructure modules + UI (in progress)
+## Phase 2: Infrastructure modules + UI (done except search)
 
 Storage (local, S3-compatible), events/jobs/webhooks, usage metering, first realtime channel
 (server-sent events), more audit and observability (metrics, tracing). Studio: files, jobs and
-events, usage overview and charts, audit and monitoring views. Module documentation will be in
-`docs/modules/*` once merged.
+events, usage overview and charts, audit and monitoring views. Module documentation:
+`docs/modules/*`, `docs/operations/OBSERVABILITY.md`. Not implemented: the search module
+(PostgreSQL full-text search, search adapters; see TODO.md).
 
-## Phase 3: SaaS business services + UI (in progress)
+## Phase 3: SaaS business services + UI (done)
 
 Billing (plans, subscriptions), entitlements, notifications, usage extensions, provider adapters
 with test doubles. Studio: plans, subscriptions, entitlements, quotas, notifications, provider
-configuration. Module documentation will be in `docs/modules/*` once merged.
+configuration. Module documentation: `docs/modules/BILLING.md`, `NOTIFY.md`, `USAGE.md`.
 
-## Phase 4: Developer experience + complete Studio (planned)
+## Phase 4: Developer experience + complete Studio (done for the backend)
 
 Python SDK (hand-maintained, contract-tested) and TypeScript SDK (generated from the committed
 OpenAPI) - both in `sdk/`, see docs/sdk/ - complete OpenAPI, CLI

@@ -7,6 +7,14 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 ## [Unreleased]
 
 ### Added
+- Implementation report `docs/AXENTRA_IMPLEMENTATION_REPORT.md`: architecture, actual module
+  scope (implemented + tested vs. planned; the search module is not implemented), Nodestro
+  provenance, API/SDK overview, verified install and start commands, test and CI evidence,
+  security checks, deployment-model and headless proofs, compatibility, open limitations, PRs and
+  merge SHAs, and the status of all 30 acceptance criteria. `docs/COMPATIBILITY.md` now lists the
+  two combinations tested in Studio CI (Axentra `a2ca72a` with Studio `0aed4fc`, e2e 180/180;
+  Axentra `7511a37` with Studio `ee7d9f2`, e2e 186/186, contract identical) and how rows are added.
+  README, ROADMAP, OVERVIEW and TODO brought in line with the merged modules.
 - SDKs (Phase 4): TypeScript SDK `@axentra/sdk` in `sdk/typescript` (types generated from the
   committed OpenAPI with openapi-typescript, openapi-fetch client with API key/session bearer or
   cookie mode with automatic CSRF header, `AxentraApiError` from problem details,
@@ -117,6 +125,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
     library example.
 
 ### Changed
+- Tests: `test_api_key_lifecycle_and_scope` no longer fails at random. It cut the key secret with
+  `split("_")[-1]`, but the secret part may contain `_`, so the remainder could be a single
+  character found anywhere in the listing (failed CI on `d5e2ba7` and `7511a37`).
 - `/v1/docs` and `/v1/openapi.json` are disabled by default in production (set
   `security.api_docs = "public"` to keep the previous behavior).
 - Registering the identical migration twice is now a no-op; two different migrations with the same
