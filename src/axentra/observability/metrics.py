@@ -14,7 +14,7 @@ one series whose label values are ``other`` (protection against unbounded cardin
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 import logging
 import math
 import re
@@ -152,6 +152,22 @@ class Gauge(_Metric):
         return self._header() + [f"{self.name}{_labels_text(self.labelnames, k)} {_fmt(v)}" for k, v in items]
 
 
+class CallbackCounter(Gauge):
+    """A counter whose totals come from a callback at scrape time (totals the host keeps itself, e.g. per-process
+    operation counts kept without importing Axentra). The callback must return monotonic totals."""
+
+    kind = "counter"
+
+    def __init__(
+        self,
+        name: str,
+        help: str,
+        labelnames: Sequence[str],
+        callback: Callable[[], Iterable[tuple[dict[str, Any], float]]],
+    ) -> None:
+        super().__init__(name, help, labelnames, callback)
+
+
 class Histogram(_Metric):
     kind = "histogram"
 
@@ -249,6 +265,17 @@ class MetricsRegistry:
         result: Gauge = self._register(Gauge(name, help, labelnames, callback))
         return result
 
+    def counter_callback(
+        self,
+        name: str,
+        help: str,
+        labelnames: Sequence[str],
+        callback: Callable[[], Iterable[tuple[dict[str, Any], float]]],
+    ) -> CallbackCounter:
+        """A counter read from ``callback`` at scrape time (see :class:`CallbackCounter`)."""
+        result: CallbackCounter = self._register(CallbackCounter(name, help, labelnames, callback))
+        return result
+
     def histogram(
         self, name: str, help: str, labelnames: Sequence[str] = (), buckets: Sequence[float] = DEFAULT_BUCKETS
     ) -> Histogram:
@@ -313,3 +340,93 @@ def register_db_pool_metrics(registry: MetricsRegistry, db: Any) -> None:
     ):
         name = f"axentra_db_{key}" if key.startswith("pool") else f"axentra_db_pool_{key}"
         registry.gauge(name, help_text, callback=gauge_of(key))
+
+
+#: ``psycopg_pool`` statistics exported per pool by :func:`register_pool_metrics` (key, metric suffix, help).
+_POOL_STATS = (
+    ("pool_size", "pool_size", "Connections currently managed by the pool"),
+    ("pool_available", "pool_idle", "Idle connections in the pool"),
+    ("pool_max", "pool_max", "Maximum pool size"),
+    ("requests_waiting", "pool_requests_waiting", "Clients waiting for a connection right now"),
+    ("requests_num", "pool_requests", "Connection requests since the pool was opened"),
+    ("requests_errors", "pool_requests_errors", "Connection requests that failed (timeout, error)"),
+    ("connections_errors", "pool_connection_errors", "Failed connection attempts"),
+)
+
+
+def pool_stats(pool: Any) -> dict[str, float]:
+    """The statistics of a ``psycopg_pool`` pool (or any object with ``get_stats()``), ``{}`` when unavailable.
+
+    ``in_use`` (``pool_size - pool_available``) is added when both are known."""
+    try:
+        stats = {key: float(value) for key, value in dict(pool.get_stats()).items()}
+    except Exception:
+        return {}
+    if "pool_size" in stats and "pool_available" in stats:
+        stats["in_use"] = max(stats["pool_size"] - stats["pool_available"], 0.0)
+    return stats
+
+
+def register_pool_metrics(
+    registry: MetricsRegistry, pools: Callable[[], Mapping[str, Any]], *, prefix: str
+) -> None:
+    """Gauges ``<prefix>_db_pool_*{pool="<name>"}`` for several named connection pools, read at scrape time.
+
+    ``pools()`` returns the pools that exist right now by name (a host embedding Axentra may have its own pool next
+    to Axentra's, or share one): a pool that is gone or closed simply disappears from the output. Names are labels,
+    so they must be a small fixed set (``app``, ``axentra``, ...), never per tenant or per request."""
+
+    def series(key: str) -> Callable[[], list[tuple[dict[str, Any], float]]]:
+        def read() -> list[tuple[dict[str, Any], float]]:
+            found = []
+            for name, pool in dict(pools()).items():
+                if pool is None:
+                    continue
+                stats = pool_stats(pool)
+                if key in stats:
+                    found.append(({"pool": name}, stats[key]))
+            return found
+
+        return read
+
+    for key, suffix, help_text in (
+        *_POOL_STATS,
+        ("in_use", "pool_in_use", "Connections handed out right now"),
+    ):
+        registry.gauge(f"{prefix}_db_{suffix}", help_text, ("pool",), callback=series(key))
+
+
+class CachedCallback:
+    """Wraps an expensive metrics callback (e.g. a database count) so that it runs at most once per ``ttl`` seconds.
+
+    Scrapes in between get the last result; a failing call keeps the previous result (and logs). Thread-safe: at most
+    one call runs at a time, concurrent scrapes wait for it instead of running it again."""
+
+    def __init__(
+        self, fn: Callable[[], Any], ttl: float, *, clock: Callable[[], float] | None = None
+    ) -> None:
+        import time
+
+        self.fn = fn
+        self.ttl = ttl
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+        self._value: Any = None
+        self._at: float | None = None
+
+    def __call__(self) -> Any:
+        with self._lock:
+            now = self._clock()
+            if self._at is None or now - self._at >= self.ttl:
+                try:
+                    self._value = self.fn()
+                except Exception:
+                    logger.warning(
+                        "cached metrics callback failed; keeping the previous value", exc_info=True
+                    )
+                self._at = now
+            return self._value
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._at = None

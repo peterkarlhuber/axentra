@@ -106,3 +106,69 @@ def test_tracing_with_in_memory_exporter():
     assert spans[0].attributes["k"] == "v"
     assert spans[0].resource.attributes["service.name"] == "svc"
     t.shutdown()
+
+
+def test_pool_metrics_per_named_pool_and_cached_callbacks() -> None:
+    from axentra.observability.metrics import CachedCallback, MetricsRegistry, register_pool_metrics
+
+    class Pool:
+        def __init__(self, size: int, idle: int, waiting: int) -> None:
+            self.stats = {
+                "pool_size": size,
+                "pool_available": idle,
+                "pool_max": 10,
+                "requests_waiting": waiting,
+            }
+
+        def get_stats(self) -> dict[str, int]:
+            return self.stats
+
+    class Broken:
+        def get_stats(self) -> dict[str, int]:
+            raise RuntimeError("closed")
+
+    pools: dict[str, object] = {
+        "app": Pool(4, 1, 2),
+        "axentra": Pool(2, 2, 0),
+        "gone": Broken(),
+        "none": None,
+    }
+    registry = MetricsRegistry()
+    register_pool_metrics(registry, lambda: pools, prefix="host")
+    text = registry.render()
+    assert 'host_db_pool_in_use{pool="app"} 3' in text
+    assert 'host_db_pool_idle{pool="axentra"} 2' in text
+    assert 'host_db_pool_requests_waiting{pool="app"} 2' in text
+    assert 'pool="gone"' not in text and 'pool="none"' not in text
+    del pools["axentra"]
+    assert 'pool="axentra"' not in registry.render()
+
+    now = [0.0]
+    calls: list[int] = []
+
+    def expensive() -> int:
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("database away")
+        return len(calls)
+
+    cached = CachedCallback(expensive, 10, clock=lambda: now[0])
+    assert cached() == 1 and cached() == 1 and len(calls) == 1
+    now[0] = 11
+    assert cached() == 1 and len(calls) == 2  # a failure keeps the previous value
+    now[0] = 22
+    assert cached() == 3
+    cached.invalidate()
+    assert cached() == 4
+
+
+def test_callback_counters_render_as_counters() -> None:
+    from axentra.observability.metrics import MetricsRegistry
+
+    totals = {"ok": 3.0}
+    registry = MetricsRegistry()
+    registry.counter_callback(
+        "host_ops_total", "Operations", ("outcome",), lambda: [({"outcome": k}, v) for k, v in totals.items()]
+    )
+    text = registry.render()
+    assert "# TYPE host_ops_total counter" in text and 'host_ops_total{outcome="ok"} 3' in text

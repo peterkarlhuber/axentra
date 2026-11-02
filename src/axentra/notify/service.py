@@ -41,6 +41,7 @@ from axentra.notify.builtin import BUILTIN_TEMPLATES, INVITATION, SYSTEM_ONLY_TE
 from axentra.notify.models import (
     LOCKED_CATEGORIES,
     DeliveryStats,
+    InboxEntry,
     MailboxEntry,
     Message,
     MessageContent,
@@ -67,6 +68,10 @@ _LOCALE = re.compile(r"^[a-z]{2,3}(-[a-z0-9]{2,8})?$")
 _VAR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,200}$")
 MAX_LOCALES = 20
+#: Channels a template may use: ``email`` (delivered by the provider) and ``inbox`` (stored for the recipient user
+#: and read in the product's UI; never handed to a provider, so it has no external side effect).
+DELIVERABLE_CHANNELS = ("email", "inbox")
+INBOX_PROVIDER = "inbox"
 MAX_OPT_OUTS = 50
 NO_EMAIL_ADDRESS = "the recipient has no email address"
 _TEMPLATE_FIELDS = (
@@ -150,9 +155,9 @@ class NotifyService:
 
     @staticmethod
     def _validate_template(data: dict[str, Any]) -> dict[str, Any]:
-        if data["channel"] != "email":
+        if data["channel"] not in DELIVERABLE_CHANNELS:
             raise ValidationFailed(
-                f"the {data['channel']} channel is not available yet; only email is supported"
+                f"the {data['channel']} channel is not available yet; only email and inbox are supported"
             )
         if not _CATEGORY.match(data["category"]):
             raise ValidationFailed("category must be 2-41 lowercase letters, digits or underscores")
@@ -608,8 +613,13 @@ class NotifyService:
                 template = self._load_template(tx, product_id, template_key)
                 if template is None:
                     raise NotFound("template not found")
-                if template.channel != "email":
-                    raise ValidationFailed("only email templates can be sent")
+                if template.channel not in DELIVERABLE_CHANNELS:
+                    raise ValidationFailed("only email and inbox templates can be sent")
+                inbox = template.channel == "inbox"
+                if inbox and to_user_id is None:
+                    raise ValidationFailed(
+                        "an inbox notification goes to a user (user_id), not to an address"
+                    )
                 user_locale: str | None = None
                 user_id: str | None = None
                 no_address = False
@@ -629,8 +639,11 @@ class NotifyService:
                         raise ValidationFailed("the recipient user is disabled")
                     email, user_locale, user_id = user["email"], user["locale"], user["id"]
                     # A user without an email address (external identity only) is not an error:
-                    # the message is recorded as suppressed with the reason, nothing is sent.
-                    no_address = not email
+                    # the message is recorded as suppressed with the reason, nothing is sent. An inbox
+                    # message needs no address: it is stored for the user.
+                    no_address = not email and not inbox
+                    if inbox:
+                        email = ""
                     lookup_user = user_id
                 else:
                     if restrict_emails and not tx.one(
@@ -661,7 +674,9 @@ class NotifyService:
                             (product_id, lookup_user, tenant_id, template.category),
                         )
                     )
-                status = "suppressed" if suppressed else "queued"
+                # An inbox message is final when stored ("sent", provider "inbox"): the dispatcher only claims
+                # queued messages, so it never reaches a delivery provider.
+                status = "suppressed" if suppressed else ("sent" if inbox else "queued")
                 enc = (
                     (None, None, None)
                     if suppressed
@@ -721,6 +736,11 @@ class NotifyService:
                         **({"reason": "no_email_address"} if no_address else {}),
                     },
                 )
+                if inbox and status == "sent":
+                    tx.execute(
+                        "UPDATE axentra_notify_messages SET provider = %s, sent_at = now() WHERE id = %s",
+                        (INBOX_PROVIDER, mid),
+                    )
                 row = tx.one_or_404("SELECT * FROM axentra_notify_messages WHERE id = %s", (mid,))
         except pg_errors.UniqueViolation:
             # A concurrent request with the same Idempotency-Key won the race.
@@ -927,6 +947,109 @@ class NotifyService:
             else None
         )
         return Page[MailboxEntry](items=items, next_cursor=nxt)
+
+    # -- in-app inbox (channel "inbox") -----------------------------------------------------------
+
+    def list_inbox(
+        self,
+        principal: Principal,
+        product_id: str,
+        tenant_id: str | None = None,
+        *,
+        unread_only: bool = False,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[InboxEntry]:
+        """The current user's inbox notifications (newest first), in one tenant or across the product.
+
+        Only users have an inbox; a user only ever sees messages addressed to them (``recipient_user_id``)."""
+        user_id = self._pref_user(principal, product_id, tenant_id)
+        limit = clamp_limit(limit)
+        where = ["product_id = %s", "channel = 'inbox'", "status = 'sent'", "recipient_user_id = %s"]
+        params: list[Any] = [product_id, user_id]
+        if tenant_id is not None:
+            where.append("tenant_id = %s")
+            params.append(tenant_id)
+        if unread_only:
+            where.append("read_at IS NULL")
+        after = decode_cursor(cursor)
+        if after:
+            where.append("(created_at, id) < (%s::timestamptz, %s)")
+            params += [after[0], after[1]]
+        params.append(limit + 1)
+        scope = DbScope.tenant(product_id, tenant_id) if tenant_id else DbScope.product(product_id)
+        with self.db.transaction(scope, read_only=True) as tx:
+            rows = tx.all(
+                "SELECT * FROM axentra_notify_messages WHERE "
+                + " AND ".join(where)
+                + " ORDER BY created_at DESC, id DESC LIMIT %s",
+                params,
+            )
+        items = []
+        for r in rows[:limit]:
+            message = self._message(r, with_content=True)
+            items.append(
+                InboxEntry(
+                    id=r["id"],
+                    product_id=r["product_id"],
+                    tenant_id=r["tenant_id"],
+                    template_key=r["template_key"],
+                    category=r["category"],
+                    created_at=r["created_at"],
+                    read_at=r["read_at"],
+                    subject=message.subject,
+                    text=message.content.text if message.content else None,
+                    content_state=message.content_state,
+                )
+            )
+        nxt = (
+            encode_cursor([rows[limit - 1]["created_at"].isoformat(), rows[limit - 1]["id"]])
+            if len(rows) > limit
+            else None
+        )
+        return Page[InboxEntry](items=items, next_cursor=nxt)
+
+    def unread_count(self, principal: Principal, product_id: str, tenant_id: str | None = None) -> int:
+        """How many inbox notifications of the current user are unread."""
+        user_id = self._pref_user(principal, product_id, tenant_id)
+        cond = "product_id = %s AND channel = 'inbox' AND status = 'sent' AND recipient_user_id = %s AND read_at IS NULL"
+        params: list[Any] = [product_id, user_id]
+        if tenant_id is not None:
+            cond += " AND tenant_id = %s"
+            params.append(tenant_id)
+        scope = DbScope.tenant(product_id, tenant_id) if tenant_id else DbScope.product(product_id)
+        with self.db.transaction(scope, read_only=True) as tx:
+            return int(tx.scalar(f"SELECT count(*) FROM axentra_notify_messages WHERE {cond}", params) or 0)
+
+    def mark_read(
+        self,
+        principal: Principal,
+        product_id: str,
+        tenant_id: str | None = None,
+        *,
+        message_ids: list[str] | None = None,
+    ) -> int:
+        """Mark the current user's inbox notifications as read (``message_ids=None``: all of them); returns how many
+        changed. Messages of other users are never touched (an unknown or foreign id changes nothing)."""
+        user_id = self._pref_user(principal, product_id, tenant_id)
+        if message_ids is not None and len(message_ids) > 500:
+            raise ValidationFailed("at most 500 message ids")
+        cond = "product_id = %s AND channel = 'inbox' AND recipient_user_id = %s AND read_at IS NULL"
+        params: list[Any] = [product_id, user_id]
+        if tenant_id is not None:
+            cond += " AND tenant_id = %s"
+            params.append(tenant_id)
+        if message_ids is not None:
+            cond += " AND id = ANY(%s)"
+            params.append(list(message_ids))
+        scope = DbScope.tenant(product_id, tenant_id) if tenant_id else DbScope.product(product_id)
+        with self.db.transaction(scope) as tx:
+            return int(
+                tx.execute(
+                    f"UPDATE axentra_notify_messages SET read_at = now(), updated_at = now() WHERE {cond}",
+                    params,
+                )
+            )
 
     # -- preferences ------------------------------------------------------------------------------
 
