@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
+from axentra.access.definitions import AccessDefinitionService
 from axentra.access.product_permission_service import ProductPermissionService
 from axentra.access.roles import RoleService
 from axentra.audit.log import AuditLog
@@ -118,6 +119,8 @@ class Axentra:
         self.roles = RoleService(self.db, self.authz, self.audit)
         #: Product-defined permissions: ``ax.permissions.register(product, [ProductPermission(...)])``.
         self.permissions = ProductPermissionService(self.db, self.authz, self.audit)
+        #: Versioned permission and role definitions of embedding products (``apply``; no "last start wins").
+        self.access_definitions = AccessDefinitionService(self.db, self.audit)
         self.api_keys = ApiKeyService(self.db, self.authz, self.audit)
         self.records = RecordService(self.db, self.authz, self.audit)
         self.oidc: OidcService | None = None

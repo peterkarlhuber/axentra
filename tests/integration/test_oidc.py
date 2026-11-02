@@ -59,6 +59,7 @@ class FakeIdP:
     forge: Callable[[dict[str, Any]], str] | None = None
     jwks_requests: int = 0
     token_requests: int = 0
+    redirect_uri: str = REDIRECT_URI
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
@@ -95,7 +96,7 @@ class FakeIdP:
         """What the provider does after the person logged in: the callback URL with a fresh code."""
         assert location.startswith(f"{ISSUER}/authorize?")
         query = {k: v[0] for k, v in parse_qs(urlsplit(location).query).items()}
-        assert query["client_id"] == CLIENT_ID and query["redirect_uri"] == REDIRECT_URI
+        assert query["client_id"] == CLIENT_ID and query["redirect_uri"] == self.redirect_uri
         assert query["response_type"] == "code" and query["code_challenge_method"] == "S256"
         assert set(query["scope"].split()) >= {"openid", "email"}
         code = secrets.token_urlsafe(16)
@@ -114,7 +115,7 @@ class FakeIdP:
         if not ok:
             return httpx.Response(401, json={"error": "invalid_client"})
         grant = self.grants.pop(form.get("code", ""), None)
-        if grant is None or form.get("redirect_uri") != REDIRECT_URI:
+        if grant is None or form.get("redirect_uri") != self.redirect_uri:
             return httpx.Response(400, json={"error": "invalid_grant"})
         challenge = base64.urlsafe_b64encode(hashlib.sha256(form["code_verifier"].encode()).digest()).rstrip(
             b"="

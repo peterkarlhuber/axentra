@@ -18,6 +18,18 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Observability for embedding hosts: `register_pool_metrics` (several named pools, label `pool`,
   with `in_use`), `MetricsRegistry.counter_callback` / `CallbackCounter` (host-kept totals as
   counters), `CachedCallback` (expensive scrape-time values at most once per TTL), `pool_stats`.
+- Versioned access definitions (migration `0009_access_definitions`, table
+  `axentra_access_definitions`, forced RLS): `ax.access_definitions.apply(product,
+  AccessDefinitions(revision, permissions, roles))` applies an embedding product's permissions and
+  custom roles once per revision (content hash per product, advisory lock, audit event
+  `access.definitions.apply`); an equal revision is a no-op, an older one is never applied
+  (`stale`), the same revision with other content is `409`. Managed roles cannot be changed or
+  deleted over the API; the unversioned `ax.permissions.register` is ignored for such products.
+  `drift()` compares for reconciliation. Replaces "last start wins".
+- `OidcService` for host routes: `redirect_uri=` (callback URL), `start(context=...)` (host
+  context stored encrypted with the login state, returned as `LoginResult.context`),
+  `finish(start_session=False)` and `LoginResult.identity` (issuer, subject, verified address,
+  name). Column `axentra_login_states.host_context` (migration `0009`).
 - Embedding Axentra as a library (docs/architecture/EMBEDDING.md):
   - `axentra.core.errors.problem_details(exc)` maps any exception to a framework-independent
     `ProblemInfo` (status, code, title, redacted detail, extra members, headers such as

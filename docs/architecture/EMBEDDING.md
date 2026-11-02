@@ -128,6 +128,41 @@ RLS applies to the host connection only if its role is subject to it (not a supe
 - Non-transactional steps: files marked `-- axentra:no-transaction`. Details in
   [DATA](DATA.md#migrations-and-namespaces).
 
+## Permissions and roles of the product
+
+Register what the product's code defines with **versioned access definitions** instead of
+calling `ax.permissions.register` and creating roles at every start ("last start wins" during a
+rolling deployment):
+
+```python
+from axentra.access.definitions import AccessDefinitions, RoleDefinition
+from axentra.access.product_permissions import ProductPermission
+
+ACCESS = AccessDefinitions(
+    3,  # raise on every content change; pin the content hash of each revision in a test
+    permissions=(ProductPermission("crm.deals:approve", "tenant", "Approve deals"),),
+    roles=(RoleDefinition("sales", "Sales", "tenant", ("tenant:read", "crm.deals:approve")),),
+)
+result = ax.access_definitions.apply("crm", ACCESS, applied_by="crm 2.4.0")  # at every start
+# result.outcome: "applied" (newer: written once, audited), "unchanged", "stale" (older: nothing written)
+```
+
+The same revision with other content raises `Conflict` (stop the start: two builds disagree).
+Managed roles are changed only by code (`409` over the API). See
+[SECURITY_MODEL](SECURITY_MODEL.md#versioned-access-definitions).
+
+## OIDC login on the host's routes
+
+A host that keeps its own login routes, cookies and session model can still let Axentra run the
+login: build an `OidcService` with `redirect_uri=` (the host's callback URL), call
+`start(provider, return_to=..., ip=..., context={...})` and set the login cookie to the returned
+`state`; in the callback call `finish(provider, state=..., code=..., error=...,
+browser_state=<login cookie>, ip=..., user_agent=..., start_session=False)`, map
+`OidcLoginError.code` to the host's error codes, read `result.user_id`, `result.identity` and
+`result.context`, and start the host's session. Rotate the session on login (end the session the
+browser held) and whenever its context changes. Details in
+[SECURITY_MODEL](SECURITY_MODEL.md#passwords) ("OIDC logins on a host product's routes").
+
 ## Version checks
 
 The package version is dynamic (hatch reads `src/axentra/_version.py`), so `pyproject.toml` has no
