@@ -10,6 +10,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   now names versioned access definitions as the deterministic way.
 
 ### Fixed
+- Invitation links in split-origin deployments: the new installation setting
+  `notify.invitation_accept_url` (absolute http(s) URL, https in production, `{token}` placeholder
+  like the product setting) is used when a product has no own `settings.invitation_accept_url`.
+  Before, such links always pointed to `<security.public_url>/accept-invitation`, the API origin,
+  where no accept page exists when Studio or the product frontend lives on another origin. The
+  default is unchanged; `GET /v1/settings` reports the effective base as
+  `notify.invitation_accept_url`.
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an
   authorization read) inside a `join(conn, scope)` block emptied that block's scope: under

@@ -35,6 +35,13 @@ session_ttl_hours = 12
 session_idle_minutes = 120
 login_rate_per_minute = 10
 
+[notify]
+# Link in invitation emails, when the product sets no own settings.invitation_accept_url. The
+# frontend that accepts invitations is not served on the API origin (public_url), so name it:
+# your product frontend's accept page, or Studio's (https://studio.example.com/invitations/accept).
+# {token} is replaced, otherwise ?token= is appended.
+# invitation_accept_url = "https://app.example.com/accept-invitation"
+
 [observability]
 log_level = "INFO"
 log_format = "json"

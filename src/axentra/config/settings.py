@@ -22,6 +22,7 @@ import os
 from pathlib import Path
 import tomllib
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -223,6 +224,28 @@ class NotifySettings(_Section):
     """Rendered subjects/bodies (and local mailbox entries) are erased after this many days."""
     message_retention_days: int = Field(180, ge=1)
     """Finished messages (incl. recipient addresses) are deleted after this many days."""
+    invitation_accept_url: str | None = None
+    """Installation-wide link for invitation emails, used when a product has no own
+    ``settings.invitation_accept_url``. ``{token}`` is replaced by the token, otherwise
+    ``?token=``/``&token=`` is appended. ``None`` (default): ``<security.public_url>/accept-invitation``.
+    Set it when the frontend that accepts invitations (e.g. Studio) is not served on the API origin.
+    ``http``/``https`` only; ``https`` in production."""
+
+    @field_validator("invitation_accept_url")
+    @classmethod
+    def _invitation_accept_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        parts = urlsplit(v)
+        if parts.scheme not in ("http", "https") or not parts.hostname or any(c.isspace() for c in v):
+            raise ValueError("notify.invitation_accept_url must be an absolute http(s) URL")
+        if parts.fragment and "{token}" not in v:
+            # ``?token=`` would be appended after the fragment and never reach the page's query.
+            raise ValueError("notify.invitation_accept_url may contain a fragment only with {token}")
+        return v
 
 
 class BillingSettings(_Section):
@@ -339,6 +362,13 @@ class Settings(_Section):
         return "disabled" if self.is_production else "public"
 
     @property
+    def invitation_accept_base(self) -> str:
+        """Installation-wide base of invitation links (a product's own setting takes precedence)."""
+        return self.notify.invitation_accept_url or (
+            self.security.public_url.rstrip("/") + "/accept-invitation"
+        )
+
+    @property
     def secure_cookies(self) -> bool:
         return self.security.public_url.startswith("https://")
 
@@ -373,6 +403,9 @@ class Settings(_Section):
                     "events.webhook_allow_private_targets disables the SSRF guard; in production it also needs"
                     " events.webhook_allow_private_targets_in_production = true"
                 )
+            accept_url = self.notify.invitation_accept_url
+            if accept_url is not None and not accept_url.startswith("https://"):
+                problems.append("notify.invitation_accept_url must use https in production")
             if self.billing.provider == "fake":
                 problems.append("billing.provider 'fake' is not allowed in production")
         if self.billing.live_payments and self.billing.provider != "stripe":

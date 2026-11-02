@@ -105,3 +105,53 @@ def test_production_requires_secure_configuration():
     bad = load_settings(None, environ={}, security={"allowed_origins": ["*"]})
     with pytest.raises(ConfigurationError):
         bad.validate_security()
+
+
+def test_notify_invitation_accept_url_validation():
+    assert load_settings(None, environ={}).notify.invitation_accept_url is None
+    assert load_settings(None, environ={}).invitation_accept_base == "http://127.0.0.1:8080/accept-invitation"
+    s = load_settings(
+        None,
+        environ={"AXENTRA__NOTIFY__INVITATION_ACCEPT_URL": " https://studio.example/invitations/accept "},
+    )
+    assert s.notify.invitation_accept_url == "https://studio.example/invitations/accept"
+    assert s.invitation_accept_base == "https://studio.example/invitations/accept"
+    assert (
+        load_settings(None, environ={}, notify={"invitation_accept_url": ""}).notify.invitation_accept_url
+        is None
+    )
+    for bad in (
+        "javascript:alert(1)",
+        "ftp://studio.example/x",
+        "/invitations/accept",
+        "https://",
+        "https://studio.example/a b",
+        "https://studio.example/accept#frag",
+    ):
+        with pytest.raises(ConfigurationError):
+            load_settings(None, environ={}, notify={"invitation_accept_url": bad})
+    # A fragment is fine when the token is placed with {token} (hash-routed frontends).
+    load_settings(
+        None, environ={}, notify={"invitation_accept_url": "https://s.example/#/accept?token={token}"}
+    )
+    prod = {
+        "environment": "production",
+        "security": {
+            "public_url": "https://api.example",
+            "master_keys_ref": "env:K",
+            "allowed_origins": ["https://studio.example"],
+        },
+    }
+    with pytest.raises(ConfigurationError, match=r"notify\.invitation_accept_url must use https"):
+        load_settings(
+            None,
+            environ={},
+            notify={"invitation_accept_url": "http://studio.example/invitations/accept"},
+            **prod,
+        ).validate_security()
+    load_settings(
+        None,
+        environ={},
+        notify={"invitation_accept_url": "https://studio.example/invitations/accept"},
+        **prod,
+    ).validate_security()
