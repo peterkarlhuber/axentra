@@ -42,7 +42,9 @@ the configuration file (`deploy/config/single.toml` or `multi.toml`):
   `deploy/compose/initdb/01-roles.sql` creates `axentra_owner` (owns the database and schema,
   runs migrations) and `axentra_app` (no superuser, no BYPASSRLS, no DDL, `SELECT/INSERT/UPDATE/
   DELETE` on the owner's tables through default privileges). The port is not published.
-- `migrate`: one-shot `axentra migrate` as `axentra_owner`, after the database is healthy.
+- `migrate`: one-shot `axentra migrate --grant-runtime-role axentra_app` as `axentra_owner`, after
+  the database is healthy (the grant also makes `axentra_schema_migrations` read-only for the
+  application role; idempotent, `axentra db grant-runtime-role`).
 - `api`: `axentra serve` as `axentra_app`, after `migrate` completed successfully. Read-only root
   filesystem, all capabilities dropped, `no-new-privileges`, `/tmp` as tmpfs.
 
@@ -111,4 +113,7 @@ AXENTRA_CONFIG=/etc/axentra/axentra.toml axentra serve --host 0.0.0.0 --port 808
 
 Run `axentra serve` under a process manager (systemd) as an unprivileged user. For roles on an
 existing PostgreSQL server, run the statements of `deploy/compose/initdb/01-roles.sql` with your
-own passwords (the `\getenv` lines are psql-specific).
+own passwords (the `\getenv` lines are psql-specific), or create the two roles yourself and let
+`axentra db grant-runtime-role axentra_app` (as the owner) grant the runtime role; `axentra db
+inspect-role` shows whether row-level security fully applies to the application role (no
+superuser, no `BYPASSRLS`, owns no table).

@@ -9,6 +9,7 @@ import sys
 import textwrap
 from typing import Any
 
+import psycopg
 import pytest
 
 from axentra.api.app import create_app
@@ -127,9 +128,12 @@ def test_reencrypt_rotates_every_column_and_old_key_can_be_removed(world: World,
 def test_reencrypt_covers_product_registered_columns(ax, pg_urls, tmp_path, capsys, monkeypatch):
     from axentra.data.reencrypt import EncryptedColumn
 
+    with psycopg.connect(pg_urls["owner"], autocommit=True) as owner:  # the product's migration
+        owner.execute(
+            "CREATE TABLE IF NOT EXISTS hard_product_secrets (id integer PRIMARY KEY, token_enc text)"
+        )
+        owner.execute("TRUNCATE hard_product_secrets")
     with ax.db.transaction(DbScope.platform()) as tx:
-        tx.execute("CREATE TABLE IF NOT EXISTS hard_product_secrets (id integer PRIMARY KEY, token_enc text)")
-        tx.execute("TRUNCATE hard_product_secrets")
         for i in range(1, 6):
             tx.execute(
                 "INSERT INTO hard_product_secrets VALUES (%s, %s)",
@@ -356,7 +360,7 @@ def test_migrate_applies_configured_and_entry_point_namespaces(fixture_packages,
     from axentra.cli import main
 
     url_file = tmp_path / "migration-url"
-    url_file.write_text(pg_urls["app"] + "\n", encoding="utf-8")
+    url_file.write_text(pg_urls["owner"] + "\n", encoding="utf-8")
     cfg = _write_config(
         tmp_path / "ax.toml",
         pg_urls,

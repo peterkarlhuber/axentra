@@ -19,18 +19,18 @@ SELECT "odd;name" FROM a;
 
 
 def test_migrations_are_idempotent_and_checksummed(pg_urls):
-    runner = MigrationRunner(pg_urls["app"])
+    runner = MigrationRunner(pg_urls["owner"])
     assert runner.migrate() == []
     status = runner.status()
     assert all(s["applied"] and s["checksum_ok"] for s in status)
 
 
 def test_product_namespace_migrations(pg_urls):
-    runner = MigrationRunner(pg_urls["app"])
+    runner = MigrationRunner(pg_urls["owner"])
     runner.register([Migration("demo_ns", 1, "init", "CREATE TABLE demo_ns_items (id text PRIMARY KEY);")])
     assert runner.migrate() == ["demo_ns:0001_init"]
     assert runner.migrate() == []
-    tampered = MigrationRunner(pg_urls["app"])
+    tampered = MigrationRunner(pg_urls["owner"])
     tampered.register([Migration("demo_ns", 1, "init", "CREATE TABLE something_else (id text);")])
     with pytest.raises(RuntimeError, match="changed after it was applied"):
         tampered.migrate()
@@ -46,7 +46,7 @@ def _delete_namespace(pg_urls, namespace):
 def test_check_reports_pending_unknown_and_foreign_namespaces(pg_urls):
     import psycopg
 
-    runner = MigrationRunner(pg_urls["app"])
+    runner = MigrationRunner(pg_urls["owner"])
     runner.register(
         [
             Migration("chk_ns", 1, "one", "CREATE TABLE chk_ns_one (id text);"),
@@ -104,7 +104,7 @@ def test_newer_axentra_schema_is_refused(pg_urls):
             " VALUES ('axentra', 9999, 'from_the_future', 'x')"
         )
     try:
-        runner = MigrationRunner(pg_urls["app"])
+        runner = MigrationRunner(pg_urls["owner"])
         assert runner.check().namespaces["axentra"].unknown == [9999]
         with pytest.raises(ConfigurationError, match=r"axentra \[9999\]"):
             runner.migrate()
@@ -121,7 +121,7 @@ def test_before_apply_hook(pg_urls):
 
     migs = [Migration("hook_ns", 1, "init", "CREATE TABLE hook_ns_items (id text PRIMARY KEY);")]
     try:
-        failing = MigrationRunner(pg_urls["app"])
+        failing = MigrationRunner(pg_urls["owner"])
         failing.register(migs)
 
         def broken_backup(pending):
@@ -132,12 +132,12 @@ def test_before_apply_hook(pg_urls):
         assert [m.label for m in failing.check(["hook_ns"]).pending] == ["hook_ns:0001_init"]
 
         calls = []
-        runner = MigrationRunner(pg_urls["app"])
+        runner = MigrationRunner(pg_urls["owner"])
         runner.register(migs)
 
         def backup(pending):
             # Runs under the migration lock: another runner cannot start now.
-            with psycopg.connect(pg_urls["app"], autocommit=True) as other:
+            with psycopg.connect(pg_urls["owner"], autocommit=True) as other:
                 from axentra.data.migrations import MIGRATION_LOCK
 
                 got = other.execute("SELECT pg_try_advisory_lock(%s)", (MIGRATION_LOCK,)).fetchone()
@@ -166,7 +166,7 @@ CREATE OR REPLACE FUNCTION ntx_noop() RETURNS text LANGUAGE sql AS $$ SELECT 'a;
     mig = Migration("ntx_ns", 1, "concurrent_index", sql)
     assert not mig.transactional
     assert Migration("x", 1, "y", "CREATE TABLE t (id int);\n-- axentra:no-transaction\n").transactional
-    runner = MigrationRunner(pg_urls["app"])
+    runner = MigrationRunner(pg_urls["owner"])
     runner.register([mig])
     try:
         assert runner.migrate() == ["ntx_ns:0001_concurrent_index"]

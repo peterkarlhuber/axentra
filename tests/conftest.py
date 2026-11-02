@@ -4,6 +4,12 @@ Integration tests need a real PostgreSQL: set ``AXENTRA_TEST_DATABASE_URL`` to a
 (e.g. ``postgresql://postgres:pg@127.0.0.1:5432/postgres``). The fixtures create a fresh database
 and a NON-superuser role that owns the schema, so row-level security is really enforced.
 Without the variable, integration tests are skipped and reported as skipped.
+
+``AXENTRA_TEST_SPLIT_ROLES=1`` runs the suite as a production deployment does: a separate owner role
+(``axentra_test_owner``) owns the database and runs every migration (``pg_urls["owner"]``,
+``database.migration_url``), and the application role ``axentra_test_app`` owns nothing and only
+has the privileges of ``axentra db grant-runtime-role`` (so it cannot even switch RLS off).
+Without it, ``pg_urls["owner"]`` is the application role.
 """
 
 from __future__ import annotations
@@ -19,6 +25,8 @@ import pytest
 ADMIN_URL = os.environ.get("AXENTRA_TEST_DATABASE_URL")
 APP_ROLE = "axentra_test_app"
 APP_PASSWORD = "axentra-test-pw"
+OWNER_ROLE = "axentra_test_owner"
+SPLIT_ROLES = os.environ.get("AXENTRA_TEST_SPLIT_ROLES") == "1"
 
 
 def _with_db(url: str, dbname: str, user: str | None = None, password: str | None = None) -> str:
@@ -37,26 +45,38 @@ def pg_urls() -> Iterator[dict[str, str]]:
     if not ADMIN_URL:
         pytest.skip("AXENTRA_TEST_DATABASE_URL is not set; PostgreSQL integration tests not executed")
     dbname = f"axentra_test_{uuid.uuid4().hex[:8]}"
+    roles = [APP_ROLE, OWNER_ROLE] if SPLIT_ROLES else [APP_ROLE]
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
-        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (APP_ROLE,)).fetchone()
-        if not exists:
-            conn.execute(
-                sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(
-                    sql.Identifier(APP_ROLE), sql.Literal(APP_PASSWORD)
+        for role in roles:
+            exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
+            if not exists:
+                conn.execute(
+                    sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(
+                        sql.Identifier(role), sql.Literal(APP_PASSWORD)
+                    )
                 )
-            )
         conn.execute(
-            sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname), sql.Identifier(APP_ROLE))
+            sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname), sql.Identifier(roles[-1]))
         )
     urls = {
         "admin": _with_db(ADMIN_URL, dbname),
         "app": _with_db(ADMIN_URL, dbname, APP_ROLE, APP_PASSWORD),
+        "owner": _with_db(ADMIN_URL, dbname, roles[-1], APP_PASSWORD),
+        "owner_role": roles[-1],
         "server_admin": ADMIN_URL,
         "dbname": dbname,
     }
     from axentra.data.migrations import MigrationRunner
 
-    MigrationRunner(urls["app"]).migrate()
+    if SPLIT_ROLES:
+        with psycopg.connect(urls["admin"], autocommit=True) as conn:
+            conn.execute(sql.SQL("ALTER SCHEMA public OWNER TO {}").format(sql.Identifier(OWNER_ROLE)))
+            conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
+    MigrationRunner(urls["owner"]).migrate()
+    if SPLIT_ROLES:
+        from axentra.data.roles import grant_runtime_role
+
+        assert grant_runtime_role(urls["owner"], APP_ROLE).restricted
     yield urls
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
         conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(dbname)))
@@ -84,7 +104,7 @@ def make_settings(pg_urls: dict[str, str], **overrides):  # type: ignore[no-unty
     base = {
         "environment": "test",
         "mode": "multi",
-        "database": {"url": pg_urls["app"], "pool_max": 6},
+        "database": {"url": pg_urls["app"], "migration_url": pg_urls["owner"], "pool_max": 6},
         "security": {
             "master_keys": f"t1:{generate_key()}",
             "allowed_origins": ["http://studio.test"],

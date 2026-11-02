@@ -26,7 +26,7 @@ from axentra.api.app import create_app
 from axentra.data.database import DbScope
 from axentra.data.migrations import MigrationRunner
 from axentra.platform import Axentra
-from tests.conftest import APP_ROLE, make_settings
+from tests.conftest import make_settings
 from tests.integration.conftest import ADMIN_EMAIL, ADMIN_PASSWORD, ORIGIN
 
 pytestmark = [pytest.mark.postgres, pytest.mark.slow]
@@ -144,7 +144,9 @@ def test_dump_and_restore_preserves_data_rls_and_a_working_app(world, pg_urls, t
     restored = f"{pg_urls['dbname']}_restored_{uuid.uuid4().hex[:6]}"
     with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
         conn.execute(
-            sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(restored), sql.Identifier(APP_ROLE))
+            sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                sql.Identifier(restored), sql.Identifier(pg_urls["owner_role"])
+            )
         )
     try:
         out = subprocess.run(
@@ -164,7 +166,8 @@ def test_dump_and_restore_preserves_data_rls_and_a_working_app(world, pg_urls, t
             assert after["rls"][table] == (True, True), f"{table} lost ENABLE/FORCE ROW LEVEL SECURITY"
 
         # Migrations: nothing pending, checksums still match.
-        runner = MigrationRunner(restored_app)
+        restored_owner = make_conninfo(**{**conninfo_to_dict(pg_urls["owner"]), "dbname": restored})
+        runner = MigrationRunner(restored_owner)
         assert runner.migrate() == []
         assert all(s["applied"] and s["checksum_ok"] for s in runner.status())
 
@@ -173,7 +176,8 @@ def test_dump_and_restore_preserves_data_rls_and_a_working_app(world, pg_urls, t
         ax = Axentra.from_settings(settings)
         ax.start()
         try:
-            assert ax.db.check_role(allow_superuser=False) == {"superuser": False, "bypass_rls": False}
+            info = ax.db.check_role(allow_superuser=False)
+            assert (info["superuser"], info["bypass_rls"]) == (False, False)
             # RLS still confines an unfiltered query to the transaction's tenant.
             with ax.db.transaction(DbScope.tenant(pid, t1), read_only=True) as tx:
                 assert {r["tenant_id"] for r in tx.all("SELECT tenant_id FROM axentra_records")} == {t1}

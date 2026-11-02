@@ -257,9 +257,16 @@ class Axentra:
         if self._started:
             return
         self.db.open()
-        self.db.check_role(
-            allow_superuser=self.settings.database.allow_superuser or not self.settings.is_production
+        relaxed = not self.settings.is_production
+        info = self.db.check_role(
+            allow_superuser=self.settings.database.allow_superuser or relaxed,
+            allow_table_owner=self.settings.database.allow_table_owner or relaxed,
         )
+        if info["table_owner"] and self.settings.is_production:
+            logger.warning(
+                "the database role owns tables protected by row-level security (it could switch RLS off);"
+                " use a separate owner role for migrations (database.allow_table_owner = false enforces it)"
+            )
         if self.settings.database.require_current_schema:
             try:
                 self.require_current_schema()

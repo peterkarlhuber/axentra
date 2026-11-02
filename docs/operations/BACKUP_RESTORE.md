@@ -73,8 +73,9 @@ Switch over:
    new name) or point `AXENTRA_DATABASE_URL` at the restored database.
 3. Make sure the keyring that matches the backup is configured (the active keyring plus every
    older key used when the backup was taken).
-4. Run `axentra migrate` (applies migrations newer than the backup, verifies checksums of the
-   rest), then start the API.
+4. Run `axentra migrate --grant-runtime-role axentra_app` as the owner role (applies migrations
+   newer than the backup, verifies checksums of the rest, re-applies the runtime role's grants),
+   then start the API.
 5. Restore file storage to the same point in time as the database.
 
 ## Verify a restore
