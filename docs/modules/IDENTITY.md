@@ -30,8 +30,18 @@ Argon2id (`argon2-cffi` defaults; hashes are upgraded on login when parameters c
 `security.password_min_length` (default 12), at most 1024 characters, not equal to the email,
 at least four distinct characters. Unknown accounts are verified against a dummy hash so the
 timing stays similar. Failed logins are throttled per IP and per account in one-minute windows stored in
-PostgreSQL (`security.login_rate_per_minute`), so the limit holds across API processes. Password
+PostgreSQL (`security.login_rate_per_minute`), so the limit holds across API processes. The
+throttle counts atomically *before* the password is verified and gives the attempt back after a
+successful login (`IdentityService.hit()` / `refund()`; the older `throttle()` + `count_failure()`
+pair is check-then-count and kept only for compatibility). Anyone who knows an email can block
+password logins of that account for up to a minute (see SECURITY_MODEL.md, "Rate limiting"). Password
 login can be switched off with `security.password_login = false` (OIDC only).
+
+**First password for OIDC-only users.** `POST /v1/me/password` needs the current password,
+except for users who have none. Those may set one only within `security.fresh_login_minutes`
+(default 5) of the session's login (`403` `reauthentication_required` otherwise; log in again
+through the provider and retry), and never with `security.first_password = "disabled"`. This keeps
+a stolen session from becoming a permanent password login that bypasses the identity provider.
 
 ## Sessions
 

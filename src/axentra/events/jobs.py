@@ -17,7 +17,8 @@ exactly-once execution.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import logging
@@ -28,9 +29,10 @@ from typing import TYPE_CHECKING, Any
 from psycopg.types.json import Jsonb
 
 from axentra.access.authorizer import Authorizer
+from axentra.access.permissions import BY_NAME, PRODUCT, TENANT, validate_permissions
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
-from axentra.core.context import Principal
+from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
 from axentra.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
@@ -108,6 +110,26 @@ def check_idempotency_key(key: str | None) -> str | None:
     if not (1 <= len(key) <= 200) or not key.isprintable():
         raise ValidationFailed("idempotency key must be 1-200 printable characters")
     return key
+
+
+@dataclass(frozen=True, slots=True)
+class JobKindSpec:
+    """Who may enqueue a job kind through the API and what its handler may do.
+
+    - ``enqueue_permission``: a permission that lets callers *without* ``jobs:manage`` enqueue this
+      kind for a tenant (typically ``events:publish``). ``None`` (the default): only ``jobs:manage``
+      holders (product operators) may enqueue it through the API.
+    - ``permissions``: the permission set of the handler's principal. ``None``: all product and
+      tenant permissions (trusted kinds only). Required when ``enqueue_permission`` is set.
+    """
+
+    kind: str
+    enqueue_permission: str | None = None
+    permissions: frozenset[str] | None = None
+
+
+#: The handler principal's permissions when a kind declares none.
+DEFAULT_HANDLER_PERMISSIONS = frozenset(PRODUCT | TENANT)
 
 
 def job_scope(product_id: str, tenant_id: str | None) -> DbScope:
@@ -382,15 +404,122 @@ class JobService:
         self.audit = audit
         self.queue = JobQueue(db, settings)
         self.handlers: dict[str, Handler] = {}
+        self.kinds: dict[str, JobKindSpec] = {}
 
     # -- registry ------------------------------------------------------------------------------
 
-    def register(self, kind: str, handler: Handler, *, replace: bool = False) -> None:
-        """Register the handler of a job kind (in every worker process that should run it)."""
+    def register(
+        self,
+        kind: str,
+        handler: Handler,
+        *,
+        replace: bool = False,
+        enqueue_permission: str | None = None,
+        permissions: Iterable[str] | None = None,
+    ) -> None:
+        """Register the handler of a job kind (in every worker process that should run it).
+
+        ``enqueue_permission`` and ``permissions`` declare the kind (see :class:`JobKindSpec` and
+        :meth:`declare`). Without them only ``jobs:manage`` holders can enqueue the kind through
+        the API and the handler holds all product and tenant permissions."""
         check_kind(kind)
         if kind in self.handlers and not replace:
             raise ValueError(f"a handler for job kind {kind!r} is already registered")
+        if enqueue_permission is not None or permissions is not None:
+            self.declare(kind, enqueue_permission=enqueue_permission, permissions=permissions, replace=True)
         self.handlers[kind] = handler
+
+    def declare(
+        self,
+        kind: str,
+        *,
+        enqueue_permission: str | None = None,
+        permissions: Iterable[str] | None = None,
+        replace: bool = False,
+    ) -> JobKindSpec:
+        """Declare a job kind without (or before) registering its handler.
+
+        The API process needs the declaration to let tenant members enqueue a kind; the worker
+        needs it to confine the handler's principal. Declare the same kinds in both (``register``
+        with the same arguments does it in processes that also run the handler).
+
+        A kind open to ``enqueue_permission`` must declare the handler's ``permissions``
+        explicitly: job payloads come from callers and are untrusted."""
+        check_kind(kind)
+        if kind.startswith(RESERVED_PREFIX) and enqueue_permission is not None:
+            raise ValueError(f"job kinds starting with {RESERVED_PREFIX!r} cannot be opened to the API")
+        if kind in self.kinds and not replace:
+            raise ValueError(f"job kind {kind!r} is already declared")
+        if enqueue_permission is not None:
+            pdef = BY_NAME.get(enqueue_permission)
+            if pdef is None or pdef.scope == "platform":
+                raise ValueError(
+                    f"enqueue_permission must be a product or tenant permission: {enqueue_permission!r}"
+                )
+            if permissions is None:
+                raise ValueError(
+                    "a job kind that callers without jobs:manage may enqueue must declare the handler's permissions"
+                )
+        perms = None if permissions is None else validate_permissions(set(permissions))
+        spec = JobKindSpec(kind=kind, enqueue_permission=enqueue_permission, permissions=perms)
+        self.kinds[kind] = spec
+        return spec
+
+    def handler_permissions(self, kind: str) -> frozenset[str]:
+        spec = self.kinds.get(kind)
+        if spec is None or spec.permissions is None:
+            return DEFAULT_HANDLER_PERMISSIONS
+        return spec.permissions
+
+    def _enqueuer(self, created_by: str | None) -> Principal | None:
+        """The user or API key that enqueued a job through :meth:`enqueue` (``None`` otherwise)."""
+        if not created_by:
+            return None
+        if created_by.startswith("usr_"):
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one(
+                    "SELECT u.status, pr.role FROM axentra_users u"
+                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id WHERE u.id = %s",
+                    (created_by,),
+                )
+            if row is None or row["status"] != "active":
+                return Principal(actor=Actor(ActorKind.USER, created_by))  # no relation: nothing
+            role = PlatformRole(row["role"]) if row["role"] else None
+            return Principal(actor=Actor(ActorKind.USER, created_by), platform_role=role)
+        if created_by.startswith("key_"):
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one(
+                    "SELECT product_id, tenant_id, permissions FROM axentra_api_keys WHERE id = %s"
+                    " AND (revoked_at IS NULL OR revoked_at > now()) AND (expires_at IS NULL OR expires_at > now())",
+                    (created_by,),
+                )
+            return Principal(
+                actor=Actor(ActorKind.API_KEY, created_by),
+                api_key_product_id=row["product_id"] if row else "-",
+                api_key_tenant_id=row["tenant_id"] if row else None,
+                api_key_permissions=frozenset(row["permissions"]) if row else frozenset(),
+            )
+        return None
+
+    def principal_for(self, job: Job) -> Principal:
+        """The principal a job's handler acts as.
+
+        A system actor confined to the job's product (and tenant), never with platform permissions,
+        holding the kind's declared permissions (:meth:`handler_permissions`). For jobs that a user
+        or API key enqueued through :meth:`enqueue`, the set is further reduced to what that caller
+        holds *now* in the job's scope, so a job never does more than its enqueuer could (and nothing
+        once the enqueuer lost access)."""
+        from axentra.events.worker import job_principal
+
+        perms = self.handler_permissions(job.kind)
+        if not job.kind.startswith(RESERVED_PREFIX):
+            enqueuer = self._enqueuer(job.created_by)
+            if enqueuer is not None:
+                try:
+                    perms = perms & self.authz.grant(enqueuer, job.product_id, job.tenant_id).permissions
+                except (Forbidden, NotFound):
+                    perms = frozenset()
+        return job_principal(job, perms)
 
     def handler(self, kind: str) -> Callable[[Handler], Handler]:
         """Decorator form of :meth:`register`."""
@@ -409,13 +538,22 @@ class JobService:
         except NotFound:
             raise NotFound("job not found") from None
 
-    def _require_enqueue(self, principal: Principal, product_id: str, tenant_id: str | None) -> None:
+    def _require_enqueue(
+        self, principal: Principal, product_id: str, tenant_id: str | None, kind: str
+    ) -> None:
+        """``jobs:manage`` enqueues any kind; other callers only kinds declared with an
+        ``enqueue_permission`` they hold in the tenant (see :meth:`declare`)."""
         if tenant_id is None:
             self.authz.require(principal, "jobs:manage", product_id)
             return
         grant = self.authz.grant(principal, product_id, tenant_id)
-        if not {"jobs:manage", "events:publish"} & grant.permissions:
-            raise Forbidden("missing permission jobs:manage or events:publish")
+        if "jobs:manage" in grant.permissions:
+            return
+        spec = self.kinds.get(kind)
+        if spec is None or spec.enqueue_permission is None:
+            raise Forbidden(f"missing permission jobs:manage (job kind {kind} is not open to tenant callers)")
+        if spec.enqueue_permission not in grant.permissions:
+            raise Forbidden(f"missing permission {spec.enqueue_permission}")
 
     # -- API operations ------------------------------------------------------------------------
 
@@ -436,7 +574,7 @@ class JobService:
         check_kind(kind)
         if kind.startswith(RESERVED_PREFIX):
             raise ValidationFailed(f"job kinds starting with {RESERVED_PREFIX!r} are reserved")
-        self._require_enqueue(principal, product_id, tenant_id)
+        self._require_enqueue(principal, product_id, tenant_id, kind)
         with self.db.transaction(job_scope(product_id, tenant_id)) as tx:
             job, created = self.queue.enqueue_in_tx(
                 tx,
@@ -451,6 +589,8 @@ class JobService:
                 idempotency_key=idempotency_key,
                 created_by=principal.actor.id,
             )
+            if not created:
+                self._check_replay(principal, job, payload or {}, priority)
             if created:
                 self.audit.record(
                     tx,
@@ -463,6 +603,17 @@ class JobService:
                     details={"kind": kind},
                 )
         return public_job(job)
+
+    def _check_replay(self, principal: Principal, job: Job, payload: dict[str, Any], priority: int) -> None:
+        """An Idempotency-Key replay returns the stored job only for the same request (kind,
+        tenant, payload, priority) from its enqueuer or from a caller who may read jobs; anything
+        else is ``409`` (without revealing the stored job)."""
+        if job.payload != payload or job.priority != priority:
+            raise Conflict("the idempotency key was already used for a different request")
+        if job.created_by != principal.actor.id and not self.authz.has(
+            principal, "jobs:read", job.product_id, job.tenant_id
+        ):
+            raise Conflict("the idempotency key was already used by another caller")
 
     def get(self, principal: Principal, product_id: str, job_id: str) -> Job:
         job = self._load(principal, product_id, job_id)
@@ -645,9 +796,11 @@ class JobService:
 
 
 __all__ = [
+    "DEFAULT_HANDLER_PERMISSIONS",
     "FINISHED_STATUSES",
     "Handler",
     "JobCancelled",
+    "JobKindSpec",
     "JobQueue",
     "JobService",
     "PermanentJobError",

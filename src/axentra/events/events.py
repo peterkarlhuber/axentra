@@ -23,7 +23,7 @@ from psycopg.types.json import Jsonb
 from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
 from axentra.core.context import Principal
-from axentra.core.errors import NotFound, ValidationFailed
+from axentra.core.errors import Conflict, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, Row, Tx
@@ -189,9 +189,19 @@ class EventService:
         else:
             self.authz.require(principal, "events:publish", product_id, tenant_id)
         with self.db.transaction(job_scope(product_id, tenant_id)) as tx:
-            return self.publish_in_tx(
+            event = self.publish_in_tx(
                 tx, product_id, tenant_id, type, data, idempotency_key=idempotency_key, actor=principal
             )
+            if idempotency_key is not None:
+                # A replay returns the stored event only for the same request from the same caller
+                # (or a caller who may read events); anything else is 409 without the stored event.
+                if event.type != type or event.data != (data or {}):
+                    raise Conflict("the idempotency key was already used for a different request")
+                if event.actor_id != principal.actor.id and not self.authz.has(
+                    principal, "jobs:read", product_id, tenant_id
+                ):
+                    raise Conflict("the idempotency key was already used by another caller")
+            return event
 
     # -- reading -------------------------------------------------------------------------------
 

@@ -62,6 +62,7 @@ def _blocked(addr: IPAddress) -> bool:
         or addr.is_multicast
         or addr.is_reserved
         or addr.is_unspecified
+        or (isinstance(addr, ipaddress.IPv6Address) and addr.is_site_local)  # deprecated fec0::/10
     )
 
 

@@ -3,6 +3,22 @@
 All methods take the calling :class:`~axentra.core.context.Principal` and authorize through
 :class:`~axentra.access.authorizer.Authorizer` before touching data. Writes run in the narrowest
 database scope (product or tenant) so row-level security backs up the explicit filters.
+
+Role assignment rules (see docs/architecture/SECURITY_MODEL.md, "Role ceiling"):
+
+- **Ceiling.** A caller may assign (set, invite, change to) a role only if every permission of that
+  role is one the caller holds in the same scope, and may change or remove a member only if the
+  member's *current* role is also within the caller's permissions. The owner role of a scope
+  (``tenant_owner``, ``product_owner``) can only be assigned, changed or removed by an owner of
+  that scope or by someone whose authority comes from a higher level (a product operator for
+  tenants, a platform admin for everything). Platform admins and trusted system code are exempt.
+- **No user directory.** Adding an existing user directly (by email or id) only resolves users the
+  caller may already see: platform admins see every user, principals with ``product_users:read``
+  see the users of the product, everyone else only the members of the tenant itself. Everyone else
+  must be invited. An unknown and a not-visible user get the same ``404``, so the endpoint is not
+  an existence oracle for the installation's accounts.
+- **Last owner.** Changes that would leave a tenant or product without an owner fail with ``409``.
+  The guard locks the tenant (product) row first, so concurrent demotions are serialized.
 """
 
 from __future__ import annotations
@@ -14,12 +30,12 @@ from typing import Any
 from psycopg import errors as pg_errors
 from psycopg.types.json import Jsonb
 
-from axentra.access.authorizer import Authorizer
-from axentra.access.permissions import BUILTIN_ROLES
+from axentra.access.authorizer import Authorizer, Grant
+from axentra.access.permissions import BUILTIN_ROLES, TENANT
 from axentra.audit.log import AuditLog
 from axentra.config.settings import DeploymentMode, Settings
 from axentra.core.clock import utcnow
-from axentra.core.context import Principal
+from axentra.core.context import ActorKind, Principal
 from axentra.core.errors import (
     Conflict,
     Forbidden,
@@ -45,6 +61,8 @@ from axentra.tenancy.models import (
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 INVITATION_TTL = timedelta(days=7)
+OWNER_ROLE = {"tenant": "tenant_owner", "product": "product_owner"}
+USER_NOT_FOUND = "user not found; invite them by email instead"
 MAX_SETTINGS_BYTES = 32_000
 
 
@@ -294,10 +312,16 @@ class TenancyService:
         user_id: str | None = None,
         email: str | None = None,
     ) -> ProductMember:
-        self.authz.require(principal, "product_members:manage", product_id)
+        grant = self.authz.require(principal, "product_members:manage", product_id)
+        uid = self._resolve_user(principal, product_id, None, user_id=user_id, email=email)
         with self.db.transaction(DbScope.product(product_id)) as tx:
             self._check_role(tx, product_id, role, "product")
-            uid = self._resolve_user(tx, user_id, email)
+            self._lock_product(tx, product_id)
+            current = tx.scalar(
+                "SELECT role FROM axentra_product_members WHERE product_id = %s AND user_id = %s",
+                (product_id, uid),
+            )
+            self._check_ceiling(tx, principal, grant, product_id, "product", role, current)
             if self._would_remove_last_owner(tx, product_id, uid, role):
                 raise Conflict("the product needs at least one owner")
             tx.execute(
@@ -323,8 +347,16 @@ class TenancyService:
         return ProductMember.model_validate(row)
 
     def remove_product_member(self, principal: Principal, product_id: str, user_id: str) -> None:
-        self.authz.require(principal, "product_members:manage", product_id)
+        grant = self.authz.require(principal, "product_members:manage", product_id)
         with self.db.transaction(DbScope.product(product_id)) as tx:
+            self._lock_product(tx, product_id)
+            current = tx.scalar(
+                "SELECT role FROM axentra_product_members WHERE product_id = %s AND user_id = %s",
+                (product_id, user_id),
+            )
+            if current is None:
+                raise NotFound("member not found")
+            self._check_ceiling(tx, principal, grant, product_id, "product", None, current)
             if self._would_remove_last_owner(tx, product_id, user_id, None):
                 raise Conflict("the product needs at least one owner")
             n = tx.execute(
@@ -344,6 +376,7 @@ class TenancyService:
 
     @staticmethod
     def _would_remove_last_owner(tx: Tx, product_id: str, user_id: str, new_role: str | None) -> bool:
+        """Call with the product row locked (:meth:`_lock_product`)."""
         current = tx.one(
             "SELECT role FROM axentra_product_members WHERE product_id = %s AND user_id = %s",
             (product_id, user_id),
@@ -358,15 +391,111 @@ class TenancyService:
         return bool(others == 0)
 
     @staticmethod
-    def _resolve_user(tx: Tx, user_id: str | None, email: str | None) -> str:
+    def _lock_product(tx: Tx, product_id: str) -> None:
+        """Serialize operator changes of one product (the last-owner guard reads, then writes)."""
+        tx.execute("SELECT 1 FROM axentra_products WHERE id = %s FOR NO KEY UPDATE", (product_id,))
+
+    @staticmethod
+    def _lock_tenant(tx: Tx, product_id: str, tenant_id: str) -> None:
+        """Serialize membership changes of one tenant (the last-owner guard reads, then writes).
+
+        ``FOR NO KEY UPDATE`` does not block inserts of rows that reference the tenant."""
+        tx.execute(
+            "SELECT 1 FROM axentra_tenants WHERE id = %s AND product_id = %s FOR NO KEY UPDATE",
+            (tenant_id, product_id),
+        )
+
+    @staticmethod
+    def _role_permissions(tx: Tx, product_id: str, role: str, scope: str) -> frozenset[str]:
+        """The permissions a role confers in ``scope`` (tenant roles only grant tenant permissions)."""
+        if role in BUILTIN_ROLES:
+            perms = BUILTIN_ROLES[role].permissions
+        else:
+            row = tx.one(
+                "SELECT permissions FROM axentra_roles WHERE product_id = %s AND key = %s", (product_id, role)
+            )
+            perms = frozenset(row["permissions"]) if row else frozenset()
+        return perms & TENANT if scope == "tenant" else perms
+
+    @staticmethod
+    def _owner_level(principal: Principal, grant: Grant, scope: str) -> bool:
+        """Whether the caller may assign, change or remove the owner role of ``scope``."""
+        if principal.is_platform_admin:
+            return True
+        machine = principal.actor.kind is ActorKind.API_KEY or (
+            principal.actor.kind is ActorKind.SYSTEM and principal.api_key_product_id is not None
+        )
+        if scope == "tenant":
+            # Tenant owners, and authority from the product level (operators, product-wide keys).
+            return (
+                grant.tenant_role == "tenant_owner"
+                or grant.product_role is not None
+                or (machine and principal.api_key_tenant_id is None)
+            )
+        return grant.product_role == "product_owner" or machine
+
+    def _check_ceiling(
+        self,
+        tx: Tx,
+        principal: Principal,
+        grant: Grant,
+        product_id: str,
+        scope: str,
+        new_role: str | None,
+        current_role: str | None,
+    ) -> None:
+        """Refuse role changes above the caller's own level (see the module docstring)."""
+        if principal.is_platform_admin:
+            return
+        for role, what in ((new_role, "assign the role"), (current_role, "change a member with the role")):
+            if role is None:
+                continue
+            missing = self._role_permissions(tx, product_id, role, scope) - grant.permissions
+            if missing:
+                raise Forbidden(
+                    f"you cannot {what} {role}: it has permissions you do not hold ({', '.join(sorted(missing))})"
+                )
+            if role == OWNER_ROLE[scope] and not self._owner_level(principal, grant, scope):
+                raise Forbidden(f"only owners can {what} {role}")
+
+    def _resolve_user(
+        self,
+        principal: Principal,
+        product_id: str,
+        tenant_id: str | None,
+        *,
+        user_id: str | None,
+        email: str | None,
+    ) -> str:
+        """The id of an existing user the caller may add directly (see the module docstring).
+
+        Unknown users and users the caller may not see raise the same ``NotFound``."""
         if user_id:
-            row = tx.one("SELECT id FROM axentra_users WHERE id = %s", (user_id,))
+            where, params = ["u.id = %s"], [user_id]
         elif email:
-            row = tx.one("SELECT id FROM axentra_users WHERE lower(email) = lower(%s)", (email.strip(),))
+            where, params = ["lower(u.email) = lower(%s)"], [email.strip()]
         else:
             raise ValidationFailed("user_id or email is required")
+        if not principal.is_platform_admin:
+            if self.authz.has(principal, "product_users:read", product_id):
+                where.append(
+                    "(EXISTS (SELECT 1 FROM axentra_memberships m WHERE m.product_id = %s AND m.user_id = u.id)"
+                    " OR EXISTS (SELECT 1 FROM axentra_product_members pm WHERE pm.product_id = %s"
+                    " AND pm.user_id = u.id))"
+                )
+                params += [product_id, product_id]
+            elif tenant_id is not None:
+                where.append(
+                    "EXISTS (SELECT 1 FROM axentra_memberships m WHERE m.product_id = %s AND m.tenant_id = %s"
+                    " AND m.user_id = u.id)"
+                )
+                params += [product_id, tenant_id]
+            else:
+                raise NotFound(USER_NOT_FOUND)
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            row = tx.one(f"SELECT u.id FROM axentra_users u WHERE {' AND '.join(where)}", params)
         if row is None:
-            raise NotFound("user not found; invite them to a tenant instead")
+            raise NotFound(USER_NOT_FOUND)
         return str(row["id"])
 
     # -- tenants ---------------------------------------------------------------------------------
@@ -426,6 +555,11 @@ class TenancyService:
         owner_user_id: str | None = None,
     ) -> Tenant:
         self.authz.require(principal, "tenants:create", product_id)
+        owner_uid = (
+            self._resolve_user(principal, product_id, None, user_id=owner_user_id, email=None)
+            if owner_user_id
+            else None
+        )
         tid = new_id("ten")
         try:
             with self.db.transaction(DbScope.tenant(product_id, tid)) as tx:
@@ -439,12 +573,11 @@ class TenancyService:
                         Jsonb(_check_settings(settings or {})),
                     ),
                 )
-                if owner_user_id:
-                    uid = self._resolve_user(tx, owner_user_id, None)
+                if owner_uid:
                     tx.execute(
                         "INSERT INTO axentra_memberships (id, product_id, tenant_id, user_id, role)"
                         " VALUES (%s, %s, %s, %s, 'tenant_owner')",
-                        (new_id("mem"), product_id, tid, uid),
+                        (new_id("mem"), product_id, tid, owner_uid),
                     )
                 self.audit.record(
                     tx,
@@ -566,10 +699,15 @@ class TenancyService:
         user_id: str | None = None,
         email: str | None = None,
     ) -> Membership:
-        self.authz.require(principal, "members:manage", product_id, tenant_id)
+        grant = self.authz.require(principal, "members:manage", product_id, tenant_id)
+        uid = self._resolve_user(principal, product_id, tenant_id, user_id=user_id, email=email)
         with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
             self._check_role(tx, product_id, role, "tenant")
-            uid = self._resolve_user(tx, user_id, email)
+            self._lock_tenant(tx, product_id, tenant_id)
+            current = tx.scalar(
+                "SELECT role FROM axentra_memberships WHERE tenant_id = %s AND user_id = %s", (tenant_id, uid)
+            )
+            self._check_ceiling(tx, principal, grant, product_id, "tenant", role, current)
             self._guard_last_tenant_owner(tx, tenant_id, uid, role)
             tx.execute(
                 "INSERT INTO axentra_memberships (id, product_id, tenant_id, user_id, role) VALUES (%s,%s,%s,%s,%s)"
@@ -592,8 +730,16 @@ class TenancyService:
         return Membership.model_validate(row)
 
     def remove_member(self, principal: Principal, product_id: str, tenant_id: str, user_id: str) -> None:
-        self.authz.require(principal, "members:manage", product_id, tenant_id)
+        grant = self.authz.require(principal, "members:manage", product_id, tenant_id)
         with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
+            self._lock_tenant(tx, product_id, tenant_id)
+            current = tx.scalar(
+                "SELECT role FROM axentra_memberships WHERE tenant_id = %s AND user_id = %s",
+                (tenant_id, user_id),
+            )
+            if current is None:
+                raise NotFound("member not found")
+            self._check_ceiling(tx, principal, grant, product_id, "tenant", None, current)
             self._guard_last_tenant_owner(tx, tenant_id, user_id, None)
             n = tx.execute(
                 "DELETE FROM axentra_memberships WHERE product_id = %s AND tenant_id = %s AND user_id = %s",
@@ -613,6 +759,7 @@ class TenancyService:
 
     @staticmethod
     def _guard_last_tenant_owner(tx: Tx, tenant_id: str, user_id: str, new_role: str | None) -> None:
+        """Call with the tenant row locked (:meth:`_lock_tenant`), so concurrent demotions serialize."""
         current = tx.one(
             "SELECT role FROM axentra_memberships WHERE tenant_id = %s AND user_id = %s", (tenant_id, user_id)
         )
@@ -653,12 +800,13 @@ class TenancyService:
     def invite(
         self, principal: Principal, product_id: str, tenant_id: str, *, email: str, role: str
     ) -> NewInvitation:
-        self.authz.require(principal, "members:manage", product_id, tenant_id)
+        grant = self.authz.require(principal, "members:manage", product_id, tenant_id)
         email = normalize_email(email)
         token = "axinv_" + new_token()
         iid = new_id("inv")
         with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
             self._check_role(tx, product_id, role, "tenant")
+            self._check_ceiling(tx, principal, grant, product_id, "tenant", role, None)
             if tx.one(
                 "SELECT 1 FROM axentra_invitations WHERE tenant_id = %s AND lower(email) = lower(%s)"
                 " AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()",

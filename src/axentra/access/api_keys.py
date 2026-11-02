@@ -6,6 +6,16 @@ an optional tenant binding, an explicit permission list and an optional expiry. 
 platform permissions. Rotation creates a replacement key and revokes the old one, optionally
 after a grace period so deployments can switch over.
 
+Keys created by keys (a principal holding ``api_keys:manage`` through an API key):
+
+- hold at most the creating key's permissions (as for every creator);
+- never outlive it: without ``expires_at`` the child inherits the parent's expiry, and a later
+  ``expires_at`` is refused (``422``);
+- are revoked together with it: revoking a key also revokes, at once, every active key that was
+  created by it (recursively). Rotation does not cascade (the replacement takes over the role of
+  the old key); keys made by users are not tied to the user's membership (they belong to the
+  product; revoke them when people leave).
+
 Adapted in concept from nodestro-api ``api_keys.py``/``serving.py`` (MIT, see
 docs/architecture/NODESTRO_REUSE.md): hash-only storage, constant-time comparison, ``last_used_at``
 written at most once a minute.
@@ -95,6 +105,18 @@ class ApiKeyService:
             raise ValidationFailed("name must be 1-200 characters")
         if expires_at is not None and expires_at <= utcnow():
             raise ValidationFailed("expires_at must be in the future")
+        if principal.actor.kind is ActorKind.API_KEY:
+            # A derived key never outlives the key that creates it.
+            with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+                parent_expiry = tx.scalar(
+                    "SELECT expires_at FROM axentra_api_keys WHERE id = %s AND product_id = %s",
+                    (principal.actor.id, product_id),
+                )
+            if parent_expiry is not None:
+                if expires_at is None:
+                    expires_at = parent_expiry
+                elif expires_at > parent_expiry:
+                    raise ValidationFailed("expires_at must not be later than the expiry of the creating key")
         key_id = new_id("key")
         secret = new_token()
         full = f"axk_{key_id.split('_', 1)[1]}_{secret}"
@@ -176,6 +198,15 @@ class ApiKeyService:
             )
             if row["revoked_at"] is None or row["revoked_at"] > utcnow():
                 tx.execute("UPDATE axentra_api_keys SET revoked_at = now() WHERE id = %s", (key_id,))
+                # Cascade: keys created by this key (and by those, recursively) are revoked too.
+                children = tx.all(
+                    "WITH RECURSIVE d(id) AS (SELECT id FROM axentra_api_keys WHERE product_id = %(p)s"
+                    " AND created_by = %(k)s UNION SELECT k.id FROM axentra_api_keys k JOIN d ON k.created_by = d.id"
+                    " WHERE k.product_id = %(p)s)"
+                    " UPDATE axentra_api_keys SET revoked_at = now() WHERE id IN (SELECT id FROM d)"
+                    " AND (revoked_at IS NULL OR revoked_at > now()) RETURNING id",
+                    {"p": product_id, "k": key_id},
+                )
                 self.audit.record(
                     tx,
                     principal,
@@ -184,6 +215,7 @@ class ApiKeyService:
                     target_id=key_id,
                     product_id=product_id,
                     tenant_id=row["tenant_id"],
+                    details={"cascaded": sorted(r["id"] for r in children)} if children else None,
                 )
             row = tx.one_or_404("SELECT * FROM axentra_api_keys WHERE id = %s", (key_id,))
         return _model(row)

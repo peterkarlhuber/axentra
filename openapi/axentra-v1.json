@@ -5639,6 +5639,11 @@
             "title": "Sensitive",
             "type": "boolean"
           },
+          "system_only": {
+            "default": false,
+            "title": "System Only",
+            "type": "boolean"
+          },
           "updated_at": {
             "anyOf": [
               {

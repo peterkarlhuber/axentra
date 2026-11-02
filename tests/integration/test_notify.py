@@ -183,11 +183,11 @@ def test_send_idempotent_dispatch_and_local_mailbox(world):
     again = _send(alice, pid, tid, {"user_id": uid}, idem="k-1")
     assert again.status_code == 200 and again.headers["Idempotent-Replayed"] == "true"
     assert again.json()["id"] == msg["id"]
-    assert _send(alice, pid, tid, {"email": "other@example.com"}, idem="k-1").status_code == 409
+    assert _send(alice, pid, tid, {"email": "bob@example.com"}, idem="k-1").status_code == 409
     # Missing variables / unknown template / bad recipient.
     r = alice.post(
         f"/v1/products/{pid}/tenants/{tid}/notify/send",
-        json={"template_key": "welcome", "to": {"email": "x@example.com"}},
+        json={"template_key": "welcome", "to": {"email": "bob@example.com"}},
     )
     assert r.status_code == 422 and "name" in r.text
     assert _send(alice, pid, tid, {"email": "x@example.com"}, key="nope").status_code == 404
@@ -197,7 +197,9 @@ def test_send_idempotent_dispatch_and_local_mailbox(world):
     stranger = world.user("stranger@example.com")
     assert _send(alice, pid, tid, {"user_id": stranger}).status_code == 404
     # Locale choice: explicit wins.
-    r = _send(alice, pid, tid, {"email": "carl@example.com"}, locale="de")
+    # Free-form addresses outside the tenant need notify:send_external (review 2026-11-01, F6).
+    assert _send(alice, pid, tid, {"email": "carl@example.com"}).status_code == 403
+    r = _send(alice, pid, tid, {"email": "alice@example.com"}, locale="de")
     assert r.json()["locale"] == "de"
 
     res = world.ax.notify.dispatcher().run_once(10)
@@ -467,7 +469,7 @@ def test_isolation_and_permissions(world):
     alice = world.login_as("alice@example.com")
     bert = world.login_as("bert@example.com")
     viewer = world.login_as("viewer@example.com")
-    mid = _send(alice, pid, tid_a, {"email": "x@example.com"}).json()["id"]
+    mid = _send(alice, pid, tid_a, {"email": "viewer@example.com"}).json()["id"]
 
     # Tenant senders see their tenant's messages only.
     assert alice.get(f"/v1/products/{pid}/notify/messages/{mid}").status_code == 200
@@ -509,7 +511,11 @@ def test_isolation_and_permissions(world):
         c.post(
             f"/v1/products/{pid}/tenants/{tid_a}/notify/send",
             headers=h,
-            json={"template_key": "welcome", "to": {"email": "k@example.com"}, "variables": {"name": "K"}},
+            json={
+                "template_key": "welcome",
+                "to": {"email": "alice@example.com"},
+                "variables": {"name": "K"},
+            },
         ).status_code
         == 202
     )

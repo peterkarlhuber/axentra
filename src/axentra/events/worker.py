@@ -32,10 +32,10 @@ import uuid
 
 import psycopg
 
-from axentra.access.permissions import PRODUCT, TENANT
 from axentra.core.context import Actor, ActorKind, Principal
 from axentra.data.database import DbScope, Tx
 from axentra.events.jobs import (
+    DEFAULT_HANDLER_PERMISSIONS,
     NOTIFY_CHANNEL,
     JobCancelled,
     PermanentJobError,
@@ -59,14 +59,16 @@ def worker_name() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
-def job_principal(job: Job) -> Principal:
-    """The principal a handler acts as: a system actor confined to the job's product (and tenant)
-    with all product and tenant permissions, never platform permissions."""
+def job_principal(job: Job, permissions: frozenset[str] | None = None) -> Principal:
+    """A system actor confined to the job's product (and tenant) with ``permissions`` (default: all
+    product and tenant permissions), never platform permissions. Workers use
+    :meth:`~axentra.events.jobs.JobService.principal_for`, which applies the kind's declared
+    permissions and the enqueuer's current permissions."""
     return Principal(
         actor=Actor(ActorKind.SYSTEM, f"job:{job.id}", f"job {job.kind}"),
         api_key_product_id=job.product_id,
         api_key_tenant_id=job.tenant_id,
-        api_key_permissions=frozenset(PRODUCT | TENANT),
+        api_key_permissions=frozenset(DEFAULT_HANDLER_PERMISSIONS if permissions is None else permissions),
     )
 
 
@@ -204,7 +206,7 @@ class JobWorker:
     def _context(self, job: Job) -> JobContext:
         return JobContext(
             job=job,
-            principal=job_principal(job),
+            principal=self.ax.jobs.principal_for(job),
             _ax=self.ax,
             _worker=self.name,
             _cancel=job.cancel_requested,

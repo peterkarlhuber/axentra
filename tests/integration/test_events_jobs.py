@@ -146,8 +146,11 @@ def test_idempotency_keys(fast_ax):
     ax = fast_ax
     pid, t1, t2 = _setup(ax)
     a = ax.jobs.enqueue(SYS, pid, "demo.k", {"v": 1}, tenant_id=t1, idempotency_key="k1")
-    b = ax.jobs.enqueue(SYS, pid, "demo.k", {"v": 2}, tenant_id=t1, idempotency_key="k1")
+    b = ax.jobs.enqueue(SYS, pid, "demo.k", {"v": 1}, tenant_id=t1, idempotency_key="k1")
     assert a.id == b.id and b.payload == {"v": 1}
+    # A different request with the same key is a conflict (security review 2026-11-01, F8).
+    with pytest.raises(Conflict):
+        ax.jobs.enqueue(SYS, pid, "demo.k", {"v": 2}, tenant_id=t1, idempotency_key="k1")
     # Other tenant, other kind or product level: separate key spaces.
     c = ax.jobs.enqueue(SYS, pid, "demo.k", {}, tenant_id=t2, idempotency_key="k1")
     d = ax.jobs.enqueue(SYS, pid, "demo.other", {}, tenant_id=t1, idempotency_key="k1")
@@ -156,7 +159,7 @@ def test_idempotency_keys(fast_ax):
     # Permanent while the row exists: also after the job finished.
     ax.jobs.register("demo.k", lambda ctx: None)
     JobWorker(ax, kinds=["demo.k"]).run_once()
-    again = ax.jobs.enqueue(SYS, pid, "demo.k", {}, tenant_id=t1, idempotency_key="k1")
+    again = ax.jobs.enqueue(SYS, pid, "demo.k", {"v": 1}, tenant_id=t1, idempotency_key="k1")
     assert again.id == a.id and again.status == "succeeded"
 
 
@@ -411,8 +414,10 @@ def test_events_outbox_subscribers_and_idempotency(fast_ax):
     assert ax.events.list(SYS, pid).items == []
     with ax.db.transaction(DbScope.tenant(pid, tid)) as tx:
         ev = ax.events.publish_in_tx(tx, pid, tid, "invoice.created", {"n": 1}, idempotency_key="inv-1")
-    again = ax.events.publish(SYS, pid, tid, "invoice.created", {"n": 2}, idempotency_key="inv-1")
+    again = ax.events.publish(SYS, pid, tid, "invoice.created", {"n": 1}, idempotency_key="inv-1")
     assert again.id == ev.id and again.data == {"n": 1}
+    with pytest.raises(Conflict):
+        ax.events.publish(SYS, pid, tid, "invoice.created", {"n": 2}, idempotency_key="inv-1")
     with pytest.raises(ValueError, match="scope"), ax.db.transaction(DbScope.tenant(pid, t2)) as tx:
         ax.events.publish_in_tx(tx, pid, tid, "invoice.created", {})
     with pytest.raises(ValidationFailed):
@@ -454,7 +459,11 @@ def test_tenant_isolation_and_permissions(world):
         ax.jobs.get(kp, other_pid, oj.id)
     with pytest.raises(NotFound):
         ax.jobs.get(SYS, pid, oj.id)  # wrong product in the path
-    # Tenant-bound key may enqueue (events:publish) in its tenant but not cancel (jobs:manage).
+    # Tenant-bound key may enqueue (events:publish) a kind opened to it in its tenant but not cancel
+    # (jobs:manage); kinds that are not opened need jobs:manage.
+    with pytest.raises(Forbidden):
+        ax.jobs.enqueue(kp, pid, "demo.iso", {}, tenant_id=t1)
+    ax.jobs.declare("demo.iso", enqueue_permission="events:publish", permissions={"records:read"})
     mine = ax.jobs.enqueue(kp, pid, "demo.iso", {}, tenant_id=t1)
     with pytest.raises(Forbidden):
         ax.jobs.cancel(kp, pid, mine.id)

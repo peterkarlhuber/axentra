@@ -216,8 +216,7 @@ class TaskboardService:
     ) -> SignupResult:
         """Public self-service signup: a new user owning a new workspace on the free plan."""
         bucket = f"taskboard:signup:{ip or 'unknown'}"
-        self.ax.identity.throttle(bucket, 10)  # 10 signups per minute and client address
-        self.ax.identity.count_failure(bucket)  # counts every attempt, successful or not
+        self.ax.identity.hit(bucket, 10)  # 10 signups per minute and client address (atomic count)
         workspace_name = _text(workspace_name, "workspace name", min_len=1, max_len=200)
 
         def new_user() -> str:

@@ -27,8 +27,8 @@ routes and the `axentra worker` command.
 | Retries | Every failed attempt is re-queued after `min(cap, base·2^(n-1))`, randomized between 50 % and 100 % ("equal jitter"), until `max_attempts`. After that the status is `dead` (the dead letter). A `PermanentJobError` gives `failed` at once. |
 | Crash recovery | A worker that dies stops renewing its leases. After `events.lease_seconds` the reaper (every worker, every `reap_interval_seconds`) re-queues the job with backoff if attempts remain (`attempts` counts the lost attempt), otherwise marks it `dead`. |
 | Ordering | No FIFO guarantee. Claims prefer higher `priority`, then earlier `run_after`, then older id. Retries and concurrency reorder jobs. |
-| Idempotency keys (jobs) | Unique per **(product, tenant, kind, key)** for as long as the job row exists, which includes finished jobs until the retention purge (`observability.job_retention_days`, default 30). Enqueueing an existing key returns the existing job unchanged. A different tenant or kind is a separate key space. |
-| Events | `publish_in_tx` writes the event and its dispatch job in the caller's transaction, so the event exists if and only if the caller's writes commit (transactional outbox). Dispatch and every subscriber run **at least once**. Fan-out is idempotent (one subscriber job per (event, subscriber), one delivery per (endpoint, event)). Idempotency keys for events are unique per (product, tenant, key) until retention. |
+| Idempotency keys (jobs) | Unique per **(product, tenant, kind, key)** for as long as the job row exists, which includes finished jobs until the retention purge (`observability.job_retention_days`, default 30). Enqueueing an existing key returns the existing job unchanged. A different tenant or kind is a separate key space. Through `JobService.enqueue` (the API) a replay is returned only for the same request (payload and priority) and only to the job's creator or a caller with `jobs:read` in its scope; otherwise `409` without the stored job. |
+| Events | `publish_in_tx` writes the event and its dispatch job in the caller's transaction, so the event exists if and only if the caller's writes commit (transactional outbox). Dispatch and every subscriber run **at least once**. Fan-out is idempotent (one subscriber job per (event, subscriber), one delivery per (endpoint, event)). Idempotency keys for events are unique per (product, tenant, key) until retention. `EventService.publish` (the API) returns a replay only for the same type and data, to the event's actor or a caller with `jobs:read`; otherwise `409`. |
 | Webhooks | **At least once** per (endpoint, event), up to `webhook_max_attempts` attempts, plus manual redeliveries. Receivers must deduplicate by `Axentra-Event-Id` (= body `id`). There is no ordering guarantee between events. |
 | Schedules | At most one scheduler fires at a time (session advisory lock on a dedicated connection). **Each slot fires at most once**, because the `(schedule_id, slot)` primary key is inserted in the same transaction as the job and the advance of `next_run_at`. This also holds when two leaders overlap. Missed slots (no worker running) are **coalesced**: the overdue slot fires once, and then the next slot after now is used. The fired job itself has the usual at-least-once execution. |
 | Streams (SSE) | A client that resumes with `Last-Event-ID` gets every event committed after that position, as long as retention has not purged it. Positions are assigned after commit, in visibility order, so a late-committing transaction cannot slip behind a position already seen. The jobs stream shows the **latest** state of each changed job; intermediate states can be skipped. |
@@ -89,10 +89,34 @@ ax.jobs.register("reports.send", send_report)
 JobWorker(ax, kinds=["reports.send"], concurrency=4).run()     # blocking; or .start() / .stop()
 ```
 
-`ctx.principal` is a system principal **confined to the job's product (and tenant)**. It holds all
-product and tenant permissions and no platform permissions, so service calls made with it cannot
-reach another product or tenant. (The authorizer treats a system actor with
-`api_key_product_id` like an API key.)
+`ctx.principal` (built by `ax.jobs.principal_for(job)`) is a system principal **confined to the
+job's product (and tenant)**, never with platform permissions, so service calls made with it
+cannot reach another product or tenant. (The authorizer treats a system actor with
+`api_key_product_id` like an API key.) Its permissions are:
+
+- the kind's declared `permissions` (see below), or all product and tenant permissions for kinds
+  that declare none (trusted kinds: enqueued by product code, schedules or `jobs:manage` holders);
+- for jobs a user or API key enqueued through `POST /jobs`, further intersected with what that
+  enqueuer holds in the job's scope *when the handler runs* (a removed member's queued job can do
+  nothing). `ctx.transaction()` is raw database access in the job's scope (RLS applies) and is not
+  limited by these permissions, so handlers must still treat the payload as untrusted input.
+
+**Who may enqueue a kind through the API.** `jobs:manage` holders may enqueue any kind not starting
+with `axentra.`. Tenant callers with only `events:publish` (the `member` role) may enqueue a kind
+only when the product opened it explicitly, in every API process (and worker) that runs:
+
+```python
+ax.jobs.register(
+    "reports.export",
+    export_report,
+    enqueue_permission="events:publish",           # tenant members may enqueue it
+    permissions={"records:read", "files:write"},  # all the handler may do (required with enqueue_permission)
+)
+# An API process that does not run the handler declares the kind only:
+ax.jobs.declare("reports.export", enqueue_permission="events:publish", permissions={"records:read", "files:write"})
+```
+
+Any other kind answers `403` to such callers.
 
 `axentra worker [--kinds a,b] [--concurrency N] [--once] [--no-scheduler] [--shutdown-timeout S]
 [--load my.module]` runs a worker process. `--load` imports a module and calls its `setup(ax)` to
@@ -169,9 +193,11 @@ synchronously (no retries) and returns the recorded delivery.
 **SSRF protection:** only `https` (`http` only outside production with `webhook_allow_http`,
 which is refused in production). URLs must not contain credentials or fragments. `localhost` and
 `*.local`, `*.localhost`, `*.internal` are refused. Before every delivery the host is resolved and
-**every** address is checked. Private, loopback, link-local, multicast, reserved, unspecified and
-IPv4-mapped forms of these are refused unless `webhook_allow_private_targets = true` (tests and
-development only). The connection goes to the checked address (no second lookup, so DNS rebinding
+**every** address is checked. Private, loopback, link-local, multicast, reserved, unspecified,
+IPv6 site-local (`fec0::/10`) and IPv4-mapped forms of these are refused unless
+`webhook_allow_private_targets = true` (tests and development; production refuses to start with it
+unless `webhook_allow_private_targets_in_production = true` is also set, for receivers on a private
+network). The connection goes to the checked address (no second lookup, so DNS rebinding
 does not work), and TLS verifies the certificate for the host name. A refused target makes the
 delivery `dead` with no further retries. A host that does not resolve is retried.
 
@@ -209,7 +235,7 @@ with a relation to the product but without the permission get `403`.
 | `GET /jobs?status=&kind=&tenant_id=&limit=&cursor=` | `jobs:read` (in the tenant when `tenant_id` is given) | `Page[Job]` newest first |
 | `GET /jobs/stats?tenant_id=` | `jobs:read` | `JobStats` |
 | `GET /jobs/stream?tenant_id=` | `jobs:read` | SSE |
-| `POST /jobs` (+ `Idempotency-Key`) | `jobs:manage`; tenant jobs: `jobs:manage` or `events:publish` in the tenant | `201 Job` |
+| `POST /jobs` (+ `Idempotency-Key`) | `jobs:manage`; tenant jobs: `jobs:manage`, or the kind's declared `enqueue_permission` (e.g. `events:publish`) in the tenant | `201 Job`; `403` for kinds not opened to the caller; `409` when the key was used for a different request or by another caller without `jobs:read` |
 | `GET /jobs/{job_id}` | `jobs:read` (in the job's tenant) | `Job` |
 | `POST /jobs/{job_id}/retry` | `jobs:manage` | `Job` (`409` unless failed/dead) |
 | `POST /jobs/{job_id}/cancel` | `jobs:manage` | `Job` (`409` when finished) |
@@ -218,7 +244,7 @@ with a relation to the product but without the permission get `403`.
 | `GET /events?tenant_id=&type=a.b or a.*` | `jobs:read` | `Page[Event]` newest first |
 | `GET /events/stream?tenant_id=&types=` | `jobs:read` | SSE |
 | `GET /events/{event_id}` | `jobs:read` | `Event` |
-| `POST /tenants/{tenant_id}/events` (+ `Idempotency-Key`) | `events:publish` | `201 Event` |
+| `POST /tenants/{tenant_id}/events` (+ `Idempotency-Key`) | `events:publish` | `201 Event`; `409` on a key reused for a different request or by another caller without `jobs:read` |
 | `GET /webhooks` · `POST /webhooks` | `webhooks:read` · `webhooks:manage` | `Page[WebhookEndpoint]` · `201 {endpoint, secret}` |
 | `GET/PATCH/DELETE /webhooks/{id}` (`If-Match`) | `webhooks:read` / `webhooks:manage` | `WebhookEndpoint` / `204` |
 | `POST /webhooks/{id}/rotate-secret` `{grace_seconds}` | `webhooks:manage` | `{endpoint, secret}` |
@@ -266,7 +292,8 @@ Shapes (see `openapi/axentra-v1.json`):
 `lease_seconds` (60), `poll_interval_seconds` (1), `listen_notify` (true), `reap_interval_seconds`
 (15), `scheduler_interval_seconds` (5), `default_max_attempts` (5), `backoff_base_seconds` (2),
 `backoff_max_seconds` (3600), `webhook_max_attempts` (8), `webhook_timeout_seconds` (10),
-`webhook_response_max_bytes` (4096), `webhook_allow_private_targets` (false), `webhook_allow_http`
+`webhook_response_max_bytes` (4096), `webhook_allow_private_targets` (false; in production only
+with `webhook_allow_private_targets_in_production`), `webhook_allow_http`
 (false; refused in production), `sse_poll_seconds` (1), `sse_reauth_seconds` (15),
 `sse_keepalive_seconds` (15), `sse_max_seconds` (3600). Retention:
 `observability.job_retention_days` (30).

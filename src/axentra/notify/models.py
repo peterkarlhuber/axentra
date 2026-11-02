@@ -36,6 +36,9 @@ class Template(BaseModel):
     and is erased as soon as the message was sent."""
     version: int
     builtin: bool
+    system_only: bool = False
+    """Only Axentra itself sends this template (e.g. ``invitation``); ``POST .../notify/send``
+    refuses it, so callers can never choose its variables (such as the accept link)."""
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

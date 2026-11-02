@@ -37,7 +37,7 @@ from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.identity.service import normalize_email
-from axentra.notify.builtin import BUILTIN_TEMPLATES, INVITATION
+from axentra.notify.builtin import BUILTIN_TEMPLATES, INVITATION, SYSTEM_ONLY_TEMPLATES
 from axentra.notify.models import (
     LOCKED_CATEGORIES,
     DeliveryStats,
@@ -188,7 +188,9 @@ class NotifyService:
 
     @staticmethod
     def _template(row: Row, *, builtin: bool = False) -> Template:
-        return Template.model_validate({**row, "builtin": builtin})
+        return Template.model_validate(
+            {**row, "builtin": builtin, "system_only": row["key"] in SYSTEM_ONLY_TEMPLATES}
+        )
 
     @staticmethod
     def _builtin(product_id: str, key: str) -> Template | None:
@@ -196,7 +198,15 @@ class NotifyService:
         if spec is None:
             return None
         return Template.model_validate(
-            {**spec, "id": None, "product_id": product_id, "key": key, "version": 0, "builtin": True}
+            {
+                **spec,
+                "id": None,
+                "product_id": product_id,
+                "key": key,
+                "version": 0,
+                "builtin": True,
+                "system_only": key in SYSTEM_ONLY_TEMPLATES,
+            }
         )
 
     def _load_template(self, tx: Tx, product_id: str, key: str) -> Template | None:
@@ -493,8 +503,18 @@ class NotifyService:
         locale: str | None = None,
         idempotency_key: str | None = None,
     ) -> SendResult:
-        """Render and enqueue one notification for a tenant (permission ``notify:send``)."""
+        """Render and enqueue one notification for a tenant (permission ``notify:send``).
+
+        - System-only templates (:data:`~axentra.notify.builtin.SYSTEM_ONLY_TEMPLATES`, e.g. the
+          invitation) are refused with ``403``; Axentra sends them itself.
+        - ``to_user_id`` must be a member of the tenant or an operator of the product.
+        - ``to_email`` must belong to a member of the tenant unless the caller also holds the
+          product permission ``notify:send_external`` (otherwise any member could use the product's
+          sender as a mail relay). The answer is the same ``403`` whether or not the address has an
+          account."""
         self.authz.require(principal, "notify:send", product_id, tenant_id)
+        if template_key in SYSTEM_ONLY_TEMPLATES:
+            raise Forbidden(f"the template {template_key} can only be sent by the system")
         return self._enqueue(
             principal,
             product_id,
@@ -506,6 +526,7 @@ class NotifyService:
             locale=locale,
             idempotency_key=idempotency_key,
             restrict_users=True,
+            restrict_emails=not self.authz.has(principal, "notify:send_external", product_id),
         )
 
     def enqueue_system(
@@ -550,6 +571,7 @@ class NotifyService:
         locale: str | None,
         idempotency_key: str | None,
         restrict_users: bool,
+        restrict_emails: bool = False,
         fallback_locale: str | None = None,
     ) -> SendResult:
         if (to_user_id is None) == (to_email is None):
@@ -606,6 +628,15 @@ class NotifyService:
                     email, user_locale, user_id = user["email"], user["locale"], user["id"]
                     lookup_user = user_id
                 else:
+                    if restrict_emails and not tx.one(
+                        "SELECT 1 FROM axentra_memberships m JOIN axentra_users u ON u.id = m.user_id"
+                        " WHERE m.product_id = %s AND m.tenant_id = %s AND lower(u.email) = lower(%s)",
+                        (product_id, tenant_id, email),
+                    ):
+                        raise Forbidden(
+                            "sending to an address that is not a member of the tenant requires"
+                            " notify:send_external"
+                        )
                     found = tx.one(
                         "SELECT id, locale FROM axentra_users WHERE lower(email) = lower(%s)", (email,)
                     )

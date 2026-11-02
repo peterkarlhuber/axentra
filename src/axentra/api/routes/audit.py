@@ -88,9 +88,11 @@ def list_audit(
 
 @router.get("/audit/{event_id}", response_model=AuditEvent)
 def get_audit(event_id: str, principal: CurrentPrincipal, ax: Ax) -> AuditEvent:
+    # Same 404 for "does not exist" and "not yours to read" (no existence oracle for event ids).
     event = ax.audit.get(DbScope.platform(), event_id)
     if event.product_id is None:
-        ax.authz.require(principal, "platform:audit")
+        if not ax.authz.has(principal, "platform:audit"):
+            raise NotFound("audit event not found")
     elif not ax.authz.has(principal, "audit:read", event.product_id):
         raise NotFound("audit event not found")
     return event

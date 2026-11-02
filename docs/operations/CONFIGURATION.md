@@ -34,6 +34,9 @@ library). In `environment = "production"` it refuses to start when:
 - `security.master_keys` is set inline, or `security.master_keys_ref` is missing;
 - `security.allowed_origins` contains anything but explicit `https://` origins;
 - an OIDC provider has an inline `client_secret` or a non-https `issuer`;
+- `events.webhook_allow_http` is set;
+- `events.webhook_allow_private_targets` is set (it switches the webhook SSRF guard off) without the
+  explicit override `events.webhook_allow_private_targets_in_production = true`;
 - `billing.provider = "fake"`.
 
 In every environment: `allowed_origins` must not contain `*`, and `billing.live_payments`
@@ -83,6 +86,8 @@ superuser or `BYPASSRLS` role is refused in production unless `database.allow_su
 | `password_login` | `AXENTRA__SECURITY__PASSWORD_LOGIN` | `true` | Enable email/password login |
 | `password_min_length` | `AXENTRA__SECURITY__PASSWORD_MIN_LENGTH` | `12` | Minimum password length (>= 8) |
 | `login_rate_per_minute` | `AXENTRA__SECURITY__LOGIN_RATE_PER_MINUTE` | `10` | Failed logins per account per minute; per IP three times this |
+| `fresh_login_minutes` | `AXENTRA__SECURITY__FRESH_LOGIN_MINUTES` | `5` | How recent the login must be for a user without a password (OIDC-only) to set one |
+| `first_password` | `AXENTRA__SECURITY__FIRST_PASSWORD` | `fresh_login` | `fresh_login` or `disabled` (OIDC-only users can never set a password) |
 | `master_keys_ref` | `AXENTRA__SECURITY__MASTER_KEYS_REF` | none | Secret reference to the keyring `kid:base64key[,...]` (first key active). Required in production |
 | `master_keys` | `AXENTRA__SECURITY__MASTER_KEYS` | none | Inline keyring; refused in production. Without either, development uses `./var/dev-keyring`, test an ephemeral key |
 | `setup_token_ttl_minutes` | `AXENTRA__SECURITY__SETUP_TOKEN_TTL_MINUTES` | `60` | Lifetime of first-run setup tokens (>= 5) |

@@ -121,3 +121,46 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   `security.api_docs = "public"` to keep the previous behavior).
 - Registering the identical migration twice is now a no-op; two different migrations with the same
   `namespace:version` are refused.
+
+### Security
+Fixes for the independent security review of 2026-11-01 (`docs/security/REVIEW-2026-11-01.md`,
+regression tests in `tests/integration/test_security_review.py`). Behavior changes for API clients
+are marked **(API)**.
+- F1 **(API)** Role ceiling: assigning, inviting with, changing or removing a role needs every
+  permission of the role (and of the member's current role) in the caller's own grant; the owner
+  roles (`tenant_owner`, `product_owner`) need the owner rank (an owner of the scope, a product
+  operator for tenants, or a platform admin). Violations are `403`. `product_support` therefore
+  manages viewers only and can no longer make itself a tenant owner; tenant admins can no longer
+  demote, remove or create tenant owners.
+- F2 **(API)** Adding existing users directly (tenant members by email or id, `owner_user_id` on
+  tenant creation, product operators) resolves only users visible to the caller (platform admin:
+  all; `product_users:read`: the product's users; otherwise members of the tenant). Everyone else
+  gets the same `404` as an unknown user (no installation-wide email oracle, no enrollment without
+  consent); use invitations.
+- F6 **(API)** The built-in `invitation` template is system-only (`Template.system_only`), `POST
+  .../notify/send` refuses it with `403`. Sending to an email address that is not a member of the
+  tenant needs the new product permission `notify:send_external` (held by `product_owner` and
+  `product_admin`).
+- F4 **(API)** Callers without `jobs:manage` may enqueue only job kinds declared with
+  `enqueue_permission` (`ax.jobs.register(..., enqueue_permission=..., permissions=...)` or
+  `ax.jobs.declare(...)`); other kinds answer `403`. Handler principals hold the kind's declared
+  permissions, intersected with the enqueuer's current permissions for API-enqueued jobs
+  (`ax.jobs.principal_for(job)`).
+- F8 **(API)** Idempotency-Key replays of jobs and events return the stored row only for the same
+  request and to its creator or a `jobs:read` holder; otherwise `409`.
+- F5 **(API)** API keys created by an API key never outlive it (inherited expiry, later
+  `expires_at` is `422`) and are revoked together with it (recursive cascade on revoke).
+- F3 **(API)** Users without a password (OIDC-only) can set a first password only within
+  `security.fresh_login_minutes` (default 5) of their login (`403 reauthentication_required`
+  otherwise); `security.first_password = "disabled"` switches it off.
+- F7 The last-owner guards lock the tenant/product row, so concurrent demotions cannot remove the
+  last owner.
+- I1 Production refuses `events.webhook_allow_private_targets` unless
+  `events.webhook_allow_private_targets_in_production = true`.
+- I2 The webhook SSRF guard also blocks IPv6 site-local addresses (`fec0::/10`).
+- I3 **(API)** `GET /v1/audit/{id}` answers `404` (not `403`) for installation-wide events the
+  caller may not read.
+- I4 Login and setup throttling count atomically before verifying (`IdentityService.hit()` /
+  `refund()`); a successful login gives its attempt back.
+- I5 OIDC auto-linking of existing accounts by verified email is documented as a design decision
+  in `docs/architecture/SECURITY_MODEL.md`.

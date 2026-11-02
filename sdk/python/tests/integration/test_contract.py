@@ -275,20 +275,24 @@ def test_notify_send_idempotent_and_messages(
     )
     key = _key(admin, product, TENANT_PERMS, tenant=tenant)
     c = server.client(api_key=key.secret)
+    # notify:send reaches members of the tenant; free-form addresses need notify:send_external.
+    bob = f"{unique('bob')}@example.com"
+    server.user(bob)
+    admin.members.add(product, tenant, "member", email=bob)
     msg = c.notify.send(
         product,
         tenant,
         "welcome",
-        to_email="bob@example.com",
+        to_email=bob,
         variables={"name": "Bob"},
         idempotency_key="n-1",
     )
-    assert msg.status == "queued" and msg.recipient == "bob@example.com" and msg.subject == "Hi Bob"
+    assert msg.status == "queued" and msg.recipient == bob and msg.subject == "Hi Bob"
     again = c.notify.send(
         product,
         tenant,
         "welcome",
-        to_email="bob@example.com",
+        to_email=bob,
         variables={"name": "Bob"},
         idempotency_key="n-1",
     )
