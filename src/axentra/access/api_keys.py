@@ -29,7 +29,8 @@ from typing import Any
 
 from axentra.access.authorizer import Authorizer
 from axentra.access.models import ApiKey, NewApiKey
-from axentra.access.permissions import validate_permissions
+from axentra.access.permissions import is_product_permission_name, validate_permissions
+from axentra.access.product_permissions import load_catalog
 from axentra.audit.log import AuditLog
 from axentra.core.clock import utcnow
 from axentra.core.context import Actor, ActorKind, Principal
@@ -94,7 +95,10 @@ class ApiKeyService:
         _replaces: str | None = None,
     ) -> NewApiKey:
         grant = self.authz.require(principal, "api_keys:manage", product_id)
-        perms = validate_permissions(permissions)
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            catalog = load_catalog(tx, product_id)
+        # Built-in names and the product's own active permissions (never another product's).
+        perms = validate_permissions(permissions, product_permissions=catalog.scopes)
         if not perms:
             raise ValidationFailed("an API key needs at least one permission")
         # No privilege escalation: a caller can only hand out permissions it holds itself.
@@ -162,11 +166,16 @@ class ApiKeyService:
         old = self.get_key(principal, product_id, key_id)
         if old.status != "active":
             raise ValidationFailed("only active keys can be rotated")
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            active = load_catalog(tx, product_id).names
+        # Retired product permissions have no effect on the old key either; the replacement does
+        # not carry them (so rotating never fails because a product retired a permission).
+        dropped = sorted(p for p in old.permissions if is_product_permission_name(p) and p not in active)
         new = self.create_key(
             principal,
             product_id,
             name=old.name,
-            permissions=old.permissions,
+            permissions=[p for p in old.permissions if p not in dropped],
             tenant_id=old.tenant_id,
             expires_at=old.expires_at,
             _replaces=key_id,
@@ -184,7 +193,8 @@ class ApiKeyService:
                 target_type="api_key",
                 target_id=key_id,
                 product_id=product_id,
-                details={"replacement": new.key.id, "grace_seconds": grace_seconds},
+                details={"replacement": new.key.id, "grace_seconds": grace_seconds}
+                | ({"dropped_permissions": dropped} if dropped else {}),
             )
         return new
 

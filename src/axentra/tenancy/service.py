@@ -23,6 +23,7 @@ Role assignment rules (see docs/architecture/SECURITY_MODEL.md, "Role ceiling"):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 import re
 from typing import Any
@@ -31,7 +32,7 @@ from psycopg import errors as pg_errors
 from psycopg.types.json import Jsonb
 
 from axentra.access.authorizer import Authorizer, Grant
-from axentra.access.permissions import BUILTIN_ROLES, TENANT
+from axentra.access.permissions import BUILTIN_ROLES
 from axentra.audit.log import AuditLog
 from axentra.config.settings import DeploymentMode, Settings
 from axentra.core.context import ActorKind, Principal
@@ -87,6 +88,15 @@ class TenancyService:
         self.settings = settings
         self.authz = authz
         self.audit = audit
+        #: Checks of product settings run on create/update (modules add theirs, e.g. the storage
+        #: content-type policy); each raises ``ValidationFailed``.
+        self.product_settings_validators: list[Callable[[dict[str, Any]], None]] = []
+
+    def _check_product_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        _check_settings(settings)
+        for check in self.product_settings_validators:
+            check(settings)
+        return settings
 
     # -- products ------------------------------------------------------------------------------
 
@@ -166,7 +176,7 @@ class TenancyService:
                         _check_slug(slug),
                         name.strip(),
                         description,
-                        Jsonb(_check_settings(settings or {})),
+                        Jsonb(self._check_product_settings(settings or {})),
                     ),
                 )
                 owner = owner_user_id or principal.user_id
@@ -221,7 +231,7 @@ class TenancyService:
             if description is not None and description != row["description"]:
                 changes["description"] = description
             if settings is not None:
-                changes["settings"] = Jsonb(_check_settings(settings))
+                changes["settings"] = Jsonb(self._check_product_settings(settings))
             if changes:
                 sets = ", ".join(f"{k} = %s" for k in changes)
                 tx.execute(
@@ -406,15 +416,9 @@ class TenancyService:
 
     @staticmethod
     def _role_permissions(tx: Tx, product_id: str, role: str, scope: str) -> frozenset[str]:
-        """The permissions a role confers in ``scope`` (tenant roles only grant tenant permissions)."""
-        if role in BUILTIN_ROLES:
-            perms = BUILTIN_ROLES[role].permissions
-        else:
-            row = tx.one(
-                "SELECT permissions FROM axentra_roles WHERE product_id = %s AND key = %s", (product_id, role)
-            )
-            perms = frozenset(row["permissions"]) if row else frozenset()
-        return perms & TENANT if scope == "tenant" else perms
+        """The permissions a role confers in ``scope`` (tenant roles only grant tenant permissions;
+        active product-defined permissions included, retired ones ignored)."""
+        return Authorizer.role_permissions(tx, product_id, role, scope)
 
     @staticmethod
     def _owner_level(principal: Principal, grant: Grant, scope: str) -> bool:

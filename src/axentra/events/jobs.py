@@ -29,7 +29,13 @@ from typing import TYPE_CHECKING, Any
 from psycopg.types.json import Jsonb
 
 from axentra.access.authorizer import Authorizer
-from axentra.access.permissions import BY_NAME, PRODUCT, TENANT, validate_permissions
+from axentra.access.permissions import (
+    BY_NAME,
+    PRODUCT,
+    TENANT,
+    is_product_permission_name,
+    validate_permissions,
+)
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
 from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
@@ -119,8 +125,9 @@ class JobKindSpec:
     - ``enqueue_permission``: a permission that lets callers *without* ``jobs:manage`` enqueue this
       kind for a tenant (typically ``events:publish``). ``None`` (the default): only ``jobs:manage``
       holders (product operators) may enqueue it through the API.
-    - ``permissions``: the permission set of the handler's principal. ``None``: all product and
-      tenant permissions (trusted kinds only). Required when ``enqueue_permission`` is set.
+    - ``permissions``: the permission set of the handler's principal. ``None``: all built-in
+      product and tenant permissions (trusted kinds only; product-defined permissions must be
+      listed explicitly). Required when ``enqueue_permission`` is set.
     """
 
     kind: str
@@ -452,7 +459,11 @@ class JobService:
             raise ValueError(f"job kind {kind!r} is already declared")
         if enqueue_permission is not None:
             pdef = BY_NAME.get(enqueue_permission)
-            if pdef is None or pdef.scope == "platform":
+            # Product-defined names are accepted by syntax (kinds are not bound to one product);
+            # they work only in products that declare them.
+            if (pdef is None and not is_product_permission_name(enqueue_permission)) or (
+                pdef is not None and pdef.scope == "platform"
+            ):
                 raise ValueError(
                     f"enqueue_permission must be a product or tenant permission: {enqueue_permission!r}"
                 )
@@ -460,7 +471,7 @@ class JobService:
                 raise ValueError(
                     "a job kind that callers without jobs:manage may enqueue must declare the handler's permissions"
                 )
-        perms = None if permissions is None else validate_permissions(set(permissions))
+        perms = None if permissions is None else validate_permissions(set(permissions), any_product_name=True)
         spec = JobKindSpec(kind=kind, enqueue_permission=enqueue_permission, permissions=perms)
         self.kinds[kind] = spec
         return spec

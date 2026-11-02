@@ -14,6 +14,12 @@ class FileInfo(BaseModel):
     tenant_id: str
     name: str
     content_type: str
+    """The stored type; ``application/octet-stream`` for files stored inert."""
+    stored_inert: bool = False
+    """A blocked type (executable/HTML/SVG/script) kept as an opaque attachment by the product's
+    content-type policy; it is never served with its real type."""
+    original_content_type: str | None = None
+    """For inert files: the declared type (else the sniffed one); informational, never served."""
     size: int
     sha256: str | None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -67,3 +73,26 @@ class PurgeReport(BaseModel):
     temp_files_removed: int = 0
     rows_removed: int = 0
     errors: int = 0
+
+
+class StoragePolicy(BaseModel):
+    """The effective content-type policy of a product (``settings.storage`` of the product)."""
+
+    product_id: str
+    blocked_types: Literal["refuse", "store_inert"]
+    """What happens to blocked uploads: ``refuse`` (415) or ``store_inert`` (opaque attachment)."""
+    blocked_types_source: Literal["product", "installation"]
+    """``installation``: the product inherits ``storage.store_blocked_as_inert``."""
+    installation_blocked_types: Literal["refuse", "store_inert"]
+    blocked_extensions: list[str]
+    """Extensions the product blocks in addition to the built-in list."""
+    blocked_content_types: list[str]
+    """Content types the product blocks in addition to the built-in list."""
+    inert_extensions: list[str]
+    """Blocked extensions the product accepts as inert attachments even under ``refuse``."""
+    builtin_blocked_extensions: list[str]
+    builtin_blocked_content_types: list[str]
+    allowed_content_types: list[str]
+    """The installation's allow-list (``storage.allowed_content_types``; empty: all)."""
+    product_version: int
+    """The product's version, for ``If-Match`` on ``PUT .../storage/policy``."""

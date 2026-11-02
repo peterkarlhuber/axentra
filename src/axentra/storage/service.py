@@ -54,8 +54,10 @@ from axentra.storage.models import (
     FileInfo,
     ProductStorageUsage,
     PurgeReport,
+    StoragePolicy,
     TenantStorageUsage,
 )
+from axentra.storage.policy import ContentPolicy, lenient_policy, parse_policy
 from axentra.storage.tokens import DownloadClaims, DownloadSigner
 
 logger = logging.getLogger(__name__)
@@ -196,6 +198,113 @@ class StorageService:
     def max_file_bytes(self) -> int:
         return self.cfg.max_file_bytes
 
+    # -- content-type policy ---------------------------------------------------------------
+
+    def _policy(self, tx: Tx, product_id: str) -> ContentPolicy:
+        row = tx.one("SELECT settings -> 'storage' AS s FROM axentra_products WHERE id = %s", (product_id,))
+        return lenient_policy(row["s"] if row else None, installation_inert=self.cfg.store_blocked_as_inert)
+
+    def content_policy(self, product_id: str) -> ContentPolicy:
+        """The effective content-type policy of a product (trusted callers; no authorization)."""
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            return self._policy(tx, product_id)
+
+    def _policy_model(self, product_id: str, policy: ContentPolicy, product_version: int) -> StoragePolicy:
+        return StoragePolicy(
+            product_id=product_id,
+            blocked_types=policy.blocked_types,
+            blocked_types_source=policy.blocked_types_source,
+            installation_blocked_types="store_inert" if self.cfg.store_blocked_as_inert else "refuse",
+            blocked_extensions=sorted(policy.blocked_extensions),
+            blocked_content_types=sorted(policy.blocked_content_types),
+            inert_extensions=sorted(policy.inert_extensions),
+            builtin_blocked_extensions=sorted(safety.BLOCKED_EXTENSIONS),
+            builtin_blocked_content_types=sorted(safety.BLOCKED_TYPES),
+            allowed_content_types=list(self.cfg.allowed_content_types),
+            product_version=product_version,
+        )
+
+    def get_policy(self, principal: Principal, product_id: str) -> StoragePolicy:
+        """The effective policy (``product:read``; also tenant members, e.g. for upload dialogs)."""
+        self.authz.require(principal, "product:read", product_id)
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            row = tx.one_or_404(
+                "SELECT version FROM axentra_products WHERE id = %s", (product_id,), what="product"
+            )
+            policy = self._policy(tx, product_id)
+        return self._policy_model(product_id, policy, row["version"])
+
+    def set_policy(
+        self,
+        principal: Principal,
+        product_id: str,
+        *,
+        blocked_types: str | None,
+        blocked_extensions: builtins.list[str],
+        blocked_content_types: builtins.list[str],
+        inert_extensions: builtins.list[str],
+        if_match: int | None = None,
+    ) -> StoragePolicy:
+        """Replace the product's policy keys in ``settings.storage`` (``product:manage``).
+        ``blocked_types = None`` inherits the installation setting; other storage settings
+        (quotas) are kept."""
+        self.authz.require(principal, "product:manage", product_id)
+        new: dict[str, Any] = {
+            "blocked_types": blocked_types,
+            "blocked_extensions": blocked_extensions,
+            "blocked_content_types": blocked_content_types,
+            "inert_extensions": inert_extensions,
+        }
+        policy = parse_policy(new, installation_inert=self.cfg.store_blocked_as_inert)
+        stored = {
+            "blocked_extensions": sorted(policy.blocked_extensions),
+            "blocked_content_types": sorted(policy.blocked_content_types),
+            "inert_extensions": sorted(policy.inert_extensions),
+        }
+        if blocked_types is not None:
+            stored["blocked_types"] = blocked_types  # type: ignore[assignment]
+        with self.db.transaction(DbScope.product(product_id)) as tx:
+            row = tx.one_or_404(
+                "SELECT settings, version, status FROM axentra_products WHERE id = %s FOR UPDATE",
+                (product_id,),
+                what="product",
+            )
+            if if_match is not None and row["version"] != if_match:
+                raise PreconditionFailed("the product was changed by someone else")
+            settings = dict(row["settings"] or {})
+            storage = dict(settings.get("storage") or {}) if isinstance(settings.get("storage"), dict) else {}
+            old = {k: storage.get(k) for k in ("blocked_types", *stored)}
+            for key in ("blocked_types", "blocked_extensions", "blocked_content_types", "inert_extensions"):
+                storage.pop(key, None)
+            storage.update({k: v for k, v in stored.items() if v or k == "blocked_types"})
+            settings["storage"] = storage
+            updated = tx.one_or_404(
+                "UPDATE axentra_products SET settings = %s, version = version + 1, updated_at = now()"
+                " WHERE id = %s RETURNING version",
+                (Jsonb(settings), product_id),
+            )
+            self.audit.record(
+                tx,
+                principal,
+                "storage.policy.update",
+                target_type="product",
+                target_id=product_id,
+                product_id=product_id,
+                details={"old": old, "new": {k: storage.get(k) for k in old}},
+            )
+        return self._policy_model(product_id, policy, updated["version"])
+
+    def _classify(
+        self, policy: ContentPolicy, name: str, declared: str | None, sniffed: str | None
+    ) -> tuple[bool, bool]:
+        """``(blocked, inert)`` for an upload: blocked by declared type, extension or sniffed content
+        (one rule for all three), and whether the policy keeps it inert instead of refusing it."""
+        ext = safety.extension(name)
+        blocked = (
+            policy.type_blocked(declared) or policy.extension_blocked(ext) or policy.type_blocked(sniffed)
+        )
+        return blocked, blocked and policy.store_inert(ext)
+
     # -- quotas ------------------------------------------------------------------------------
 
     def _product_defaults(self, tx: Tx, product_id: str) -> tuple[int | None, int | None]:
@@ -259,18 +368,20 @@ class StorageService:
             if expires_at <= utcnow():
                 raise ValidationFailed("expires_at must be in the future")
         declared = safety.normalize_content_type(content_type)
-        inert = self.cfg.store_blocked_as_inert
-        blocked = safety.is_blocked(declared) or safety.extension(clean_name) in safety.BLOCKED_EXTENSIONS
+        with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
+            policy = self._policy(tx, product_id)
+        blocked, inert = self._classify(policy, clean_name, declared, None)
         if blocked and not inert:
             raise UnsupportedMediaType("executable, HTML, SVG and script files are not accepted")
         head, stream = _peek(_chunks(data), safety.SNIFF_BYTES)
         sniffed = safety.sniff(head)
-        if safety.is_blocked(sniffed):
-            if not inert:
-                raise UnsupportedMediaType("executable, HTML, SVG and script files are not accepted")
-            blocked = True
-        # storage.store_blocked_as_inert: risky files are kept as opaque bytes, never as their real type.
+        blocked, inert = self._classify(policy, clean_name, declared, sniffed)
+        if blocked and not inert:
+            raise UnsupportedMediaType("executable, HTML, SVG and script files are not accepted")
+        # Inert: risky files are kept as opaque bytes, never with their real type; the declared
+        # (else the sniffed) type is recorded as original_content_type but never used for serving.
         ctype = safety.OCTET_STREAM if blocked else safety.choose_content_type(declared, sniffed)
+        original = (declared if declared not in (None, safety.OCTET_STREAM) else sniffed) if blocked else None
         if not safety.type_allowed(ctype, self.cfg.allowed_content_types):
             raise UnsupportedMediaType(f"content type {ctype} is not allowed")
         if not head:
@@ -287,14 +398,17 @@ class StorageService:
             if qb is not None and usage["bytes_used"] >= qb:
                 raise QuotaExceeded("the tenant's storage quota (bytes) is exhausted")
             tx.execute(
-                "INSERT INTO axentra_files (id, product_id, tenant_id, name, content_type, storage_key, backend,"
-                " metadata, status, created_by, expires_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s)",
+                "INSERT INTO axentra_files (id, product_id, tenant_id, name, content_type, stored_inert,"
+                " original_content_type, storage_key, backend, metadata, status, created_by, expires_at)"
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s)",
                 (
                     file_id,
                     product_id,
                     tenant_id,
                     clean_name,
                     ctype,
+                    blocked,
+                    original,
                     key,
                     self.backend.name,
                     Jsonb(meta),
@@ -345,7 +459,8 @@ class StorageService:
                             "size": meter.size,
                             "content_type": ctype,
                             "sha256": meter.sha256,
-                        },
+                        }
+                        | ({"stored_inert": True, "original_content_type": original} if blocked else {}),
                     )
         except BaseException:
             self._abandon(product_id, tenant_id, file_id, key)
@@ -492,11 +607,16 @@ class StorageService:
             changes: dict[str, Any] = {}
             if name is not None:
                 clean = safety.sanitize_name(name)
-                if (
-                    safety.extension(clean) in safety.BLOCKED_EXTENSIONS
-                    and not self.cfg.store_blocked_as_inert
-                ):
-                    raise UnsupportedMediaType("this file name extension is not accepted")
+                policy = self._policy(tx, product_id)
+                ext = safety.extension(clean)
+                if policy.extension_blocked(ext):
+                    if not policy.store_inert(ext):
+                        raise UnsupportedMediaType("this file name extension is not accepted")
+                    if not row["stored_inert"]:
+                        # Renamed to a blocked extension: from now on an inert attachment.
+                        changes["stored_inert"] = True
+                        changes["original_content_type"] = row["content_type"]
+                        changes["content_type"] = safety.OCTET_STREAM
                 if clean != row["name"]:
                     changes["name"] = clean
             if metadata is not None:

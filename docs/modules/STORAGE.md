@@ -6,13 +6,15 @@ to a product (no agent, knowledge or document semantics); products attach meanin
 own tables or through the free-form `metadata` labels.
 
 Code: `src/axentra/storage/` (service, backends, safety, tokens, models), HTTP layer
-`src/axentra/api/routes/storage.py` and `src/axentra/api/multipart.py`, migration
-`src/axentra/data/sql/0003_storage.sql`.
+`src/axentra/api/routes/storage.py` and `src/axentra/api/multipart.py`, migrations
+`src/axentra/data/sql/0003_storage.sql` and `0008_product_permissions.sql` (`stored_inert`,
+`original_content_type`).
 
 ## Concepts
 
 - **File**: belongs to one product and one tenant. Metadata lives in `axentra_files`
-  (`id` `fil_...`, `name`, `content_type`, `size`, `sha256`, `metadata`, `status`, `version`,
+  (`id` `fil_...`, `name`, `content_type`, `stored_inert`, `original_content_type`, `size`,
+  `sha256`, `metadata`, `status`, `version`,
   `created_by`, `created_at`, `updated_at`, `expires_at`, `deleted_at`, plus the internal
   `storage_key`, `backend` and `object_deleted_at`). Files are immutable: to change the content,
   upload a new file. `name` and `metadata` can be edited (optimistic concurrency via `version`).
@@ -48,7 +50,7 @@ Code: `src/axentra/storage/` (service, backends, safety, tokens, models), HTTP l
 | `s3_presigned_downloads` | `false` | `download-url` returns a presigned S3 URL instead of an Axentra URL |
 | `max_file_bytes` | 50 MiB | hard per-file limit, enforced while streaming |
 | `allowed_content_types` | `[]` | allow-list (`image/png`, `image/*`); empty: everything except the blocked types |
-| `store_blocked_as_inert` | `false` | store blocked (executable/HTML/SVG/script) uploads as inert `application/octet-stream` instead of refusing them |
+| `store_blocked_as_inert` | `false` | installation default of the content-type policy: store blocked (executable/HTML/SVG/script) uploads as inert `application/octet-stream` instead of refusing them; products override it (see "Content-type policy") |
 | `signed_url_ttl_seconds` | 300 | maximum (and default) lifetime of download URLs |
 | `default_quota_bytes`, `default_quota_files` | none | installation-wide tenant default |
 | `pending_upload_timeout_seconds` | 3600 | after this, a still-pending upload counts as abandoned |
@@ -97,13 +99,21 @@ All paths are under `/v1`. `F = /products/{product_id}/tenants/{tenant_id}/files
 | `POST F/{file_id}/download-url` `{ttl_seconds?}` | `files:read` | `DownloadUrl` |
 | `GET /files/download/{token}` | public (the token is the credential) | bytes (streamed, attachment) |
 | `GET /products/{product_id}/storage/usage?limit=&cursor=` | `collections:read` | `ProductStorageUsage` |
+| `GET /products/{product_id}/storage/policy` | `product:read` | `StoragePolicy` |
+| `PUT /products/{product_id}/storage/policy` `{blocked_types, blocked_extensions, blocked_content_types, inert_extensions}`, `If-Match` (product version) | `product:manage` | `StoragePolicy` |
 | `GET /products/{product_id}/tenants/{tenant_id}/storage/usage` | `files:read` | `TenantStorageUsage` |
 | `PUT /products/{product_id}/tenants/{tenant_id}/storage/quota` `{quota_bytes, quota_files}`, `If-Match` | `tenants:update` | `TenantStorageUsage` |
 
 Shapes:
 
-- `FileInfo`: `{id, product_id, tenant_id, name, content_type, size, sha256, metadata, status,
-  version, created_by, created_at, updated_at, expires_at}`.
+- `FileInfo`: `{id, product_id, tenant_id, name, content_type, stored_inert,
+  original_content_type, size, sha256, metadata, status, version, created_by, created_at,
+  updated_at, expires_at}`. `stored_inert` marks a blocked file kept as an opaque attachment;
+  `original_content_type` is then its declared type (else the sniffed one), for display only.
+- `StoragePolicy`: `{product_id, blocked_types, blocked_types_source, installation_blocked_types,
+  blocked_extensions, blocked_content_types, inert_extensions, builtin_blocked_extensions,
+  builtin_blocked_content_types, allowed_content_types, product_version}` (the effective policy,
+  see "Content-type policy").
 - `DownloadUrl`: `{url, path, expires_at, kind}`; `kind` is `signed` (Axentra URL, `path` is
   `/v1/files/download/{token}`, `url` is `security.public_url` + path) or `presigned` (S3, `path`
   is null).
@@ -129,7 +139,49 @@ their own tenant's usage through the tenant endpoint.
 
 Audit events (same transaction as the change): `storage.file.upload`, `storage.file.update`,
 `storage.file.delete`, `storage.file.expire` (system actor, from the purge), `storage.quota.update`
-(old and new values). Downloads are not audited.
+(old and new values), `storage.policy.update` (old and new policy keys). Upload events of inert
+files carry `stored_inert` and `original_content_type`. Downloads are not audited.
+
+## Content-type policy
+
+Executable, HTML, XHTML, SVG, script and PHP files are *blocked*: by declared type
+(`safety.BLOCKED_TYPES`), by file name extension (`safety.BLOCKED_EXTENSIONS`: `html`, `js`, `sh`,
+`php`, `ps1`, `bat`, `exe`, `svg`, ...) or by sniffed content (PE/ELF/Mach-O, HTML, SVG, and any
+file that starts with a `#!` shebang). One rule decides for all three reasons, per product
+(`axentra.storage.policy`), stored in the product's settings next to the quota defaults:
+
+```json
+{"storage": {
+  "quota_files": 10000,
+  "blocked_types": "store_inert",
+  "blocked_extensions": ["py", "rb"],
+  "blocked_content_types": ["text/x-ruby"],
+  "inert_extensions": ["html", "sh"]
+}}
+```
+
+| key | default | meaning |
+| --- | --- | --- |
+| `blocked_types` | installation (`storage.store_blocked_as_inert`: `store_inert` if true, else `refuse`) | `refuse`: blocked uploads get `415`. `store_inert`: they are stored as `application/octet-stream` with `stored_inert = true` |
+| `blocked_extensions` | `[]` | extensions blocked in addition to the built-in list (lowercase, without dot; tighten only) |
+| `blocked_content_types` | `[]` | content types blocked in addition to the built-in list (tighten only) |
+| `inert_extensions` | `[]` | blocked extensions accepted as inert even under `refuse`; the decision uses the file's extension, also when the file is blocked by its content (a shebang script named `run.sh` with `sh` listed is stored inert, the same content named `run.txt` is refused) |
+
+- The built-in blocklist cannot be shortened; a product can only block more or keep blocked files
+  inert instead of refusing them. A blocked file is never stored or served with its real type:
+  downloads (direct and signed URLs) are attachments with `nosniff`, a sandboxing CSP and
+  `application/octet-stream`. `original_content_type` is informational.
+- Renaming a file (`PATCH`) to a blocked extension follows the same policy: refused, or the file
+  becomes inert (`content_type` turns to `application/octet-stream`, the old type moves to
+  `original_content_type`).
+- `storage.allowed_content_types` (installation) still applies to the resulting type, so an
+  allow-list without `application/octet-stream` refuses inert files.
+- `PUT .../storage/policy` replaces the four keys (other `settings.storage` keys such as quotas
+  are kept; `blocked_types: null` inherits the installation default). `PATCH /products/{id}` with
+  `settings.storage` validates the same keys (`422` for unknown modes, malformed extensions or
+  types, more than 100 entries).
+- A product's policy never affects another product. Library callers read the effective policy
+  with `ax.storage.content_policy(product_id)`.
 
 ## Guarantees
 
@@ -163,9 +215,9 @@ Audit events (same transaction as the change): `storage.file.upload`, `storage.f
 - Content types: the declared type is a hint. The first 512 bytes are sniffed (PE/ELF/Mach-O,
   shebang, HTML, SVG, XML, PNG, JPEG, GIF, WebP, PDF, ZIP, GZIP). Executable, HTML, XHTML, SVG and
   script types are refused at upload by declared type, by sniffed content and by file name
-  extension. With `storage.store_blocked_as_inert = true` they are accepted instead and stored as
-  `application/octet-stream` (never with their real type), so they can only be downloaded as
-  attachments; the setting is installation-wide (no per-product policy yet). A sniffed type replaces the declared one when that is missing, generic or of another
+  extension, unless the product's content-type policy (see above) keeps them as inert
+  `application/octet-stream` attachments (never with their real type). A sniffed type replaces
+  the declared one when that is missing, generic or of another
   top-level type. `allowed_content_types` is applied to the resulting type.
 - Downloads are always `Content-Disposition: attachment` (ASCII fallback plus RFC 5987
   `filename*`), `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`,

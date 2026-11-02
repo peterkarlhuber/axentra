@@ -182,3 +182,36 @@ def test_download_tokens_rotation_tamper_expiry():
             old.verify(bad)
     # The derived key is purpose-bound: it differs from the raw keyring key.
     assert old._key("a1") != Keyring.parse(f"a1:{k1}").key("a1")
+
+
+def test_content_policy_parsing_and_classification():
+    import pytest
+
+    from axentra.core.errors import ValidationFailed
+    from axentra.storage.policy import check_product_settings, lenient_policy, parse_policy
+
+    p = parse_policy(None, installation_inert=False)
+    assert p.blocked_types == "refuse" and p.blocked_types_source == "installation"
+    assert parse_policy({}, installation_inert=True).blocked_types == "store_inert"
+    p = parse_policy(
+        {"blocked_types": "refuse", "blocked_extensions": [".PY"], "inert_extensions": ["sh"]},
+        installation_inert=True,
+    )
+    assert p.blocked_types == "refuse" and p.blocked_types_source == "product"
+    assert p.extension_blocked("py") and p.extension_blocked("html") and not p.extension_blocked("txt")
+    assert p.store_inert("sh") and not p.store_inert("html")
+    for bad in (
+        {"blocked_types": "inline"},
+        {"blocked_extensions": "py"},
+        {"inert_extensions": ["../x"]},
+        {"blocked_content_types": ["not a type"]},
+        {"inert_extensions": ["x"] * 101},
+    ):
+        with pytest.raises(ValidationFailed):
+            parse_policy(bad, installation_inert=False)
+        with pytest.raises(ValidationFailed):
+            check_product_settings({"storage": bad})
+        # Stored values that are invalid never loosen the policy.
+        assert lenient_policy(bad, installation_inert=False).blocked_types == "refuse"
+    check_product_settings({"storage": "legacy"})  # non-object values were never validated
+    check_product_settings({})

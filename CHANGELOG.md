@@ -29,6 +29,31 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   `oidc[].link_by_verified_email` (default true; false never links an unknown identity to an
   existing user by email), `IdentityService.create_external_user`, `link_identity` and
   `list_identities` for imports. Notifications to such users are recorded as `suppressed`.
+- Product-defined permissions (Nodestro plan G-1): products declare their own namespaced
+  permissions (`<namespace>.<resource>:<action>`, e.g. `crm.deals:approve`) with scope
+  (`product`/`tenant`), description, `read_like` and optional `default_roles` for built-in roles.
+  Embedding products register them in process (`ax.permissions.register(product, [ProductPermission(...)])`,
+  mirrored at `ax.start()`); other products declare them over HTTP
+  (`PUT`/`DELETE /v1/products/{pid}/permissions/{name}`, new product permission
+  `permissions:manage`, held by `product_owner` only). New table `axentra_product_permissions`
+  (migration `0008_product_permissions`, forced RLS). `GET /v1/products/{pid}/permissions` lists
+  the built-in and product permissions grantable in a product (`roles:read`, `api_keys:read` or
+  `permissions:manage`); `PermissionInfo` gained `source`, `read_like`, `default_roles`,
+  `declared_by`, `retired_at`. Custom roles and API keys are validated per product (another
+  product's names are `422`); owners/admins hold product permissions automatically, viewer and
+  support roles the read-like ones; tenant roles confer tenant-scoped product permissions.
+  Permissions that are no longer declared are retired, never deleted, and grant nothing while
+  retired (key rotation drops them). Job kinds accept product permission names. Python SDK:
+  `roles.permissions(product_id)`. See SECURITY_MODEL.md, "Product-defined permissions".
+- Per-product storage content-type policy (Nodestro plan G-7): `settings.storage.blocked_types`
+  (`refuse`/`store_inert`, default from `storage.store_blocked_as_inert`), extra
+  `blocked_extensions`/`blocked_content_types` (tighten only) and `inert_extensions` (accepted as
+  inert even when refusing); one rule for declared type, extension and sniffed content, including
+  shebang scripts. `GET`/`PUT /v1/products/{pid}/storage/policy`; product settings updates
+  validate these keys. Files stored inert keep their declared type in the new
+  `FileInfo.original_content_type` and are flagged `stored_inert` (migration `0008` adds both
+  columns); they are still only served as `application/octet-stream` attachments with `nosniff`.
+  Renaming a file to a blocked extension follows the same policy. See docs/modules/STORAGE.md.
 - Search module (`axentra.search`, order section 4 L): tenant-scoped PostgreSQL full-text index
   (migration `0006_search`, table `axentra_search_documents` with forced RLS, generated weighted
   `tsvector` over title and body, GIN index). Products index documents by kind + ref id through
@@ -165,6 +190,11 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   options above or library calls); the API version stays `1.0`.
 - Session expiry (absolute and idle), setup tokens and invitation expiry are computed and compared
   on the database clock instead of the API host's clock.
+- New built-in product permission `permissions:manage` (declare and retire product permissions
+  over the API). `product_owner` and platform admins hold it; `product_admin` does not (like
+  `product_members:manage`), because a declaration changes what built-in roles hold.
+- Product settings updates validate the storage content-type policy keys of `settings.storage`
+  (`422` for invalid values); other settings are unchanged.
 - Tests: `test_I4_login_throttling_is_atomic` pins the one-minute throttling window. When its 100
   concurrent attempts straddled a minute boundary, the new window granted a fresh budget (fixed
   windows allow up to twice the budget across a boundary, as documented), so the test failed.

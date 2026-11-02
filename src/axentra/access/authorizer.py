@@ -12,16 +12,19 @@ Rules:
   a related principal without the permission gets ``Forbidden``.
 - Archived products and suspended tenants are reachable only by platform admins.
 - API keys are confined to their product (and tenant, if bound) and never hold platform permissions.
+- Product-defined permissions (:mod:`axentra.access.product_permissions`) count only while they are
+  active in the product: retired or unknown names stored in roles or keys grant nothing.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from axentra.access.permissions import BUILTIN_ROLES, PLATFORM, PLATFORM_ROLE_PERMISSIONS, TENANT
+from axentra.access.permissions import BUILTIN_ROLES, PLATFORM, PLATFORM_ROLE_PERMISSIONS
+from axentra.access.product_permissions import ProductCatalog, load_catalog
 from axentra.core.context import ActorKind, Principal
 from axentra.core.errors import Forbidden, NotFound
-from axentra.data.database import Database, DbScope
+from axentra.data.database import Database, DbScope, Tx
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,14 +41,20 @@ class Authorizer:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def _role_permissions(
-        self, product_id: str, role_key: str | None, custom: dict[str, frozenset[str]]
-    ) -> frozenset[str]:
-        if role_key is None:
-            return frozenset()
-        if role_key in BUILTIN_ROLES:
-            return BUILTIN_ROLES[role_key].permissions
-        return custom.get(role_key, frozenset())
+    @staticmethod
+    def role_permissions(tx: Tx, product_id: str, role_key: str, scope: str) -> frozenset[str]:
+        """The permissions a built-in or custom role confers in ``scope`` of the product (tenant
+        roles only grant tenant-scoped permissions), including active product permissions."""
+        catalog = load_catalog(tx, product_id)
+        custom: dict[str, frozenset[str]] = {}
+        if role_key not in BUILTIN_ROLES:
+            row = tx.one(
+                "SELECT permissions FROM axentra_roles WHERE product_id = %s AND key = %s",
+                (product_id, role_key),
+            )
+            custom = {role_key: frozenset(row["permissions"])} if row else {}
+        perms = catalog.role_permissions(role_key, custom)
+        return perms & catalog.tenant_mask if scope == "tenant" else perms
 
     def grant(
         self, principal: Principal, product_id: str | None = None, tenant_id: str | None = None
@@ -70,6 +79,7 @@ class Authorizer:
                 )
                 if tenant is None:
                     raise NotFound("tenant not found")
+            catalog: ProductCatalog = load_catalog(tx, product_id)
 
             # API keys, and system principals scoped like a key (job handlers, see axentra.events.worker).
             if principal.actor.kind is ActorKind.API_KEY or (
@@ -85,9 +95,12 @@ class Authorizer:
                         raise NotFound("tenant not found")
                 if product["status"] != "active" or (tenant is not None and tenant["status"] != "active"):
                     raise Forbidden("the product or tenant is not active")
-                key_perms = principal.api_key_permissions - PLATFORM
+                # Unknown and retired product permissions grant nothing.
+                key_perms = (principal.api_key_permissions - PLATFORM) & catalog.known
                 return Grant(permissions=key_perms, related=True)
 
+            platform_role = principal.platform_role.value if principal.platform_role is not None else None
+            platform_perms = catalog.platform_role(platform_role)
             if principal.is_platform_admin:
                 return Grant(permissions=platform_perms, related=True)
             user_id = principal.user_id
@@ -127,9 +140,9 @@ class Authorizer:
                 raise Forbidden("the product or tenant is not active")
             return Grant(permissions=platform_perms, related=True)
         perms: set[str] = set(platform_perms)
-        perms |= self._role_permissions(product_id, product_role, custom)
+        perms |= catalog.role_permissions(product_role, custom)
         if tenant_id is not None:
-            perms |= self._role_permissions(product_id, tenant_role, custom) & TENANT
+            perms |= catalog.role_permissions(tenant_role, custom) & catalog.tenant_mask
         # Without a tenant, tenant permissions from product roles apply to all tenants of the product.
         return Grant(
             permissions=frozenset(perms), related=True, product_role=product_role, tenant_role=tenant_role

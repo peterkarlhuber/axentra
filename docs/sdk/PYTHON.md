@@ -92,7 +92,7 @@ the credentials. Every request carries
 | `operators` (product members) | `list`, `add`, `change`, `remove` |
 | `members` (tenant members) | `list`, `add`, `change`, `remove` |
 | `invitations` | `list`, `create` (returns the one-time `token`), `revoke`, `accept` |
-| `roles` | `list`, `create`, `update(version=)`, `delete` |
+| `roles` | `list`, `permissions(include_retired=)` (built-in and product-defined catalog of a product), `create`, `update(version=)`, `delete` |
 | `api_keys` | `list`, `get`, `create` (returns the `secret` once), `revoke`, `rotate` |
 | `records` | `list` (page), `iter`, `get`, `create`, `replace(version=)`, `delete(version=)` |
 | `files` | `upload` (bytes, file object or path), `get`, `list`, `iter`, `update`, `delete`, `download`, `download_to`, `stream`, `download_url` |
