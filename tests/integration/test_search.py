@@ -133,12 +133,13 @@ def test_query_syntax_kind_filter_and_validation(two_tenants):
         {"q": ""},
         {"q": "x" * 501},
         {"q": "blue", "kind": "Bad Kind"},
-        {"q": "blue", "cursor": "zz"},
     ):
         r = world.admin.get(_base(pid, t1), params=bad)
         assert r.status_code == 422, (bad, r.text)
         assert r.headers["content-type"].startswith("application/problem+json")
     assert world.admin.get(_base(pid, t1)).status_code == 422  # q is required
+    r = world.admin.get(_base(pid, t1), params={"q": "blue", "cursor": "zz"})
+    assert r.status_code == 400 and r.json()["code"] == "invalid_cursor", r.text
 
 
 def test_pagination_is_stable_and_bounded(world: World, ax_factory):

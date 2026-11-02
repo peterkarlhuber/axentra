@@ -272,10 +272,10 @@ class ScheduleService:
         if tenant_id is not None:
             sql += " AND tenant_id = %s"
             params.append(tenant_id)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         if after:
             sql += " AND id > %s"
-            params.append(str(after[0]))
+            params.append(after[0])
         sql += " ORDER BY id LIMIT %s"
         params.append(n + 1)
         with self.db.transaction(job_scope(product_id, tenant_id), read_only=True) as tx:

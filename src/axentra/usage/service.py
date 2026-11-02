@@ -764,10 +764,8 @@ class UsageService:
         if until:
             where.append("e.occurred_at < %s")
             params.append(until)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("timestamp", "str"))
         if after:
-            if len(after) != 2:
-                raise ValidationFailed("invalid cursor")
             where.append("(e.occurred_at, e.id) < (%s::timestamptz, %s)")
             params += after
         sql = (
@@ -1139,10 +1137,8 @@ class UsageService:
         if meter:
             where.append("m.key = %s")
             params.append(meter)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str", "str"))
         if after:
-            if len(after) != 2:
-                raise ValidationFailed("invalid cursor")
             where.append("(c.tenant_id, m.key) > (%s, %s)")
             params += after
         sql = (

@@ -488,10 +488,8 @@ class BillingService:
         if plan:
             where.append("(p.key = %s OR p.id = %s)")
             params += [plan, plan]
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("timestamp", "str"))
         if after:
-            if len(after) != 2:
-                raise ValidationFailed("invalid cursor")
             where.append("(s.created_at, s.id) < (%s::timestamptz, %s)")
             params += after
         params.append(limit + 1)

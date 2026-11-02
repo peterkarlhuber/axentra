@@ -25,6 +25,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- Malformed pagination cursors are a `400 invalid_cursor` (detail `invalid cursor`) on every list endpoint
+  instead of a `500` (re-review AX-R1): before, a cursor with the wrong number or types of values, a NUL
+  character, a lone surrogate or a timestamp PostgreSQL rejects (ISO week dates, comma fractions, offsets
+  with microseconds, out-of-range values) reached the SQL, for example on `/notify/messages`,
+  `/notify/mailbox`, `/v1/audit` and `/tenants`. `decode_cursor(cursor, shape)` now takes the expected
+  value types (`"str"`, `"timestamp"`, `"int"`), accepts only the timestamp form Axentra issues and
+  returns it as an aware UTC datetime; without a shape it still rejects NUL characters, lone surrogates,
+  non-finite numbers and cursors over 4096 characters. The new error `InvalidCursor` is a subclass of
+  `ValidationFailed`. **Breaking (HTTP):** a tampered cursor that was a `422 validation_failed` before
+  (for example one that is not base64 JSON) is now a `400 invalid_cursor`. Embedding hosts that page
+  their own tables should pass a shape (docs/guides/PRODUCT_TABLES.md).
 - Row-level security: tenant scope can no longer write product-level rows (security review SR-02).
   Migration `0011_tenant_scope_writes` adds `axentra_scope_allows_write` (tenant scope requires
   `tenant_id` = the current tenant) and uses it in every `scope` policy's `WITH CHECK` plus new

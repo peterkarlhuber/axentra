@@ -145,7 +145,7 @@ class AuditLog:
             )
             like = "%" + q.replace("%", r"\%").replace("_", r"\_") + "%"
             params += [like, like, like, like]
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("timestamp", "str"))
         if after:
             where.append("(occurred_at, id) < (%s::timestamptz, %s)")
             params += [after[0], after[1]]

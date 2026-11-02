@@ -826,7 +826,7 @@ class NotifyService:
         if since:
             where.append("created_at >= %s")
             params.append(since)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("timestamp", "str"))
         if after:
             where.append("(created_at, id) < (%s::timestamptz, %s)")
             params += [after[0], after[1]]
@@ -911,7 +911,7 @@ class NotifyService:
         if recipient:
             where.append("lower(recipient) = lower(%s)")
             params.append(recipient.strip())
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("timestamp", "str"))
         if after:
             where.append("(created_at, id) < (%s::timestamptz, %s)")
             params += [after[0], after[1]]
@@ -972,7 +972,7 @@ class NotifyService:
             params.append(tenant_id)
         if unread_only:
             where.append("read_at IS NULL")
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("timestamp", "str"))
         if after:
             where.append("(created_at, id) < (%s::timestamptz, %s)")
             params += [after[0], after[1]]

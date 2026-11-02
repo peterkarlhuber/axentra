@@ -140,7 +140,7 @@ class RecordStore:
         sort_field = (sort or "id").lstrip("-")
         if sort_field not in ("id", "created_at", "updated_at"):
             raise ValidationFailed("sort must be id, created_at or updated_at (prefix - for descending)")
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str", "str") if sort_field == "id" else ("timestamp", "str"))
         op = "<" if desc else ">"
         if after:
             if sort_field == "id":

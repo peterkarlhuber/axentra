@@ -296,12 +296,12 @@ class TaskboardService:
     ) -> Page[Project]:
         self._require(principal, "records:read", tenant_id)
         n = clamp_limit(limit)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         sql = "SELECT * FROM taskboard_projects WHERE product_id = %s AND tenant_id = %s"
         params: list[Any] = [self.product_id, tenant_id]
         if after:
             sql += " AND id > %s"
-            params.append(str(after[0]))
+            params.append(after[0])
         params.append(n + 1)
         with self.ax.db.transaction(self._scope(tenant_id), read_only=True) as tx:
             rows = tx.all(sql + " ORDER BY id LIMIT %s", params)
@@ -427,7 +427,7 @@ class TaskboardService:
         if status is not None and status not in STATUSES:
             raise ValidationFailed(f"status must be one of: {', '.join(STATUSES)}")
         n = clamp_limit(limit)
-        after = decode_cursor(cursor)
+        after = decode_cursor(cursor, ("str",))
         sql = "SELECT * FROM taskboard_tasks WHERE product_id = %s AND tenant_id = %s AND project_id = %s"
         params: list[Any] = [self.product_id, tenant_id, project_id]
         if status:
@@ -435,7 +435,7 @@ class TaskboardService:
             params.append(status)
         if after:
             sql += " AND id > %s"
-            params.append(str(after[0]))
+            params.append(after[0])
         params.append(n + 1)
         with self.ax.db.transaction(self._scope(tenant_id), read_only=True) as tx:
             self._project_row(tx, tenant_id, project_id)
