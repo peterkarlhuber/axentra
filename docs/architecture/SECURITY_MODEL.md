@@ -178,7 +178,11 @@ All decisions go through `axentra.access.authorizer.Authorizer`:
    (no operator role) gets `product:read` at product level, to pick a tenant, and nothing else.
 4. **Archived products and suspended tenants.** Platform admins keep full access (to inspect and
    restore). Platform viewers keep read access. Everyone else, including API keys, gets
-   `403 Forbidden`.
+   `403 Forbidden`. One exception for the tenant *record* (name, slug, status, member count:
+   product administration metadata that the tenant list shows anyway): `GET
+   /v1/products/{p}/tenants/{t}` also accepts `tenants:read` held for the whole product of an
+   active product, so product operators can open a suspended tenant and reactivate it with
+   `tenants:update`. Its data stays closed to them.
 5. **Key confinement.** An API key acts only in its product. A tenant-bound key has no
    permissions at product level and only its own tenant at tenant level. Platform permissions are
    always stripped from keys.

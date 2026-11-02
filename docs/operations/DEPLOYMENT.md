@@ -82,6 +82,10 @@ TLS; `.env.example` uses `development` so that plain HTTP on localhost works.
 - TLS terminated by a reverse proxy; the proxy's address in `security.trusted_proxies` (and
   nothing broader), so client IPs for throttling and audit are correct.
 - `security.allowed_origins`: exactly the product frontends and Studio origins (https).
+- Invitation links: when the page that accepts invitations (Studio or a product frontend) is not
+  served on `security.public_url`, set `notify.invitation_accept_url` (for Studio
+  `https://studio.example.com/invitations/accept`) or the product's `settings.invitation_accept_url`;
+  the default `<public_url>/accept-invitation` points to the API origin.
 - Keyring via `security.master_keys_ref` (`file:/run/secrets/...` preferred), backed up separately
   from database backups.
 - Database URL via `database.url_ref`; the API role is not a superuser and has no `BYPASSRLS`

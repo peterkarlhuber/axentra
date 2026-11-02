@@ -28,6 +28,7 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
+| P3 | identity | A failed OIDC login redirects to `<login page>?login_error=...` without the original `return_to`, so a deep link (for example an invitation accept page) is lost; Studio keeps an opened invitation per tab as a workaround. Pass a validated `return_to` along |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
 | P2 | search | Optional vector/semantic search through an adapter (e.g. pgvector with an embedding step; order section 4 L) |
 | P2 | search | External search adapters (OpenSearch, Meilisearch, ...) implementing `SearchAdapter`; only `PostgresSearchAdapter` exists, and an external engine's audit event cannot be atomic with its write |

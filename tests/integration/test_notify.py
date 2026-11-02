@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -452,6 +453,61 @@ def test_invitation_default_accept_url_and_user_locale(world):
     assert r.json()["accept_url"].startswith("http://127.0.0.1:8080/accept-invitation?token=axinv_")
     (m,) = world.admin.get(f"/v1/products/{pid}/notify/messages").json()["items"]
     assert m["locale"] == "en"
+
+
+def test_invitation_installation_accept_url_and_precedence(ax_factory, caplog):
+    """notify.invitation_accept_url is used when the product has no own link (split origins)."""
+    ax = ax_factory(notify={"invitation_accept_url": "https://studio.example/invitations/accept"})
+    app = create_app(axentra=ax, start=False)
+    world = World(ax=ax, app=app, admin=bootstrap_admin(ax, app))
+    caplog.set_level(logging.DEBUG)
+    assert (
+        ax.notify.invitation_accept_url({}, "axinv_a/b")
+        == "https://studio.example/invitations/accept?token=axinv_a%2Fb"
+    )
+    # A product's own (valid) setting wins; an invalid one falls back to the installation setting.
+    assert ax.notify.invitation_accept_url({"invitation_accept_url": "https://p.example/join"}, "t") == (
+        "https://p.example/join?token=t"
+    )
+    assert ax.notify.invitation_accept_url({"invitation_accept_url": "ftp://p.example/x"}, "t") == (
+        "https://studio.example/invitations/accept?token=t"
+    )
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    r = world.admin.post(f"/v1/products/{pid}/tenants/{tid}/invitations", json={"email": "fay@example.com"})
+    assert r.status_code == 201, r.text
+    token = r.json()["token"]
+    assert r.json()["accept_url"] == f"https://studio.example/invitations/accept?token={token}"
+    assert world.ax.notify.dispatcher().run_once().sent == 1
+    box = world.admin.get(f"/v1/products/{pid}/notify/mailbox").json()["items"]
+    assert f'href="https://studio.example/invitations/accept?token={token}"' in box[0]["html"]
+    # The link carries a working token: the invited user accepts with the token taken from it.
+    link_token = parse_qs(urlsplit(r.json()["accept_url"]).query)["token"][0]
+    world.user("fay@example.com")
+    acc = world.login_as("fay@example.com").post("/v1/invitations/accept", json={"token": link_token})
+    assert acc.status_code == 200 and acc.json()["tenant_id"] == tid
+    effective = world.admin.get("/v1/settings").json()["notify"]
+    assert effective["invitation_accept_url"] == "https://studio.example/invitations/accept"
+    assert token not in caplog.text and "studio.example/invitations/accept?token" not in caplog.text
+
+    pid2 = _product(
+        world, slug="crm2", settings={"invitation_accept_url": "https://crm2.example/i/{token}/go"}
+    )
+    tid2 = _tenant(world, pid2, slug="acme2")
+    r = world.admin.post(f"/v1/products/{pid2}/tenants/{tid2}/invitations", json={"email": "gus@example.com"})
+    assert r.json()["accept_url"] == f"https://crm2.example/i/{r.json()['token']}/go"
+
+
+def test_invitation_installation_accept_url_token_placeholder(ax_factory):
+    ax = ax_factory(notify={"invitation_accept_url": "https://studio.example/#/accept?t={token}&x=1"})
+    assert ax.notify.invitation_accept_url({}, "axinv_z") == "https://studio.example/#/accept?t=axinv_z&x=1"
+    assert ax.settings.invitation_accept_base == "https://studio.example/#/accept?t={token}&x=1"
+
+
+def test_invitation_default_accept_url_reported_in_settings(world):
+    assert world.ax.settings.notify.invitation_accept_url is None
+    effective = world.admin.get("/v1/settings").json()["notify"]
+    assert effective["invitation_accept_url"] == "http://127.0.0.1:8080/accept-invitation"
 
 
 # -- isolation & permissions ------------------------------------------------------------------------

@@ -32,6 +32,12 @@ session_ttl_hours = 12
 session_idle_minutes = 120
 login_rate_per_minute = 10
 
+[notify]
+# Link in invitation emails when a product sets no own settings.invitation_accept_url. Needed
+# here because Studio is not served on the API origin (public_url): without it, links point to
+# https://api.example.com/accept-invitation. {token} is replaced, else ?token= is appended.
+invitation_accept_url = "https://studio.example.com/invitations/accept"
+
 [observability]
 log_level = "INFO"
 log_format = "json"

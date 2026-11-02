@@ -10,7 +10,8 @@ Rules:
   a tenant role (memberships), or the explicit permission list of an API key.
 - No existence oracle: a principal without any relation to a product or tenant gets ``NotFound``,
   a related principal without the permission gets ``Forbidden``.
-- Archived products and suspended tenants are reachable only by platform admins.
+- Archived products and suspended tenants are reachable only by platform admins (the tenant
+  record itself is readable with product-wide ``tenants:read``, see ``TenancyService.get_tenant``).
 - API keys are confined to their product (and tenant, if bound) and never hold platform permissions.
 - Product-defined permissions (:mod:`axentra.access.product_permissions`) count only while they are
   active in the product: retired or unknown names stored in roles or keys grant nothing.

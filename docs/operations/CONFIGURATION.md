@@ -37,7 +37,8 @@ library). In `environment = "production"` it refuses to start when:
 - `events.webhook_allow_http` is set;
 - `events.webhook_allow_private_targets` is set (it switches the webhook SSRF guard off) without the
   explicit override `events.webhook_allow_private_targets_in_production = true`;
-- `billing.provider = "fake"`.
+- `billing.provider = "fake"`;
+- `notify.invitation_accept_url` is set and not `https://`.
 
 In every environment: `allowed_origins` must not contain `*`, and `billing.live_payments`
 requires `billing.provider = "stripe"`. At `Axentra.start()`, the database role is checked: a
@@ -151,6 +152,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `smtp_username` | none |
 | `smtp_password_ref` | none |
 | `smtp_starttls` | `true` |
+| `invitation_accept_url` | none: `<security.public_url>/accept-invitation`. Link in invitation emails and in `accept_url` of `POST .../invitations`, used when the product sets no own `settings.invitation_accept_url`. Absolute `http(s)` URL (`https` in production); `{token}` is replaced by the token, otherwise `?token=` is appended; a `#fragment` only together with `{token}`. Set it when the frontend that accepts invitations is not on the API origin, e.g. `https://studio.example.com/invitations/accept` (env `AXENTRA__NOTIFY__INVITATION_ACCEPT_URL`; see modules/NOTIFY.md "Invitation hook") |
 
 `[billing]`
 

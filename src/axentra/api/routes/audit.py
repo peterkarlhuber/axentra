@@ -145,7 +145,12 @@ def effective_settings(principal: CurrentPrincipal, ax: Ax) -> EffectiveSettings
             "s3_bucket": s.storage.s3_bucket,
             "s3_region": s.storage.s3_region,
         },
-        notify={"provider": s.notify.provider, "sender": s.notify.sender},
+        notify={
+            "provider": s.notify.provider,
+            "sender": s.notify.sender,
+            # The installation-wide base of invitation links (a product's own setting still wins).
+            "invitation_accept_url": s.invitation_accept_base,
+        },
         billing={"provider": s.billing.provider, "live_payments": s.billing.live_payments},
         observability={
             "log_level": s.observability.log_level,

@@ -33,6 +33,21 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   every text column of every Axentra table after a rotation and finds no value under the old key.
 
 ### Fixed
+- Product operators can read a suspended tenant's record again, so they can reactivate it:
+  `GET /v1/products/{p}/tenants/{t}` now accepts `tenants:read` held for the whole product (product
+  roles, product-wide API keys, platform roles), whatever the tenant's status, exactly as the tenant
+  list already showed it. Everyone else still needs `tenant:read` in the tenant, which a suspended
+  tenant refuses. The tenant's data (members, invitations, records, files, usage, billing, ...) stays
+  closed to everyone but platform roles; unrelated principals still get `404`; archived products
+  stay closed. The `tenancy.tenant.update` audit event of a status change now carries
+  `previous_status`.
+- Invitation links in split-origin deployments: the new installation setting
+  `notify.invitation_accept_url` (absolute http(s) URL, https in production, `{token}` placeholder
+  like the product setting) is used when a product has no own `settings.invitation_accept_url`.
+  Before, such links always pointed to `<security.public_url>/accept-invitation`, the API origin,
+  where no accept page exists when Studio or the product frontend lives on another origin. The
+  default is unchanged; `GET /v1/settings` reports the effective base as
+  `notify.invitation_accept_url`.
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an
   authorization read) inside a `join(conn, scope)` block emptied that block's scope: under
