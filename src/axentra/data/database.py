@@ -12,6 +12,10 @@ rows of another product or tenant. Settings are transaction-local and therefore 
 next user of a pooled connection. RLS is defense in depth: services still filter explicitly, and
 the policies only help when the application role is not a superuser and has no ``BYPASSRLS``
 (checked by :meth:`Database.check_role`).
+
+An application that embeds Axentra and has its own psycopg connection to the same database can
+run Axentra writes inside its own transaction with :func:`join` (see
+docs/architecture/EMBEDDING.md).
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ import logging
 from typing import Any, Literal
 
 import psycopg
+from psycopg import pq
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -63,20 +68,33 @@ class DbScope:
 Row = dict[str, Any]
 
 
-class Tx:
-    """A transaction bound to one scope; thin helpers over a psycopg connection."""
+Params = Sequence[Any] | dict[str, Any] | None
+_SET_SCOPE_SQL = (
+    "SELECT set_config('axentra.scope', %s, true), set_config('axentra.product_id', %s, true),"
+    " set_config('axentra.tenant_id', %s, true)"
+)
 
-    def __init__(self, conn: psycopg.Connection[Row], scope: DbScope) -> None:
+
+class Tx:
+    """A transaction bound to one scope; thin helpers over a psycopg connection.
+
+    Rows are always returned as dicts (each query uses a ``dict_row`` cursor), whatever row
+    factory the connection itself has, so a :class:`Tx` also works on a connection of the host
+    application (:func:`join`)."""
+
+    def __init__(self, conn: psycopg.Connection[Any], scope: DbScope) -> None:
         self.conn = conn
         self.scope = scope
 
-    def execute(self, sql: str, params: Sequence[Any] | dict[str, Any] | None = None) -> int:
-        cur = self.conn.execute(sql, params)
-        return cur.rowcount
+    def execute(self, sql: str, params: Params = None) -> int:
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            return cur.rowcount
 
-    def one(self, sql: str, params: Sequence[Any] | dict[str, Any] | None = None) -> Row | None:
-        cur = self.conn.execute(sql, params)
-        return cur.fetchone()
+    def one(self, sql: str, params: Params = None) -> Row | None:
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            return cur.fetchone()
 
     def one_or_404(
         self, sql: str, params: Sequence[Any] | dict[str, Any] | None = None, what: str = "resource"
@@ -86,13 +104,62 @@ class Tx:
             raise NotFound(f"{what} not found")
         return row
 
-    def all(self, sql: str, params: Sequence[Any] | dict[str, Any] | None = None) -> list[Row]:
-        cur = self.conn.execute(sql, params)
-        return cur.fetchall()
+    def all(self, sql: str, params: Params = None) -> list[Row]:
+        with self.conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
 
-    def scalar(self, sql: str, params: Sequence[Any] | dict[str, Any] | None = None) -> Any:
+    def scalar(self, sql: str, params: Params = None) -> Any:
         row = self.one(sql, params)
         return None if row is None else next(iter(row.values()))
+
+    def require_scope(self, product_id: str, tenant_id: str | None = None) -> None:
+        """Refuse a transaction whose scope cannot reach the given product (and tenant)."""
+        sc = self.scope
+        if sc.kind == "platform":
+            return
+        if sc.product_id != product_id or (sc.kind == "tenant" and sc.tenant_id != tenant_id):
+            raise ConfigurationError(
+                f"the transaction scope ({sc.kind}) does not cover product {product_id}"
+                + (f" and tenant {tenant_id}" if tenant_id else "")
+            )
+
+
+@contextmanager
+def join(conn: psycopg.Connection[Any], scope: DbScope) -> Iterator[Tx]:
+    """Run Axentra writes inside a transaction the host application already opened.
+
+    ``conn`` is the host's own psycopg connection to the Axentra database; it must be inside a
+    transaction block (``conn.info.transaction_status`` is ``INTRANS``): either ``with
+    conn.transaction():`` on a non-autocommit or autocommit connection, an explicit ``BEGIN`` on
+    an autocommit connection, or an implicit transaction of a non-autocommit connection that has
+    already executed a statement. Anything else (idle, failed, or no connection) is refused with
+    :class:`~axentra.core.errors.ConfigurationError`, because Axentra's writes would otherwise
+    commit on their own.
+
+    The scope is written with ``set_config(..., true)`` (transaction-local); the values that were
+    set before are restored when the block ends normally, so the rest of the host transaction
+    (and a nested :func:`join`) keeps its own scope. Axentra never commits or rolls back the
+    joined transaction: the host does, and everything written through the yielded :class:`Tx`
+    (audit events, usage events, ...) commits or rolls back with the host's own changes.
+    """
+    status = conn.info.transaction_status
+    if status != pq.TransactionStatus.INTRANS:
+        raise ConfigurationError(
+            "Axentra can only join an open transaction (begin one first; the connection's"
+            f" transaction status is {status.name})"
+        )
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT current_setting('axentra.scope', true) AS s, current_setting('axentra.product_id', true) AS p,"
+            " current_setting('axentra.tenant_id', true) AS t"
+        )
+        prev = cur.fetchone()
+        cur.execute(_SET_SCOPE_SQL, (scope.kind, scope.product_id or "", scope.tenant_id or ""))
+    yield Tx(conn, scope)
+    if conn.info.transaction_status == pq.TransactionStatus.INTRANS and prev is not None:
+        with conn.cursor() as cur:
+            cur.execute(_SET_SCOPE_SQL, (prev["s"] or "", prev["p"] or "", prev["t"] or ""))
 
 
 class Database:
@@ -127,11 +194,7 @@ class Database:
         with self.pool.connection() as conn, conn.transaction():
             if read_only:
                 conn.execute("SET TRANSACTION READ ONLY")
-            conn.execute(
-                "SELECT set_config('axentra.scope', %s, true), set_config('axentra.product_id', %s, true),"
-                " set_config('axentra.tenant_id', %s, true)",
-                (scope.kind, scope.product_id or "", scope.tenant_id or ""),
-            )
+            conn.execute(_SET_SCOPE_SQL, (scope.kind, scope.product_id or "", scope.tenant_id or ""))
             yield Tx(conn, scope)
 
     def ping(self) -> bool:
