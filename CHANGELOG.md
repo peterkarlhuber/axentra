@@ -25,6 +25,11 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- OIDC callback: when the `invitation` given on `GET /v1/auth/oidc/{provider}/start` was accepted during
+  the login, the redirect to `return_to` carries `invitation_accepted=<tenant id>` (re-review AX-R2), so a
+  frontend can show the accepted invitation instead of asking for a confirmation that would fail with
+  `404`. `LoginResult.invitation_tenant_id` gives embedding hosts the same information. A failed
+  acceptance redirects without it, as before.
 - Malformed pagination cursors are a `400 invalid_cursor` (detail `invalid cursor`) on every list endpoint
   instead of a `500` (re-review AX-R1): before, a cursor with the wrong number or types of values, a NUL
   character, a lone surrogate or a timestamp PostgreSQL rejects (ISO week dates, comma fractions, offsets

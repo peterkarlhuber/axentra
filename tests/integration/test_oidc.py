@@ -507,13 +507,34 @@ def test_invitation_allows_signup_and_is_accepted(make_world) -> None:  # type: 
     b, r = w.login(
         "inv-sub", params={"invitation": token, "return_to": "/welcome"}, email="invitee@example.com"
     )
-    assert r.headers["location"] == "/welcome"
+    # The frontend learns that (and where) the invitation was accepted during the login.
+    assert r.headers["location"] == f"/welcome?invitation_accepted={tid}"
     me = b.get("/v1/me").json()
     assert me["products"][0]["tenants"][0]["tenant"]["id"] == tid
     with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
         assert tx.scalar("SELECT accepted_at FROM axentra_invitations") is not None
         stored = tx.all("SELECT invitation_token FROM axentra_login_states")
     assert all(token not in str(s) for s in stored)
+
+
+def test_invitation_accepted_marker_keeps_return_to_and_is_absent_when_not_accepted(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    pid = w.admin.post("/v1/products", json={"slug": "crm", "name": "CRM"}).json()["id"]
+    tid = w.admin.post(f"/v1/products/{pid}/tenants", json={"slug": "acme", "name": "Acme"}).json()["id"]
+    token = w.admin.post(
+        f"/v1/products/{pid}/tenants/{tid}/invitations", json={"email": "kim@example.com", "role": "member"}
+    ).json()["token"]
+    # Another address: the login stands, the invitation stays open, no marker.
+    _, r = w.login("other-sub", params={"invitation": token, "return_to": "/a?x=1"}, email="lee@example.com")
+    assert r.headers["location"] == "/a?x=1"
+    # The invited address: the marker is added to the existing query, the fragment is kept.
+    _, r = w.login(
+        "kim-sub", params={"invitation": token, "return_to": "/a?x=1#top"}, email="kim@example.com"
+    )
+    assert r.headers["location"] == f"/a?x=1&invitation_accepted={tid}#top"
+    # A used token: login without marker.
+    _, r = w.login("kim-sub", params={"invitation": token, "return_to": "/a"}, email="kim@example.com")
+    assert r.headers["location"] == "/a"
 
 
 def test_open_invitation_alone_allows_signup(make_world) -> None:  # type: ignore[no-untyped-def]

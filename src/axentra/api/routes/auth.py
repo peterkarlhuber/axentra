@@ -179,7 +179,7 @@ def oidc_callback(
     error: Annotated[str | None, Query(max_length=200)] = None,
 ) -> Response:
     """On failure the browser is sent to the login page with ``?login_error=<code>``."""
-    from axentra.identity.oidc import OidcLoginError, login_error_url
+    from axentra.identity.oidc import OidcLoginError, login_error_url, with_query_param
 
     oidc = _oidc(ax)
     try:
@@ -201,7 +201,12 @@ def oidc_callback(
         return out
     if result.session is None:  # pragma: no cover - Axentra's own route always starts a session
         raise RuntimeError("the OIDC login finished without a session")
-    out = RedirectResponse(result.return_to, status_code=302)
+    target = result.return_to
+    if result.invitation_tenant_id:
+        # Tells the frontend that the invitation was accepted during the login (and for which
+        # tenant), so it does not ask the person to confirm a used invitation again.
+        target = with_query_param(target, "invitation_accepted", result.invitation_tenant_id)
+    out = RedirectResponse(target, status_code=302)
     _login_cookie(ax, out, None)
     set_session_cookie(ax, out, result.session)
     return out

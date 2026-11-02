@@ -128,8 +128,11 @@ redirects and accept at most 1 MiB.
   `allowed_email_domains`); otherwise the login is refused with `email_not_verified`.
 - An unknown verified email creates a user when the provider has `allow_signup = true`, or when an
   open invitation exists for that email. With `invitation=<token>` on `start`, the invitation is
-  also accepted right after the login (tenant membership with the invited role); if accepting
-  fails, the login still succeeds and the frontend can call `POST /v1/invitations/accept`.
+  also accepted right after the login (tenant membership with the invited role), and the callback
+  adds `invitation_accepted=<tenant id>` to the `return_to` query so the frontend does not ask for
+  a second confirmation (Studio checks that `/v1/me` lists that tenant before it shows "accepted").
+  If accepting fails, the login still succeeds without the parameter and the frontend can call
+  `POST /v1/invitations/accept`.
 - `allowed_email_domains` (case-insensitive, exact domain, no subdomains) is checked on **every**
   login, so a verified email in an allowed domain is required each time.
 - A disabled user is refused.
