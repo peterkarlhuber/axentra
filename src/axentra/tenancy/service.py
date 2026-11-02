@@ -34,7 +34,6 @@ from axentra.access.authorizer import Authorizer, Grant
 from axentra.access.permissions import BUILTIN_ROLES, TENANT
 from axentra.audit.log import AuditLog
 from axentra.config.settings import DeploymentMode, Settings
-from axentra.core.clock import utcnow
 from axentra.core.context import ActorKind, Principal
 from axentra.core.errors import (
     Conflict,
@@ -782,7 +781,7 @@ class TenancyService:
             status = "accepted"
         elif row["revoked_at"]:
             status = "revoked"
-        elif row["expires_at"] <= utcnow():
+        elif row["expired"]:  # compared on the database clock (selected as expires_at <= now())
             status = "expired"
         else:
             status = "pending"
@@ -792,7 +791,7 @@ class TenancyService:
         self.authz.require(principal, "members:read", product_id, tenant_id)
         with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
             rows = tx.all(
-                "SELECT * FROM axentra_invitations WHERE product_id = %s AND tenant_id = %s"
+                "SELECT *, expires_at <= now() AS expired FROM axentra_invitations WHERE product_id = %s AND tenant_id = %s"
                 " ORDER BY created_at DESC LIMIT 500",
                 (product_id, tenant_id),
             )
@@ -816,7 +815,7 @@ class TenancyService:
                 raise Conflict("an open invitation for this email exists")
             tx.execute(
                 "INSERT INTO axentra_invitations (id, product_id, tenant_id, email, role, token_hash, invited_by,"
-                " expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                " expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, now() + %s)",
                 (
                     iid,
                     product_id,
@@ -825,7 +824,7 @@ class TenancyService:
                     role,
                     hash_token(token),
                     principal.actor.id,
-                    utcnow() + INVITATION_TTL,
+                    INVITATION_TTL,
                 ),
             )
             self.audit.record(
@@ -838,7 +837,9 @@ class TenancyService:
                 tenant_id=tenant_id,
                 details={"email": email, "role": role},
             )
-            row = tx.one_or_404("SELECT * FROM axentra_invitations WHERE id = %s", (iid,))
+            row = tx.one_or_404(
+                "SELECT *, expires_at <= now() AS expired FROM axentra_invitations WHERE id = %s", (iid,)
+            )
         return NewInvitation(invitation=self._invitation(row), token=token)
 
     def revoke_invitation(
@@ -869,9 +870,10 @@ class TenancyService:
             raise Forbidden("only users can accept invitations")
         with self.db.transaction(DbScope.platform()) as tx:
             inv = tx.one(
-                "SELECT * FROM axentra_invitations WHERE token_hash = %s FOR UPDATE", (hash_token(token),)
+                "SELECT *, expires_at <= now() AS expired FROM axentra_invitations WHERE token_hash = %s FOR UPDATE",
+                (hash_token(token),),
             )
-            if inv is None or inv["accepted_at"] or inv["revoked_at"] or inv["expires_at"] <= utcnow():
+            if inv is None or inv["accepted_at"] or inv["revoked_at"] or inv["expired"]:
                 raise NotFound("the invitation is invalid or expired")
             email = tx.scalar("SELECT email FROM axentra_users WHERE id = %s", (principal.user_id,))
             # Bound to the address: a user without an email address can never accept by match.

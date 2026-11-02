@@ -317,11 +317,11 @@ class IdentityService:
 
     def create_setup_token(self) -> str:
         token = "axsetup_" + new_token()
-        expires = utcnow() + timedelta(minutes=self.settings.security.setup_token_ttl_minutes)
         with self.db.transaction(DbScope.platform()) as tx:
             tx.execute(
-                "INSERT INTO axentra_setup_tokens (token_hash, expires_at) VALUES (%s, %s)",
-                (hash_token(token), expires),
+                "INSERT INTO axentra_setup_tokens (token_hash, expires_at)"
+                " VALUES (%s, now() + make_interval(mins => %s))",
+                (hash_token(token), self.settings.security.setup_token_ttl_minutes),
             )
             self.audit.record(tx, Principal.system("cli"), "identity.setup_token.create")
         return token
@@ -462,12 +462,22 @@ class IdentityService:
         token = new_token()
         session_id = new_id("ses")
         csrf = new_token(24)
-        expires = utcnow() + timedelta(hours=self.settings.security.session_ttl_hours)
         with self.db.transaction(DbScope.platform()) as tx:
-            tx.execute(
+            # Expiry is computed and later checked on the database clock (never the app host's),
+            # so clock skew between API hosts and PostgreSQL cannot lengthen or shorten sessions.
+            expires = tx.scalar(
                 "INSERT INTO axentra_sessions (id, user_id, token_hash, csrf_token, auth_method, ip, user_agent, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (session_id, user_id, hash_token(token), csrf, method, ip, user_agent[:400], expires),
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s)) RETURNING expires_at",
+                (
+                    session_id,
+                    user_id,
+                    hash_token(token),
+                    csrf,
+                    method,
+                    ip,
+                    user_agent[:400],
+                    self.settings.security.session_ttl_hours,
+                ),
             )
             tx.execute("UPDATE axentra_users SET last_login_at = now() WHERE id = %s", (user_id,))
             self.audit.record(
@@ -494,23 +504,18 @@ class IdentityService:
     def resolve_session(
         self, token: str, *, request_id: str | None = None, ip: str | None = None
     ) -> tuple[Principal, SessionInfo]:
-        idle = timedelta(minutes=self.settings.security.session_idle_minutes)
-        now = utcnow()
         with self.db.transaction(DbScope.platform()) as tx:
+            # Absolute and idle expiry are compared with the database clock (see start_session).
             row = tx.one(
-                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.last_seen_at, s.revoked_at, u.status"
+                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.revoked_at, u.status,"
+                " s.expires_at > now() AND s.last_seen_at + make_interval(mins => %s) > now() AS live,"
+                " now() - s.last_seen_at > %s AS touch"
                 " FROM axentra_sessions s JOIN axentra_users u ON u.id = s.user_id WHERE s.token_hash = %s",
-                (hash_token(token),),
+                (self.settings.security.session_idle_minutes, _LAST_SEEN_RESOLUTION, hash_token(token)),
             )
-            if (
-                row is None
-                or row["revoked_at"] is not None
-                or row["status"] != "active"
-                or row["expires_at"] <= now
-                or row["last_seen_at"] + idle <= now
-            ):
+            if row is None or row["revoked_at"] is not None or row["status"] != "active" or not row["live"]:
                 raise Unauthenticated("the session is invalid or expired")
-            if now - row["last_seen_at"] > _LAST_SEEN_RESOLUTION:
+            if row["touch"]:
                 tx.execute("UPDATE axentra_sessions SET last_seen_at = now() WHERE id = %s", (row["id"],))
         user = self.get_user(row["user_id"])
         role = PlatformRole(user.platform_role) if user.platform_role else None
