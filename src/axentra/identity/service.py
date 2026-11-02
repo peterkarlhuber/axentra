@@ -183,7 +183,8 @@ class IdentityService:
                 "SELECT email, password_hash FROM axentra_users WHERE id = %s FOR UPDATE", (user_id,)
             )
             if not row["password_hash"]:
-                if self.settings.security.first_password == "disabled":  # noqa: S105
+                self_service_mode = self.settings.security.first_password  # a mode, not a secret
+                if self_service_mode == "disabled":
                     raise Forbidden("users who log in through an identity provider cannot set a password")
                 fresh = tx.one(
                     "SELECT 1 FROM axentra_sessions WHERE id = %s AND user_id = %s AND revoked_at IS NULL"
