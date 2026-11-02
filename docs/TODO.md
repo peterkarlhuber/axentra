@@ -26,8 +26,6 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 |---|---|---|
 | P1 | access | Product-defined permissions: the permission catalog is closed (`CATALOG` in code; `validate_permissions` refuses other names), so product tables reuse `records:*` and custom roles/API keys cannot carry product permissions (Nodestro plan G-1) |
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
-| P1 | identity | Users without an email address: `axentra_users.email` is `NOT NULL` (unique on `lower(email)`), so external-identity-only users (no verified email claim) cannot exist (Nodestro plan G-3) |
-| P1 | library | `AxentraError` is mapped to problem+json only by the HTTP app; library embedders with their own web layer get no handler or mapping helper (an escaping `AxentraError` becomes a 500 there). Provide a documented mapping (status, code, extras) usable outside `axentra.api` |
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
@@ -40,14 +38,14 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | P2 | tenancy | Product-level invitations for operators: `POST /v1/products/{id}/members` resolves only users the caller can see, so a product owner who is not a platform admin cannot add an operator without a visible account (Studio TODO, marked backend) |
 | P2 | events | List the job kinds a tenant caller may enqueue (declared `enqueue_permission`), so clients can offer them (Studio TODO, marked backend) |
 | P2 | storage | Content-type policy per product: `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` and other blocked types are refused installation-wide, or stored inert with the global `storage.store_blocked_as_inert`; the blocklist itself is fixed in code (Nodestro plan G-7) |
-| P2 | migrations | Runner features from Nodestro (plan G-2): pre-migration backup hook, refusal when the schema is newer than the code, a serving gate for a compatible schema range, optional non-transactional steps |
+| P3 | migrations | Runner follow-ups (plan G-2; the backup hook, newer-schema refusal, serving gate and `-- axentra:no-transaction` steps exist): a declared forward-compatible range per namespace (today any unknown applied version fails the gate), Python (data backfill) migrations, a per-migration lock/statement timeout, dry-run SQL output |
 | P3 | notify | SMS and push adapters (email is the only channel) |
 | P2 | notify | Per-tenant send rate limits for `POST .../notify/send` (review 2026-11-01, F6 follow-up; the relay itself is closed by `notify:send_external` and system-only templates) |
-| P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md) |
+| P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md). Linking can now be turned off per provider (`link_by_verified_email = false`) |
+| P2 | identity | Users without an email address: no HTTP API or Studio view to create them or to link/unlink external identities (library only: `create_external_user`, `link_identity`); OIDC login states and login throttling windows still use the host clock |
 | P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up) |
 | P2 | access | Optional revocation of API keys created by a user when that user loses product access (review 2026-11-01, F5 follow-up; key-created keys already cascade) |
 | P2 | security | Shared rate limiting across API processes (the general limit is an in-memory token bucket per process; only login throttling is shared through PostgreSQL) |
-| P2 | release | Version checks against the package metadata: Axentra uses `dynamic = ["version"]` (hatch reads `src/axentra/_version.py`), so tools that read `project.version` from `pyproject.toml` (e.g. Nodestro's `check_versions.py`) see none; document/offer a supported way (`axentra --version`, `importlib.metadata.version("axentra")`, or a static version) |
 
 ## Developer experience (Phase 4)
 
@@ -75,8 +73,8 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 
 | Pri | Area | Item |
 |---|---|---|
-| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002). Generic gaps from its section 9 are listed above (G-1, G-2, G-3, G-7); G-6 (re-encryption registry) is done |
-| P3 | integration | Remaining plan gaps, needed only if Nodestro adopts Axentra: G-4 (login without membership, access decided by the product; DB-clock session checks), G-5 (claim token for ownerless tenants), G-8 (verify the merged jobs module against Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss") |
+| P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md` (analysis only; Nodestro must first drop Python 3.10, see ADR 0002). Generic gaps from its section 9 are listed above (G-1, G-2 follow-ups, G-7); G-3, G-4 and G-6 are done |
+| P3 | integration | Remaining plan gaps, needed only if Nodestro adopts Axentra: G-5 (claim token for ownerless tenants), G-8 (verify the merged jobs module against Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss") |
 
 ## Known limitations
 

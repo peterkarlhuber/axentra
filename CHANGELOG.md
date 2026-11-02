@@ -7,6 +7,28 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 ## [Unreleased]
 
 ### Added
+- Embedding Axentra as a library (docs/architecture/EMBEDDING.md):
+  - `axentra.core.errors.problem_details(exc)` maps any exception to a framework-independent
+    `ProblemInfo` (status, code, title, redacted detail, extra members, headers such as
+    `Retry-After`, `internal` flag, `body()`); the HTTP API's handlers use it.
+    `AxentraError(..., retry_after=)` sets `Retry-After`.
+  - `ax.db.joined(conn)`: every Axentra transaction on the calling thread runs on the host's
+    psycopg connection inside a savepoint, so services commit or roll back with the host
+    transaction. `axentra.data.join(conn, scope)` yields a `Tx` on the host connection;
+    `UsageService.record_in(tx, ...)` records usage in it. `Tx` returns dict rows regardless of
+    the connection's row factory.
+  - `Axentra(settings, keyring=...)` accepts a keyring loaded by the host; production then does
+    not require `security.master_keys_ref`.
+- Migrations: `MigrationRunner.check()` (applied, pending and unknown versions per namespace),
+  `require_current()` / `ax.require_current_schema()` raising `SchemaNotCurrent`,
+  `migrate(before_apply=..., allow_newer=...)`, `-- axentra:no-transaction` migrations,
+  `database.require_current_schema` (start gate and a `schema` readiness check), and
+  `axentra migrate --check [--namespace] [--allow-newer] [--load]`.
+- Users without an email address (migration `0007_users_without_email`): `create_user(email=None)`,
+  per-provider `oidc[].allow_signup_without_email` (default false) and
+  `oidc[].link_by_verified_email` (default true; false never links an unknown identity to an
+  existing user by email), `IdentityService.create_external_user`, `link_identity` and
+  `list_identities` for imports. Notifications to such users are recorded as `suppressed`.
 - Search module (`axentra.search`, order section 4 L): tenant-scoped PostgreSQL full-text index
   (migration `0006_search`, table `axentra_search_documents` with forced RLS, generated weighted
   `tsvector` over title and body, GIN index). Products index documents by kind + ref id through
@@ -136,6 +158,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
     library example.
 
 ### Changed
+- `migrate()` now refuses to run when a registered namespace has applied versions the code does
+  not know (pass `allow_newer=True`), and checks all checksums before applying anything.
+- HTTP: `email` in `User`, `Membership` and `ProductMember` responses is `string | null`. It is
+  `null` only for users without an email address, which exist only after opting in (provider
+  options above or library calls); the API version stays `1.0`.
+- Session expiry (absolute and idle), setup tokens and invitation expiry are computed and compared
+  on the database clock instead of the API host's clock.
 - Tests: `test_I4_login_throttling_is_atomic` pins the one-minute throttling window. When its 100
   concurrent attempts straddled a minute boundary, the new window granted a fresh budget (fixed
   windows allow up to twice the budget across a boundary, as documented), so the test failed.

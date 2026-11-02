@@ -59,8 +59,12 @@ schema_migrations (see [Limits of RLS](#limits-of-row-level-security)).
 | **API key** | `axentra_api_keys` | Its explicit permission list, confined to one product and optionally one tenant |
 | **System** | not stored | `Principal.system(reason)`: platform admin, for in-process callers (CLI, startup). Never built from a request |
 
-Users are global: one account (one email) can be an operator of one product and a member of
-tenants in several products. A user sees a product only through a relation to it. The first
+Users are global: one account (at most one email address) can be an operator of one product and
+a member of tenants in several products. An account may have **no email address** (migration
+`0007`, e.g. an external identity without a verified email claim): such an account can neither
+log in with a password nor set one, and never matches an email-bound invitation, so its only
+way in is its linked external identities, and it gains access only through memberships set by
+user id. A user sees a product only through a relation to it. The first
 platform admin is created with a one-time setup token (`axentra admin setup-token`, valid
 `security.setup_token_ttl_minutes`, stored hashed, usable only while no platform admin exists).
 
@@ -218,7 +222,9 @@ policies are really exercised.
   (`security.session_ttl_hours`, default 12 h), after `security.session_idle_minutes` (default
   120) without use, on logout, on revocation (own sessions or by an admin), when the user is
   disabled, and (for other sessions of the user) when the password changes. `last_seen_at` is
-  updated at most once a minute.
+  updated at most once a minute. Expiry is computed and compared on the database clock
+  (`now()`), so clock skew between API hosts does not change session lifetimes; setup tokens and
+  invitations use the database clock too.
 - **Session fixation.** A new token is generated at every login and setup; tokens are never
   accepted from query strings or set by the client.
 - **Cookie.** `HttpOnly; SameSite=Lax; Path=/`, `Secure` and the `__Host-axentra-session` name
@@ -256,7 +262,17 @@ platform admins. This is the usual behaviour and keeps invitations working, but 
 configured provider to be authoritative for the email domains it vouches for. Configure
 `oidc[].allowed_email_domains` for each provider (and use providers whose email claims are verified
 and owned by the organization); a provider that lets users claim arbitrary verified emails could
-otherwise take over accounts. No opt-out setting exists in this version.
+otherwise take over accounts.
+
+Per provider, `oidc[].link_by_verified_email = false` turns this off: an unknown (issuer,
+subject) is then never linked to an existing account by email. It gets a new account instead;
+when the verified address already belongs to another account, the new account has **no email
+address** (the address stays with its owner, and the identity row records it for operators), and
+it is created only with `allow_signup`. Nothing is merged automatically; an operator links
+identities to an existing account deliberately with `IdentityService.link_identity` (platform
+admin, audited). `oidc[].allow_signup_without_email = true` (only with `allow_signup`, not with
+`allowed_email_domains`) lets an identity without a verified email create an account without an
+address; Axentra still never uses an unverified `email` claim.
 
 ## API keys
 
@@ -288,6 +304,9 @@ user's membership: revoke them when people leave.
   rendered notification content and the local mailbox. Product backends register theirs with
   `ax.register_encrypted_column(EncryptedColumn(...))` so rotation covers them.
   Development without a configured keyring writes `./var/dev-keyring`; tests use ephemeral keys.
+  An application embedding Axentra may load the keyring itself and pass it as
+  `Axentra(settings, keyring=Keyring.parse(...))`; production then does not require
+  `security.master_keys_ref` (inline `security.master_keys` stays refused).
 - **Rotation procedure** ([ADR 0011](../adr/0011-keyring-rotation.md)):
   1. Generate a key: `axentra keys generate --kid k2`.
   2. Put it **in front**: `k2:...,k1:...`. Back up the new keyring (see

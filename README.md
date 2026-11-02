@@ -146,7 +146,7 @@ Axentra runs without Studio; Studio is just another client. Tested combinations 
 ## Documentation
 
 - Architecture: [overview](docs/architecture/OVERVIEW.md), [security model](docs/architecture/SECURITY_MODEL.md),
-  [data](docs/architecture/DATA.md), [deployment models](docs/architecture/DEPLOYMENT_MODELS.md),
+  [data](docs/architecture/DATA.md), [embedding](docs/architecture/EMBEDDING.md), [deployment models](docs/architecture/DEPLOYMENT_MODELS.md),
   [versioning](docs/architecture/VERSIONING.md), [API conventions](docs/architecture/API_CONVENTIONS.md),
   [decisions (ADRs)](docs/adr/)
 - Guides: [building a product](docs/guides/BUILDING_A_PRODUCT.md), [product tables](docs/guides/PRODUCT_TABLES.md);
