@@ -10,6 +10,11 @@ from typing import Any
 
 INVITATION = "invitation"
 
+#: Template keys only Axentra itself may send (never through ``POST .../notify/send``), whether or
+#: not a product overrides their content: their variables (e.g. ``accept_url``) must never be
+#: chosen by an API caller.
+SYSTEM_ONLY_TEMPLATES: frozenset[str] = frozenset({INVITATION})
+
 BUILTIN_TEMPLATES: dict[str, dict[str, Any]] = {
     INVITATION: {
         "channel": "email",

@@ -8,6 +8,10 @@ Permissions are strings ``<resource>:<action>``. Each has a scope:
   in every tenant of that product.
 
 Access is denied unless a role or API key grants the permission explicitly.
+
+Holding ``members:manage`` / ``product_members:manage`` does not let a principal hand out more
+than it holds: role assignment is capped by the caller's own permissions (the "role ceiling", see
+:mod:`axentra.tenancy.service`).
 """
 
 from __future__ import annotations
@@ -56,6 +60,11 @@ CATALOG: tuple[PermissionDef, ...] = (
     PermissionDef("usage:manage", "product", "Define meters and quotas"),
     PermissionDef("billing:manage", "product", "Manage plans, prices and subscriptions"),
     PermissionDef("notify:manage", "product", "Manage notification templates and send tests"),
+    PermissionDef(
+        "notify:send_external",
+        "product",
+        "Send notifications to email addresses that are not members of the tenant",
+    ),
     # Tenant
     PermissionDef("tenant:read", "tenant", "View the tenant"),
     PermissionDef("members:read", "tenant", "View tenant members and invitations"),
@@ -127,7 +136,8 @@ BUILTIN_ROLES: dict[str, BuiltinRole] = {
             "product_support",
             "Support",
             "product",
-            "Reads everything in the product and manages tenant members",
+            "Reads everything in the product and manages tenant members up to its own permissions"
+            " (in practice: viewers)",
             (PRODUCT & READS) | {"product:read", "members:manage"} | (TENANT & READS) | {"tenant:read"},
         ),
         BuiltinRole(

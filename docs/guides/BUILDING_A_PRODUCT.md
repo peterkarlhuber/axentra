@@ -116,7 +116,7 @@ def list_projects(tenant_id: str, principal: CurrentPrincipal, svc: Svc): ...
   `axentra.api.app.iter_api_routes`, because newer FastAPI versions keep included routers as
   wrapper objects.
 - Signup is your product's decision. Taskboard's public `POST /api/signup` throttles per IP
-  (`ax.identity.throttle`/`count_failure`). It creates the tenant first, so a taken slug fails
+  (`ax.identity.hit`, an atomic per-minute counter). It creates the tenant first, so a taken slug fails
   before an account exists. It then calls `ax.identity.create_user`, adds the owner membership and
   subscribes the free plan, and deletes the tenant again if a later step fails.
 

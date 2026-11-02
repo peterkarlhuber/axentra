@@ -97,7 +97,14 @@ class SecuritySettings(_Section):
     password_login: bool = True
     password_min_length: int = Field(12, ge=8)
     login_rate_per_minute: int = Field(10, ge=1)
-    """Failed-login budget per IP and per account per minute."""
+    """Failed-login budget per IP and per account per minute (the IP budget is three times this)."""
+    fresh_login_minutes: int = Field(5, ge=1, le=60)
+    """How recent the session's login must be for a user without a password (OIDC-only) to set a
+    first password via ``POST /v1/me/password``."""
+    first_password: Literal["fresh_login", "disabled"] = "fresh_login"  # noqa: S105 (a mode)
+    """Whether users without a password (OIDC-only) may set one: ``fresh_login`` (default) within
+    ``fresh_login_minutes`` of their login, ``disabled``: never (they keep logging in through their
+    identity provider, so MFA and IdP-side deprovisioning always apply)."""
     master_keys_ref: str | None = None
     """Reference to the versioned encryption keyring (``kid:base64key,kid2:...``); first = active."""
     master_keys: str | None = None
@@ -237,6 +244,10 @@ class EventsSettings(_Section):
     """Allow webhook URLs that resolve to private, loopback or link-local addresses (tests/dev only)."""
     webhook_allow_http: bool = False
     """Allow plain-http webhook URLs outside production (never in production)."""
+    webhook_allow_private_targets_in_production: bool = False
+    """Explicit override that lets ``webhook_allow_private_targets`` be used in production (for
+    installations whose webhook receivers live on a private network). Without it production refuses
+    to start with private targets allowed, because that switches the SSRF guard off."""
     sse_poll_seconds: float = Field(1.0, gt=0, le=30)
     sse_reauth_seconds: float = Field(15.0, gt=0, le=300)
     sse_keepalive_seconds: float = Field(15.0, gt=0, le=300)
@@ -310,6 +321,14 @@ class Settings(_Section):
                     problems.append(f"oidc[{p.id}].issuer must use https")
             if self.events.webhook_allow_http:
                 problems.append("events.webhook_allow_http is not allowed in production")
+            if (
+                self.events.webhook_allow_private_targets
+                and not self.events.webhook_allow_private_targets_in_production
+            ):
+                problems.append(
+                    "events.webhook_allow_private_targets disables the SSRF guard; in production it also needs"
+                    " events.webhook_allow_private_targets_in_production = true"
+                )
             if self.billing.provider == "fake":
                 problems.append("billing.provider 'fake' is not allowed in production")
         if self.billing.live_payments and self.billing.provider != "stripe":

@@ -39,6 +39,12 @@ class Forbidden(AxentraError):
     title = "Not permitted"
 
 
+class ReauthenticationRequired(Forbidden):
+    """The action needs a recent login (e.g. setting a first password); log in again and retry."""
+
+    code = "reauthentication_required"
+
+
 class NotFound(AxentraError):
     code = "not_found"
     status = 404

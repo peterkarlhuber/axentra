@@ -5,7 +5,7 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last reviewed: 2026-11-01 (`0.1.0.dev0`, after the Phase 5 hardening change).
+Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/security/REVIEW-2026-11-01.md).
 
 ## Release
 
@@ -26,6 +26,10 @@ Last reviewed: 2026-11-01 (`0.1.0.dev0`, after the Phase 5 hardening change).
 | P2 | identity | MFA (TOTP/WebAuthn) |
 | P2 | storage | Content-type policy per product: `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` and other blocked types are refused installation-wide, or stored inert with the global `storage.store_blocked_as_inert`; the blocklist itself is fixed in code (Nodestro plan G-7) |
 | P2 | migrations | Runner features from Nodestro (plan G-2): pre-migration backup hook, refusal when the schema is newer than the code, a serving gate for a compatible schema range, optional non-transactional steps |
+| P2 | notify | Per-tenant send rate limits for `POST .../notify/send` (review 2026-11-01, F6 follow-up; the relay itself is closed by `notify:send_external` and system-only templates) |
+| P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md) |
+| P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up) |
+| P2 | access | Optional revocation of API keys created by a user when that user loses product access (review 2026-11-01, F5 follow-up; key-created keys already cascade) |
 | P2 | security | Shared rate limiting across API processes (the general limit is an in-memory token bucket per process; only login throttling is shared through PostgreSQL) |
 | P2 | release | Version checks against the package metadata: Axentra uses `dynamic = ["version"]` (hatch reads `src/axentra/_version.py`), so tools that read `project.version` from `pyproject.toml` (e.g. Nodestro's `check_versions.py`) see none; document/offer a supported way (`axentra --version`, `importlib.metadata.version("axentra")`, or a static version) |
 
@@ -67,7 +71,10 @@ These are current, deliberate or accepted properties; some have an item above.
 - Unique constraints on natural keys (emails, product slugs, tenant slugs, role keys) can reveal
   existence through conflict errors.
 - Login throttling uses fixed one-minute windows (bursts up to twice the budget at a window
-  boundary); no lockout, no CAPTCHA.
+  boundary); no CAPTCHA. The per-account budget lets anyone who knows an email block password
+  logins of that account for up to a minute (accepted trade-off, see SECURITY_MODEL.md).
+- Job kinds and their handler permissions are declared in process (`ax.jobs.register`/`declare`);
+  an API process that does not declare a kind refuses it to tenant callers (fail closed).
 - The general rate limit is off by default and per process (N processes allow N times the rate);
   the request body limit does not protect against slow clients (use the reverse proxy).
 - `pg_dump` needs a superuser or a `BYPASSRLS` backup role (forced RLS); see

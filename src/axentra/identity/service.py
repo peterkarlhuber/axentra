@@ -21,7 +21,15 @@ from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
 from axentra.core.clock import utcnow
 from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
-from axentra.core.errors import Conflict, Forbidden, NotFound, RateLimited, Unauthenticated, ValidationFailed
+from axentra.core.errors import (
+    Conflict,
+    Forbidden,
+    NotFound,
+    RateLimited,
+    ReauthenticationRequired,
+    Unauthenticated,
+    ValidationFailed,
+)
 from axentra.core.ids import new_id, new_token
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
@@ -162,12 +170,42 @@ class IdentityService:
         return self.get_user(user_id)
 
     def change_password(self, principal: Principal, current: str, new: str) -> None:
+        """Change the password (the current one is required), or set a first password.
+
+        A user without a password (OIDC-only) has no current password to prove; setting one turns
+        a session into a permanent login that bypasses the identity provider. It is therefore only
+        allowed within ``security.fresh_login_minutes`` of the session's login (``403``
+        ``reauthentication_required`` otherwise: log in again and retry), and never with
+        ``security.first_password = "disabled"``."""
         user_id = self._require_user(principal)
         with self.db.transaction(DbScope.platform()) as tx:
             row = tx.one_or_404(
                 "SELECT email, password_hash FROM axentra_users WHERE id = %s FOR UPDATE", (user_id,)
             )
-            if row["password_hash"] and not verify_password(row["password_hash"], current):
+            if not row["password_hash"]:
+                self_service_mode = self.settings.security.first_password  # a mode, not a secret
+                if self_service_mode == "disabled":
+                    raise Forbidden("users who log in through an identity provider cannot set a password")
+                fresh = tx.one(
+                    "SELECT 1 FROM axentra_sessions WHERE id = %s AND user_id = %s AND revoked_at IS NULL"
+                    " AND created_at > now() - make_interval(mins => %s)",
+                    (principal.session_id or "", user_id, self.settings.security.fresh_login_minutes),
+                )
+                if fresh is None:
+                    self.audit.record(
+                        tx,
+                        principal,
+                        "identity.password.change",
+                        target_type="user",
+                        target_id=user_id,
+                        outcome="denied",
+                        details={"reason": "stale_session"},
+                    )
+                    raise ReauthenticationRequired(
+                        "log in again to set a password (the login must be at most"
+                        f" {self.settings.security.fresh_login_minutes} minutes old)"
+                    )
+            elif not verify_password(row["password_hash"], current):
                 self.audit.record(
                     tx,
                     principal,
@@ -284,7 +322,7 @@ class IdentityService:
     def complete_setup(
         self, token: str, *, email: str, name: str, password: str, ip: str | None, user_agent: str
     ) -> NewSession:
-        self.throttle(f"setup:{ip}", self.settings.security.login_rate_per_minute)
+        self.hit(f"setup:{ip}", self.settings.security.login_rate_per_minute)
         with self.db.transaction(DbScope.platform()) as tx:
             row = tx.one(
                 "SELECT token_hash FROM axentra_setup_tokens WHERE token_hash = %s AND used_at IS NULL"
@@ -292,7 +330,6 @@ class IdentityService:
                 (hash_token(token),),
             )
             if row is None:
-                self.count_failure(f"setup:{ip}")
                 raise Unauthenticated("the setup token is invalid or expired")
             if tx.one("SELECT 1 FROM axentra_platform_roles WHERE role = 'platform_admin' LIMIT 1"):
                 raise Conflict("setup was already completed")
@@ -318,7 +355,33 @@ class IdentityService:
     def _window(self) -> datetime:
         return utcnow().replace(second=0, microsecond=0)
 
+    def hit(self, bucket: str, limit: int) -> None:
+        """Count one attempt and refuse it when the bucket is over ``limit`` in this minute.
+
+        Atomic (one ``INSERT ... ON CONFLICT ... RETURNING``): concurrent attempts cannot exceed
+        the budget. Use :meth:`refund` to give back the attempt when it turned out fine (e.g. a
+        successful login), so that only failures use up the budget."""
+        with self.db.transaction(DbScope.platform()) as tx:
+            hits = tx.scalar(
+                "INSERT INTO axentra_rate_limits (bucket, window_start, hits) VALUES (%s, %s, 1)"
+                " ON CONFLICT (bucket, window_start) DO UPDATE SET hits = axentra_rate_limits.hits + 1"
+                " RETURNING hits",
+                (bucket, self._window()),
+            )
+            tx.execute("DELETE FROM axentra_rate_limits WHERE window_start < now() - interval '10 minutes'")
+        if hits is not None and hits > limit:
+            raise RateLimited("too many attempts; try again in a minute")
+
+    def refund(self, bucket: str) -> None:
+        """Give back one attempt counted by :meth:`hit` in the current window."""
+        with self.db.transaction(DbScope.platform()) as tx:
+            tx.execute(
+                "UPDATE axentra_rate_limits SET hits = greatest(hits - 1, 0) WHERE bucket = %s AND window_start = %s",
+                (bucket, self._window()),
+            )
+
     def throttle(self, bucket: str, limit: int) -> None:
+        """Check without counting (prefer :meth:`hit`; check-then-count is not atomic)."""
         with self.db.transaction(DbScope.platform(), read_only=True) as tx:
             hits = tx.scalar(
                 "SELECT hits FROM axentra_rate_limits WHERE bucket = %s AND window_start = %s",
@@ -344,8 +407,16 @@ class IdentityService:
         limit = self.settings.security.login_rate_per_minute
         account_bucket = f"login:acct:{email.strip().lower()}"
         ip_bucket = f"login:ip:{ip}"
-        self.throttle(ip_bucket, limit * 3)
-        self.throttle(account_bucket, limit)
+        # Count first, verify afterwards (atomic, so parallel attempts cannot exceed the budget);
+        # a successful login gives its attempts back. Trade-off: the per-account bucket lets anyone
+        # who knows an email block password logins for that account for up to a minute
+        # (see docs/architecture/SECURITY_MODEL.md, "Login throttling").
+        self.hit(ip_bucket, limit * 3)
+        try:
+            self.hit(account_bucket, limit)
+        except RateLimited:
+            self.refund(ip_bucket)
+            raise
         with self.db.transaction(DbScope.platform()) as tx:
             row = tx.one(
                 "SELECT id, email, status, password_hash FROM axentra_users WHERE lower(email) = lower(%s)",
@@ -372,10 +443,10 @@ class IdentityService:
                         (hash_password(password), row["id"]),
                     )
         if denied:
-            self.count_failure(ip_bucket)
-            self.count_failure(account_bucket)
             raise Unauthenticated("wrong email or password")
         assert row is not None
+        self.refund(ip_bucket)
+        self.refund(account_bucket)
         return self.start_session(row["id"], "password", ip=ip, user_agent=user_agent)
 
     # -- sessions -------------------------------------------------------------------------------

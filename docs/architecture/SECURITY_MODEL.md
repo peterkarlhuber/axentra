@@ -92,7 +92,45 @@ All decisions go through `axentra.access.authorizer.Authorizer`:
    `403`. Rotation copies the old key's permissions and re-runs the same check.
 7. **Guard rails.** The last platform admin cannot be disabled or demoted; the last product
    owner and the last tenant owner cannot be removed or demoted; a user cannot disable themself;
-   only platform admins change platform roles.
+   only platform admins change platform roles. The last-owner guards lock the tenant (product)
+   row (`SELECT ... FOR NO KEY UPDATE`) before they count owners, so concurrent demotions or
+   removals are serialized and cannot both pass.
+8. **Role ceiling.** `members:manage` and `product_members:manage` do not let a caller hand out
+   more than it holds. Assigning a role (adding, inviting, changing a member's role) needs every
+   permission of that role in the caller's own grant in the same scope; changing or removing a
+   member also needs the member's *current* role to be within the caller's grant. The owner role
+   of a scope (`tenant_owner`, `product_owner`) can be assigned, changed or removed only by an
+   owner of that scope or by authority from a higher level (product operators and product-wide
+   API keys for tenants; platform admins everywhere). Platform admins and in-process system code
+   are exempt. Consequences: `product_support` (reads plus `members:manage`) manages *viewers*
+   only and cannot make itself an owner; a `tenant_admin` cannot demote, remove or create
+   `tenant_owner`s (it has the same permissions, but not the owner rank); a custom role with
+   `product_members:manage` cannot grant roles stronger than itself. Violations answer `403`.
+9. **No user directory for tenant admins.** Adding an existing user directly (`POST
+   .../members` with `email` or `user_id`, `owner_user_id` when creating a tenant, `POST
+   /v1/products/{id}/members`) resolves only users the caller can already see: platform admins
+   every user; principals with `product_users:read` the users of the product (members of any of
+   its tenants, or its operators); everyone else only the members of the tenant itself (role
+   changes). Any other user, existing or not, gets the same `404` ("user not found; invite them
+   by email instead"), so the endpoint is not an existence oracle for the installation's
+   accounts and nobody is enrolled into a tenant of another product without consent. Invitations
+   (`POST .../invitations`) answer the same for every address.
+10. **Job handlers are confined.** Callers without `jobs:manage` may enqueue only job kinds a
+    product explicitly opened with `enqueue_permission` (see `modules/EVENTS_AND_JOBS.md`). A
+    handler's principal holds the kind's declared permission set (default for undeclared kinds:
+    all product and tenant permissions, i.e. trusted kinds that only operators or product code
+    enqueue), intersected, for jobs a user or API key enqueued through the API, with what that
+    enqueuer holds in the job's scope when the handler runs.
+11. **Idempotency replays.** A repeated `Idempotency-Key` returns the stored job or event only
+    for the same request (kind/type, tenant, payload/data, priority) and only to its creator or to
+    a caller who may read jobs/events (`jobs:read`); anything else is `409` without the stored
+    resource. Notifications compare a request hash in the same way.
+12. **System-only notifications.** The built-in `invitation` template is sent only by Axentra
+    (`POST .../notify/send` answers `403`), so no caller chooses its accept link. Sending to a
+    free-form email address that is not a member of the tenant needs the product permission
+    `notify:send_external` (product owners/admins and API keys that hold it); plain `notify:send`
+    reaches members of the tenant by email, and members or product operators by `user_id`. The `403` is the same whether or not the
+    address has an account.
 
 Services call `authz.require(principal, permission, product_id, tenant_id)` before any data
 access. Low-level classes (`RecordStore`, `Database.transaction`) do not authorize.
@@ -204,6 +242,22 @@ to the email, at least 4 distinct characters. Logins for unknown accounts verify
 hash so timing does not reveal whether an account exists; the error message is always "wrong
 email or password".
 
+A user without a password (OIDC-only) has no current password to prove, so setting a first
+password through `POST /v1/me/password` would turn a stolen session into a permanent login that
+bypasses the identity provider (its MFA, `allowed_email_domains` and deprovisioning). It is
+therefore allowed only within `security.fresh_login_minutes` (default 5) of the session's login;
+otherwise `403` with code `reauthentication_required` (log in again, then retry). With
+`security.first_password = "disabled"` it is never allowed. Residual risk: a session stolen within
+those minutes can still set a password; installations that rely on IdP-side MFA should disable it.
+
+**OIDC account linking (design decision).** The first OIDC login with a verified email (`email_verified`
+is `true`) that matches an existing account links that account to the provider subject, also for
+platform admins. This is the usual behaviour and keeps invitations working, but it trusts every
+configured provider to be authoritative for the email domains it vouches for. Configure
+`oidc[].allowed_email_domains` for each provider (and use providers whose email claims are verified
+and owned by the organization); a provider that lets users claim arbitrary verified emails could
+otherwise take over accounts. No opt-out setting exists in this version.
+
 ## API keys
 
 ([ADR 0007](../adr/0007-api-keys.md)) Format `axk_<26 char id>_<43 char secret>`. Shown exactly
@@ -212,6 +266,13 @@ constant time. A key has a product, an optional tenant, an explicit permission l
 optional expiry. Rotation creates a replacement and revokes the old key immediately or after a
 grace period (at most 7 days). `last_used_at` is updated at most once a minute. Keys are sent as
 `Authorization: Bearer axk_...` (or `X-API-Key`).
+
+Keys created by a key (a key holding `api_keys:manage`) hold at most its permissions and never
+outlive it: without `expires_at` they inherit the creating key's expiry, a later `expires_at` is
+refused with `422`. Revoking a key revokes all keys created by it, recursively, in the same
+transaction (the audit event lists them under `cascaded`). Rotation does not cascade (the
+replacement takes over). Keys created by users belong to the product and are not tied to the
+user's membership: revoke them when people leave.
 
 ## Secrets and the keyring
 
@@ -256,10 +317,18 @@ storing. Redaction is a safety net; code must still avoid logging secrets.
 ## Rate limiting
 
 Only authentication is throttled in this version: failed password logins count per account
-(`security.login_rate_per_minute`, default 10) and per client IP (three times that), and failed
+(`security.login_rate_per_minute`, default 10) and per client IP (three times that), and
 setup-token attempts per IP, in fixed one-minute windows stored in PostgreSQL (shared by all API
 processes). Exceeding a budget returns `429` with `Retry-After: 60`. Fixed windows allow up to
 twice the budget across a window boundary.
+
+**Login throttling** counts before it verifies: one statement (`INSERT ... ON CONFLICT DO UPDATE
+... RETURNING hits`) increments the bucket and the attempt is refused when the result is over the
+budget, so parallel attempts cannot exceed it. A successful login gives its attempts back, so only
+failures use up the budget. Trade-off (accepted): the per-account bucket lets anyone who knows an
+email block *password* logins for that account for up to one minute by sending wrong passwords
+(sessions in use and OIDC logins are not affected). Dropping the per-account bucket would instead
+allow unlimited guessing of one account from many IP addresses.
 
 General request rate limiting is optional and **off by default** (`security.rate_limit_per_minute`
 per credential, `security.rate_limit_ip_per_minute` per client IP, `security.rate_limit_burst`).
@@ -305,13 +374,15 @@ listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mo
 | Threat | Mitigation | Residual risk / notes |
 |---|---|---|
 | IDOR / BOLA (foreign ids in the path) | Authorizer checks every product/tenant id against the principal; unrelated scopes return `404`; queries filter by product and tenant; RLS confines unfiltered queries; cross-tenant and cross-product tests | Platform-scope queries rely on code review; global users table is not under RLS |
-| Privilege escalation | Deny by default; platform permissions never granted to keys or product roles; key creators cannot grant what they lack; last-owner/admin guards | Product roles hold tenant permissions in all tenants by design |
+| Privilege escalation | Deny by default; platform permissions never granted to keys or product roles; key creators cannot grant what they lack; role ceiling on member and operator changes; owner rank; derived keys capped by the parent's expiry and revoked with it; job handlers confined to declared and enqueuer permissions; last-owner/admin guards with row locks | Product roles hold tenant permissions in all tenants by design; keys created by users outlive the user's membership |
 | CSRF | SameSite=Lax cookie, CSRF header token for unsafe cookie requests, Origin allow-list, login CSRF check | Browsers that send no `Origin` rely on the CSRF token alone (sufficient) |
 | XSS | The API returns JSON only (`application/json`, `application/problem+json`) with `nosniff` and a `default-src 'none'` CSP; cookies are HttpOnly | Frontends (product UIs, Studio) must escape data themselves; `/v1/docs` loads Swagger UI assets from a CDN without the strict CSP |
 | SQL injection | Parameterized queries only (psycopg placeholders); dynamic identifiers come from fixed allow-lists (sort fields, regex-checked field names); JSON filters passed as bound `jsonb` | Product code using `ax.db` must follow the same rule |
 | Session fixation / theft | New random token per login, hash-only storage, HttpOnly + Secure + `__Host-` cookie, idle and absolute expiry, revocation | A stolen token is valid until it expires or is revoked |
 | Brute force / credential stuffing | Argon2id, per-account and per-IP throttling, uniform error message and timing | Fixed windows; no CAPTCHA or lockout; distributed attacks across many IPs are limited only per account |
-| SSRF | No outbound requests from user input in this version | Planned webhooks (Phase 2) must validate target URLs, block private ranges and redirects |
+| SSRF | Webhook targets: https only in production, every resolved address checked against private, loopback, link-local, multicast, reserved, unspecified and IPv6 site-local (`fec0::/10`) ranges, connection pinned to the checked address, no redirects | `events.webhook_allow_private_targets` turns the check off; production refuses to start with it unless `events.webhook_allow_private_targets_in_production` is also set |
+| Account enumeration | Uniform login errors and timing; adding members resolves only users visible to the caller (same `404` otherwise); invitations answer the same for every address; audit lookups answer `404` for missing and not-permitted events alike | Unique constraints (emails, slugs) can reveal existence through `409` to callers allowed to create those |
+| Mail relay / phishing | System-only invitation template; external recipients need `notify:send_external` | No per-tenant send rate limit yet (see docs/TODO.md) |
 | Secret leakage | Hash-only credentials, secrets shown once, secret references, AES-GCM with context binding, redaction in logs/problems/audit, startup refusal of inline secrets in production | Database dumps contain hashes and ciphertexts; the keyring must be stored separately |
 | RLS bypass via misconfiguration | Startup check for superuser/BYPASSRLS; separate owner and app roles in compose | `allow_superuser = true` disables this protection |
 | Spoofed client IP | `X-Forwarded-For` only from `trusted_proxies` | Wrong proxy configuration makes throttling per IP ineffective |

@@ -473,10 +473,9 @@ class OidcService:
         target = self.safe_return_to(return_to)
         bucket = f"oidc:start:{ip}"
         try:
-            self.identity.throttle(bucket, self.settings.security.login_rate_per_minute * 6)
+            self.identity.hit(bucket, self.settings.security.login_rate_per_minute * 6)
         except AxentraError as exc:
             raise OidcLoginError("rate_limited", str(exc), return_to=target) from exc
-        self.identity.count_failure(bucket)
         state = new_token(32)
         nonce = new_token(24)
         verifier = new_token(48)

@@ -245,10 +245,17 @@ def test_api_jobs_permissions_and_isolation(lworld):
     jid = r.json()["id"]
     again = w.admin.post(
         f"/v1/products/{pid}/jobs",
-        json={"kind": "demo.x", "tenant_id": t1},
+        json={"kind": "demo.x", "payload": {"a": 1}, "tenant_id": t1},
         headers={"Idempotency-Key": "k-1"},
     )
     assert again.json()["id"] == jid
+    # The same key with a different request is a conflict (security review 2026-11-01, F8).
+    other = w.admin.post(
+        f"/v1/products/{pid}/jobs",
+        json={"kind": "demo.x", "tenant_id": t1},
+        headers={"Idempotency-Key": "k-1"},
+    )
+    assert other.status_code == 409
     assert (
         w.admin.post(f"/v1/products/{pid}/jobs", json={"kind": "axentra.webhook.deliver"}).status_code == 422
     )
@@ -333,10 +340,18 @@ def test_api_schedules_and_events_crud(lworld):
     ).json()
     e2 = w.admin.post(
         f"/v1/products/{pid}/tenants/{t1}/events",
-        json={"type": "a.b", "data": {"x": 2}},
+        json={"type": "a.b", "data": {"x": 1}},
         headers={"Idempotency-Key": "e1"},
     ).json()
     assert e["id"] == e2["id"]
+    assert (
+        w.admin.post(
+            f"/v1/products/{pid}/tenants/{t1}/events",
+            json={"type": "a.b", "data": {"x": 2}},
+            headers={"Idempotency-Key": "e1"},
+        ).status_code
+        == 409
+    )
     assert w.admin.get(f"/v1/products/{pid}/events/{e['id']}").json()["data"] == {"x": 1}
     assert [
         x["id"] for x in w.admin.get(f"/v1/products/{pid}/events", params={"type": "a.*"}).json()["items"]

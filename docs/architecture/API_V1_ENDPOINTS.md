@@ -18,6 +18,8 @@ summary. Permission names in brackets.
 ## Me
 - `GET /v1/me` -> `{user, platform_role, products: [{product, role, permissions[], tenants: [{tenant, role, permissions[]}]}]}`
 - `PATCH /v1/me` `{name?, locale?, preferences?}`; `POST /v1/me/password` `{current_password, new_password}`
+  (users without a password: only within `security.fresh_login_minutes` of the login, else `403`
+  `reauthentication_required`; never with `security.first_password = "disabled"`)
 
 ## Products
 - `GET /v1/products` (visible to caller), `POST /v1/products` [platform admin, multi mode only]
@@ -25,12 +27,20 @@ summary. Permission names in brackets.
 - `POST /v1/products/{pid}/archive`, `POST /v1/products/{pid}/restore` [platform admin, multi]
 - `GET /v1/products/{pid}/overview` -> counts (tenants, users, keys, audit last 24h) [product:read]
 - `GET/POST /v1/products/{pid}/members`, `PATCH/DELETE /v1/products/{pid}/members/{user_id}` [product_members:*]
+  (role ceiling: `403` for roles above the caller's permissions or the owner rank; `404` for users
+  not visible to the caller, see SECURITY_MODEL.md rules 8-9)
 
 ## Tenants
 - `GET/POST /v1/products/{pid}/tenants` [tenants:read / tenants:create]
 - `GET/PATCH/DELETE /v1/products/{pid}/tenants/{tid}` [tenants:read / tenants:update / tenants:delete]
 - `GET/POST /v1/products/{pid}/tenants/{tid}/members`, `PATCH/DELETE .../members/{user_id}` [members:read / members:manage]
-- `GET/POST /v1/products/{pid}/tenants/{tid}/invitations`, `DELETE .../invitations/{inv_id}` [members:manage]
+  - Role ceiling: `403` when the role to assign, or the member's current role, has permissions the
+    caller lacks, or is `tenant_owner` and the caller is neither a tenant owner nor a product
+    operator. `DELETE`/`PATCH` of a non-member: `404`.
+  - `POST` by email/user id resolves only users visible to the caller (platform admin: all;
+    `product_users:read`: users of the product; otherwise members of this tenant). Others get
+    `404` "user not found; invite them by email instead", the same as unknown users: use invitations.
+- `GET/POST /v1/products/{pid}/tenants/{tid}/invitations`, `DELETE .../invitations/{inv_id}` [members:manage] (role ceiling as above)
 - `POST /v1/invitations/accept` `{token}` (authenticated user)
 
 ## Users
@@ -50,5 +60,5 @@ summary. Permission names in brackets.
 
 ## Audit and settings
 - `GET /v1/audit?product_id=&tenant_id=&action=&actor_id=&since=&until=&q=` [audit:read]
-- `GET /v1/audit/{event_id}`
+- `GET /v1/audit/{event_id}` (`404` both for unknown events and for events the caller may not read)
 - `GET /v1/settings` (effective non-secret configuration) [platform admin or product admin read-only]
