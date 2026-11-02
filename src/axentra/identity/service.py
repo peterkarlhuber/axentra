@@ -517,7 +517,15 @@ class IdentityService:
                 raise Unauthenticated("the session is invalid or expired")
             if row["touch"]:
                 tx.execute("UPDATE axentra_sessions SET last_seen_at = now() WHERE id = %s", (row["id"],))
-        user = self.get_user(row["user_id"])
+            # The user in the same transaction (one snapshot, one round trip of transaction control fewer per
+            # request than a separate get_user).
+            user = self._user(
+                tx.one_or_404(
+                    f"SELECT {_USER_COLUMNS} FROM {_USER_FROM} WHERE u.id = %s",
+                    (row["user_id"],),
+                    what="user",
+                )
+            )
         role = PlatformRole(user.platform_role) if user.platform_role else None
         principal = Principal(
             actor=Actor(ActorKind.USER, user.id, user.display),
