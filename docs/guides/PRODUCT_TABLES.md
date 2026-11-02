@@ -15,7 +15,13 @@ role and checks isolation and cascading deletes.
    `FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants (product_id, id) ON DELETE CASCADE`.
    Product-level tables have `product_id` with a foreign key to `axentra_products (id)`.
 3. `ENABLE` **and** `FORCE ROW LEVEL SECURITY`, plus the `scope` policy with
-   `axentra_scope_allows(product_id, tenant_id)` in `USING` and `WITH CHECK`.
+   `axentra_scope_allows(product_id, tenant_id)` in `USING` and `WITH CHECK`. A table whose rows
+   may be product-level (`tenant_id` NULL, or no `tenant_id` column at all) must keep tenant code
+   from writing them: use `axentra_scope_allows_write(product_id, tenant_id)` (Axentra migration
+   `0011`; pass `NULL` as the tenant for a product-level table) in `WITH CHECK`, and add the
+   restrictive `scope_update` / `scope_delete` policies Axentra uses:
+   `CREATE POLICY scope_update ON crm_x AS RESTRICTIVE FOR UPDATE USING (axentra_scope_allows_write(product_id, tenant_id));`
+   and the same `FOR DELETE`. For a `NOT NULL` `tenant_id` both functions behave the same.
 4. Index `(product_id, tenant_id, ...)` first: every query filters by them.
 5. Ids from `axentra.core.ids.new_id("<prefix>")` (2-4 lowercase letters), a `version` column if
    rows are edited concurrently.

@@ -18,6 +18,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - `IdentityService.resolve_session` reads the user in the session's transaction (one transaction per
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
+### Security
+- Row-level security: tenant scope can no longer write product-level rows (security review SR-02).
+  Migration `0011_tenant_scope_writes` adds `axentra_scope_allows_write` (tenant scope requires
+  `tenant_id` = the current tenant) and uses it in every `scope` policy's `WITH CHECK` plus new
+  restrictive `scope_update` / `scope_delete` policies. Reading product-level rows from tenant scope is
+  unchanged. Product tables with nullable `tenant_id` should follow (docs/guides/PRODUCT_TABLES.md).
+- `secrets reencrypt` also re-encrypts the OIDC login state's `host_context` (security review SR-05):
+  before, a value there stayed under the old key after `pending: 0`. The report adds `by_kid` (values per
+  key id over every column) for hosts that check their keyring against stored values. A test scans
+  every text column of every Axentra table after a rotation and finds no value under the old key.
+
 ### Fixed
 - Product operators can read a suspended tenant's record again, so they can reactivate it:
   `GET /v1/products/{p}/tenants/{t}` now accepts `tenants:read` held for the whole product (product
