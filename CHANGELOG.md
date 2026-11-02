@@ -136,6 +136,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
     library example.
 
 ### Changed
+- Tests: `test_I4_login_throttling_is_atomic` pins the one-minute throttling window. When its 100
+  concurrent attempts straddled a minute boundary, the new window granted a fresh budget (fixed
+  windows allow up to twice the budget across a boundary, as documented), so the test failed.
 - Tests: `test_api_key_lifecycle_and_scope` no longer fails at random. It cut the key secret with
   `split("_")[-1]`, but the secret part may contain `_`, so the remainder could be a single
   character found anywhere in the listing (failed CI on `d5e2ba7` and `7511a37`).
