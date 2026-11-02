@@ -7,7 +7,8 @@ Two ways to declare (see :mod:`axentra.access.product_permissions` for the seman
   :meth:`~axentra.platform.Axentra.start`, and at once by ``register`` after start) mirrors them
   into ``axentra_product_permissions``. Code-declared rows the registration no longer lists are
   retired, never deleted. The last process that synchronizes wins, so run the same registration in
-  every process of a product (API, workers).
+  every process of a product (API, workers), or use versioned access definitions
+  (:mod:`axentra.access.definitions`): a product managed by those is skipped here.
 - **Over HTTP** (products that do not embed Axentra): ``PUT``/``DELETE
   /v1/products/{product_id}/permissions/{name}`` with ``permissions:manage``. Rows registered by
   code cannot be changed or retired over HTTP (``409``); code takes over rows declared over HTTP.
@@ -21,6 +22,7 @@ import logging
 import threading
 
 from axentra.access.authorizer import Authorizer
+from axentra.access.definitions import lock_product
 from axentra.access.models import PermissionInfo
 from axentra.access.product_permissions import (
     MAX_PERMISSIONS_PER_PRODUCT,
@@ -134,6 +136,15 @@ class ProductPermissionService:
             pid = row["id"]
             report.product_id = pid
             self._lock_product(tx, pid)
+            if tx.one("SELECT 1 FROM axentra_access_definitions WHERE product_id = %s", (pid,)):
+                # Versioned definitions (axentra.access.definitions) own this product's permissions: an
+                # unversioned registration must never overwrite them ("last start wins").
+                logger.warning(
+                    "product %r is managed by versioned access definitions; the in-process registration is ignored",
+                    key,
+                )
+                report.skipped = True
+                return report
             existing = {
                 r["name"]: r
                 for r in tx.all("SELECT * FROM axentra_product_permissions WHERE product_id = %s", (pid,))
@@ -177,10 +188,8 @@ class ProductPermissionService:
 
     @staticmethod
     def _lock_product(tx: Tx, product_id: str) -> None:
-        """Serialize declarations of one product (concurrent starts, API calls)."""
-        tx.execute(
-            "SELECT pg_advisory_xact_lock(hashtext('axentra.product_permissions:' || %s))", (product_id,)
-        )
+        """Serialize declarations of one product (concurrent starts, API calls, versioned definitions)."""
+        lock_product(tx, product_id)
 
     @staticmethod
     def _upsert(tx: Tx, product_id: str, p: ProductPermission, declared_by: str) -> None:
