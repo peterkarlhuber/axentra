@@ -83,7 +83,8 @@ These are current, deliberate or accepted properties; some have an item above.
 
 - `axentra_users` (and sessions, platform roles, external identities) are global tables without
   row-level security; protection is in the service layer.
-- In tenant scope, RLS also shows product-level rows (`tenant_id IS NULL`) of the same product.
+- In tenant scope, RLS also shows product-level rows (`tenant_id IS NULL`) of the same product
+  (read-only there since migration `0011`).
 - Unique constraints on natural keys (emails, product slugs, tenant slugs, role keys) can reveal
   existence through conflict errors.
 - Login throttling uses fixed one-minute windows (bursts up to twice the budget at a window

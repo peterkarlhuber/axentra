@@ -67,7 +67,15 @@ class EncryptedColumn:
 
 
 def builtin_encrypted_columns() -> list[EncryptedColumn]:
-    """Every Axentra column that stores ciphertexts (contexts mirror the owning modules)."""
+    """Every Axentra column that stores ciphertexts (contexts mirror the owning modules).
+
+    The list must name every column an Axentra module writes with ``SecretBox.encrypt``: OIDC login
+    states (``identity/oidc.py``), webhook secrets (``events/webhooks.py``), notification messages
+    including the in-app inbox (``notify/service.py``) and the local mailbox (``notify/providers.py``).
+    A column missing here would keep values under the old key after ``secrets reencrypt`` reported
+    ``pending: 0``, and removing that key would make them unreadable (security review SR-05);
+    ``tests/integration/test_hardening.py`` scans every Axentra table after a rotation to catch that.
+    """
 
     def login(field_name: str) -> Callable[[dict[str, Any]], str]:
         return lambda r: f"axentra_login_states:{r['state_hash']}:{field_name}"
@@ -82,6 +90,7 @@ def builtin_encrypted_columns() -> list[EncryptedColumn]:
         EncryptedColumn("axentra_login_states", "nonce", "state_hash", login("nonce")),
         EncryptedColumn("axentra_login_states", "code_verifier", "state_hash", login("code_verifier")),
         EncryptedColumn("axentra_login_states", "invitation_token", "state_hash", login("invitation")),
+        EncryptedColumn("axentra_login_states", "host_context", "state_hash", login("host_context")),
         EncryptedColumn("axentra_webhook_endpoints", "secret_enc", "id", webhook),
         EncryptedColumn("axentra_webhook_endpoints", "previous_secret_enc", "id", webhook),
     ]
@@ -123,6 +132,17 @@ class ReencryptReport:
     def pending(self) -> int:
         return sum(c.pending for c in self.columns.values())
 
+    @property
+    def by_kid(self) -> dict[str, int]:
+        """Stored values per key id over every column (``?``: not an Axentra ciphertext), counted before
+        the run. A key id that is not listed holds no value of a registered column and may be removed
+        from the keyring; a host's startup check can refuse a keyring that lacks a listed key id."""
+        out: dict[str, int] = {}
+        for c in self.columns.values():
+            for kid, n in c.by_kid.items():
+                out[kid] = out.get(kid, 0) + n
+        return dict(sorted(out.items()))
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "active_kid": self.active_kid,
@@ -130,6 +150,7 @@ class ReencryptReport:
             "pending": self.pending,
             "failed": self.failed,
             "reencrypted": sum(c.reencrypted for c in self.columns.values()),
+            "by_kid": self.by_kid,
             "columns": {k: vars(v) for k, v in self.columns.items()},
         }
 
