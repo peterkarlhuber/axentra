@@ -16,6 +16,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: Roadmap Phase 6 (Nodestro integration) marked done on the Axentra side; the "last start wins" limitation
   now names versioned access definitions as the deterministic way.
 
+### Security
+- Row-level security: tenant scope can no longer write product-level rows (security review SR-02).
+  Migration `0011_tenant_scope_writes` adds `axentra_scope_allows_write` (tenant scope requires
+  `tenant_id` = the current tenant) and uses it in every `scope` policy's `WITH CHECK` plus new
+  restrictive `scope_update` / `scope_delete` policies. Reading product-level rows from tenant scope is
+  unchanged. Product tables with nullable `tenant_id` should follow (docs/guides/PRODUCT_TABLES.md).
+
 ### Fixed
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an

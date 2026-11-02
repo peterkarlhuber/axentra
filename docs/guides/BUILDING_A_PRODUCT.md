@@ -84,6 +84,9 @@ CREATE POLICY scope ON taskboard_tasks
     WITH CHECK (axentra_scope_allows(product_id, tenant_id));
 ```
 
+Tables with product-level rows (nullable `tenant_id`) use `axentra_scope_allows_write` in
+`WITH CHECK` instead, so tenant code cannot write them (see `PRODUCT_TABLES.md`, rule 3).
+
 Taskboard adds a composite foreign key `(product_id, tenant_id, project_id) -> taskboard_projects`.
 A task can therefore never point at another tenant's project, whatever the application code does.
 

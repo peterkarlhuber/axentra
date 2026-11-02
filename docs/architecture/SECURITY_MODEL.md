@@ -248,7 +248,7 @@ The third argument `true` makes the settings transaction-local, so they disappea
 rollback and never leak to the next user of a pooled connection (tested in
 `tests/integration/test_rls.py`).
 
-**One policy function.**
+**Two policy functions: read and write.**
 
 ```sql
 CREATE FUNCTION axentra_scope_allows(p text, t text) RETURNS boolean LANGUAGE sql STABLE AS $$
@@ -260,21 +260,34 @@ CREATE FUNCTION axentra_scope_allows(p text, t text) RETURNS boolean LANGUAGE sq
         ELSE false
     END
 $$;
+-- migration 0011: the same, except that tenant scope requires t = the current tenant
+CREATE FUNCTION axentra_scope_allows_write(p text, t text) ...
+        WHEN 'tenant'  THEN ... AND t IS NOT NULL AND t = current_setting('axentra.tenant_id', true)
 ```
 
-Every protected table has `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL SECURITY` (so the policy
-applies to the table owner too) and one policy `scope` with the same expression in `USING` (read,
-update, delete) and `WITH CHECK` (insert, update):
+Every protected table has `ENABLE ROW LEVEL SECURITY`, `FORCE ROW LEVEL SECURITY` (so the policies
+apply to the table owner too) and three policies:
 
-| Scope | Sees and may write |
-|---|---|
-| none / unknown | nothing |
-| `platform` | everything |
-| `product` (P) | rows of product P (all its tenants and product-level rows) |
-| `tenant` (P, T) | rows of tenant T, **plus product-level rows of P whose `tenant_id` is NULL** (e.g. product-wide API keys, product-level audit events, the product row itself) |
+- `scope` (permissive, all commands): `USING (axentra_scope_allows(...))` and
+  `WITH CHECK (axentra_scope_allows_write(...))`, so new and updated rows must pass the write side;
+- `scope_update` and `scope_delete` (restrictive, `FOR UPDATE` / `FOR DELETE`):
+  `USING (axentra_scope_allows_write(...))`, so UPDATE, DELETE and `SELECT ... FOR UPDATE/SHARE`
+  only reach rows the scope may write.
+
+| Scope | Sees | May write |
+|---|---|---|
+| none / unknown | nothing | nothing |
+| `platform` | everything | everything |
+| `product` (P) | rows of product P (all its tenants and product-level rows) | the same |
+| `tenant` (P, T) | rows of tenant T, **plus product-level rows of P whose `tenant_id` is NULL** (e.g. product-wide API keys, product-level audit events, the product row itself) | rows of tenant T only: never a row with `tenant_id` NULL, and never a row of a table that holds only product-level rows (products, product members, roles, meters, plans, notification templates, product permissions, access definitions) |
+
+Before migration `0011` the write side was the read side, so a tenant-bound transaction could insert,
+re-home or delete product-level rows (security review SR-02); `tests/integration/test_rls_tenant_writes.py`
+covers every such table. Services that write product-level rows use product scope.
 
 Audit events with `product_id IS NULL` (platform events) are readable only in platform scope;
-they may be inserted from any scope.
+they may be inserted from any scope. Product-level audit events (`tenant_id` NULL) are inserted from
+product or platform scope only.
 
 **Non-superuser role checked at startup.** `Axentra.start()` calls `Database.check_role`: if the
 connected role is a superuser or has `BYPASSRLS`, startup fails in production unless
@@ -288,9 +301,9 @@ policies are really exercised.
 - **Platform scope sees all.** Services that need cross-product reads (authorization lookups,
   authentication, admin listings) use `DbScope.platform()`. RLS protects nothing in those
   transactions; correctness depends on the service code.
-- **Tenant scope sees product-level rows** of the same product (see the table above). Product
-  tables that hold product-wide data should not be readable by tenant code if that matters;
-  model it with separate tables or a non-null `tenant_id`.
+- **Tenant scope sees product-level rows** of the same product (see the table above), but cannot
+  write them. Product tables that hold product-wide data should not be readable by tenant code if
+  that matters; model it with separate tables or a non-null `tenant_id`.
 - **Unique constraints leak existence.** An `INSERT` that collides with a row hidden by RLS still
   fails with a unique violation. Ids are random, so this matters only for natural keys: product
   slugs (global), tenant slugs (per product), role keys (per product), user emails (global).
