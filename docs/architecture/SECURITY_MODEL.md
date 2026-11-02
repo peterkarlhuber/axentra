@@ -456,8 +456,13 @@ user's membership: revoke them when people leave.
 
 `axentra.core.redaction` removes secrets from logs, problem details and audit details: values of
 keys matching `password|secret|token|api_key|authorization|cookie|private_key|credential|signature|csrf`
-are replaced with `[redacted]`, and token-like strings (Axentra API keys, `Bearer ...`, JWTs,
-passwords in `postgres://user:pass@` URLs) are masked in free text. The JSON log formatter and the
+are replaced with `[redacted]`, and token-like strings (Axentra API keys and invitation tokens,
+`Bearer ...`, JWTs, passwords in `postgres://user:pass@` URLs) and the values of `*token`,
+`invitation` and `setup` query parameters are masked in free text. URL patterns match the literal
+and the percent-encoded spelling (`%3Ftoken%3D`, `axinv%5F...`, also encoded more than once), so a
+URL that is itself a query value (`return_to=...`) is covered. URLs that are stored rather than
+logged, such as the OIDC `return_to`, lose secret-carrying parameters entirely
+(`strip_secret_params`). The JSON log formatter and the
 problem renderer apply it to every message; the audit log applies it to `details` before
 storing. Redaction is a safety net; code must still avoid logging secrets.
 

@@ -118,12 +118,19 @@ export interface paths {
         };
         /**
          * Start an OpenID Connect login (redirects to the identity provider)
-         * @description ``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``).
-         *     ``invitation``: an invitation token; lets the invited email sign up and accepts the invitation.
+         * @description ``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``);
+         *     query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed.
+         *     ``invitation``: deprecated, use the ``POST`` start for logins with an invitation.
          */
         get: operations["oidc_start_v1_auth_oidc__provider__start_get"];
         put?: never;
-        post?: never;
+        /**
+         * Start an OpenID Connect login with the invitation in the body (no secret in any URL)
+         * @description The ``GET`` start with the same fields as a JSON body, for logins that carry an invitation
+         *     token: a URL query ends up in proxy access logs and ``Referer`` headers, a request body does not.
+         *     Sets the same login cookie (send it with credentials) and answers the URL to navigate to.
+         */
+        post: operations["oidc_start_post_v1_auth_oidc__provider__start_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3093,6 +3100,27 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** OidcStartAnswer */
+        OidcStartAnswer: {
+            /**
+             * Redirect Url
+             * @description Where to send the browser now (top-level navigation): the identity provider's authorization URL, or the login page with `?login_error=<code>` when the login cannot start.
+             */
+            redirect_url: string;
+        };
+        /** OidcStartRequest */
+        OidcStartRequest: {
+            /**
+             * Invitation
+             * @description An invitation token: lets the invited email sign up and accepts the invitation right after the login. Stored encrypted with the login state, never in a URL.
+             */
+            invitation?: string | null;
+            /**
+             * Return To
+             * @description Where to continue after the login: a path on the API origin or an absolute URL on an allowed origin (else `/`). Query parameters that carry secrets are removed.
+             */
+            return_to?: string | null;
+        };
         /** OverridesSet */
         OverridesSet: {
             /**
@@ -4845,6 +4873,10 @@ export interface operations {
     oidc_start_v1_auth_oidc__provider__start_get: {
         parameters: {
             query?: {
+                /**
+                 * @deprecated
+                 * @description Deprecated: a URL query is recorded by proxies that log full URLs. Send the invitation token in the body of `POST /v1/auth/oidc/{provider}/start`.
+                 */
                 invitation?: string | null;
                 return_to?: string | null;
             };
@@ -4862,6 +4894,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    oidc_start_post_v1_auth_oidc__provider__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OidcStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OidcStartAnswer"];
+                };
             };
             /** @description Validation Error */
             422: {
