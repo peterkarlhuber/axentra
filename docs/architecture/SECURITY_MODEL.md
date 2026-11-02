@@ -434,9 +434,15 @@ user's membership: revoke them when people leave.
      per column, the number of values per key id; `axentra secrets reencrypt` rewrites every value
      not under the active key in batches (one transaction per batch, compare-and-swap per row, so
      it is safe while the API runs and can be re-run after an interruption). Values that cannot be
-     decrypted are counted as `failed` and left unchanged (exit code 2).
-  5. Remove `k1` only when the dry run shows no value under `k1` (and no backup you may still
-     restore needs it), then restart again.
+     decrypted are counted as `failed` and left unchanged (exit code 2). The command covers every
+     Axentra column that holds keyring ciphertexts (OIDC login states: nonce, code verifier,
+     invitation, host context; webhook secrets: current and previous; notification messages,
+     including in-app inbox messages, and the local mailbox: subject, text, HTML) plus the columns
+     products register with `ax.register_encrypted_column`. `pending` is the sum over all of them
+     and `by_kid` the values per key id over all of them.
+  5. Remove `k1` only when the dry run shows `pending: 0` and no `k1` under `by_kid` (and no backup
+     you may still restore needs it), then restart again. An embedding host that keeps encrypted
+     values of its own outside registered columns must re-encrypt and check those as well.
   Decrypting a value whose key id is not in the ring fails with a configuration error naming the
   missing key id; losing a key means losing the values encrypted with it.
 - **Hashes, not ciphertexts, for credentials** that are only compared: session tokens, API key

@@ -10,21 +10,45 @@ import textwrap
 from typing import Any
 
 import psycopg
+import psycopg.sql
 import pytest
 
 from axentra.api.app import create_app
 from axentra.config.secrets import generate_key
+from axentra.core.context import Actor, ActorKind, Principal
 from axentra.data.database import DbScope
 from axentra.platform import Axentra
 from tests.conftest import make_settings
 from tests.integration.conftest import Browser, World
-from tests.integration.test_notify import _product, _send, _template, _tenant
+from tests.integration.test_notify import _member, _product, _send, _template, _tenant
 
 # -- secrets reencrypt ----------------------------------------------------------------------------
 
 
 def _kids(report: dict[str, Any]) -> set[str]:
-    return {kid for col in report["columns"].values() for kid in col["by_kid"]}
+    kids = {kid for col in report["columns"].values() for kid in col["by_kid"]}
+    assert set(report["by_kid"]) == kids
+    return kids
+
+
+def _values_under(pg_urls: dict[str, str], kid: str) -> dict[str, int]:
+    """Every text value of every Axentra table that is a ciphertext under ``kid`` (registered or not)."""
+    found: dict[str, int] = {}
+    with psycopg.connect(pg_urls["admin"]) as conn:
+        cols = conn.execute(
+            "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'"
+            " AND table_name LIKE 'axentra_%%' AND data_type = 'text' ORDER BY 1, 2"
+        ).fetchall()
+        for table, column in cols:
+            n = conn.execute(
+                psycopg.sql.SQL("SELECT count(*) FROM {} WHERE {} LIKE %s").format(
+                    psycopg.sql.Identifier(table), psycopg.sql.Identifier(column)
+                ),
+                (f"axs1.{kid}.%",),
+            ).fetchone()[0]  # type: ignore[index]
+            if n:
+                found[f"{table}.{column}"] = n
+    return found
 
 
 def _write_config(path: Path, pg_urls: dict[str, str], keys: str, **database: Any) -> Path:
@@ -46,6 +70,17 @@ def test_reencrypt_rotates_every_column_and_old_key_can_be_removed(world: World,
     _template(world, pid)
     msg = _send(world.admin, pid, tid, {"email": "bob@example.com"}).json()
     assert ax1.notify is not None and ax1.notify.dispatcher().run_once(10).sent == 1
+    # Notify: an in-app inbox message (stored encrypted at enqueue, never dispatched).
+    _template(
+        world,
+        pid,
+        key="run.failed",
+        channel="inbox",
+        category="runs",
+        variants={"en": {"subject": "Run {{ name }} failed", "text": "The run {{ name }} failed."}},
+    )
+    bob = _member(world, pid, tid, "bob@example.com")
+    ax1.notify.enqueue_system(pid, tid, template_key="run.failed", to_user_id=bob, variables={"name": "R1"})
     # Webhooks: current and previous secret.
     r = world.admin.post(
         f"/v1/products/{pid}/webhooks", json={"url": "https://hooks.example.com/x", "event_types": ["*"]}
@@ -58,13 +93,16 @@ def test_reencrypt_rotates_every_column_and_old_key_can_be_removed(world: World,
     ctx = "axentra_login_states:hash1"
     with ax1.db.transaction(DbScope.platform()) as tx:
         for state, nonce_ctx in (("hash1", ctx), ("broken", "axentra_login_states:other")):
+            sctx = f"axentra_login_states:{state}"
             tx.execute(
-                "INSERT INTO axentra_login_states (state_hash, provider, nonce, code_verifier, expires_at)"
-                " VALUES (%s, 'p', %s, %s, now() + interval '5 minutes')",
+                "INSERT INTO axentra_login_states (state_hash, provider, nonce, code_verifier, invitation_token,"
+                " host_context, expires_at) VALUES (%s, 'p', %s, %s, %s, %s, now() + interval '5 minutes')",
                 (
                     state,
                     ax1.secrets.encrypt("nonce-1", nonce_ctx + ":nonce"),
-                    ax1.secrets.encrypt("verifier-1", f"axentra_login_states:{state}:code_verifier"),
+                    ax1.secrets.encrypt("verifier-1", sctx + ":code_verifier"),
+                    ax1.secrets.encrypt("invite-1", sctx + ":invitation"),
+                    ax1.secrets.encrypt('{"k": "v"}', sctx + ":host_context"),
                 ),
             )
 
@@ -80,7 +118,11 @@ def test_reencrypt_rotates_every_column_and_old_key_can_be_removed(world: World,
         assert cols["axentra_notify_messages.body_html_enc"]["pending"] == 1
         assert cols["axentra_notify_mailbox.subject_enc"]["pending"] == 1
         assert cols["axentra_login_states.nonce"]["pending"] == 2
-        assert cols["axentra_login_states.invitation_token"]["total"] == 0
+        assert cols["axentra_login_states.invitation_token"]["pending"] == 2
+        assert cols["axentra_login_states.host_context"]["pending"] == 2
+        assert cols["axentra_notify_messages.subject_enc"]["pending"] == 2  # e-mail + inbox
+        # The dry run's pending count covers every value under the old key, in any Axentra column.
+        assert dry["pending"] == sum(_values_under(pg_urls, "t1").values())
         # Dry run changed nothing.
         assert ax2.reencrypt_secrets(dry_run=True).as_dict()["pending"] == dry["pending"]
 
@@ -93,6 +135,8 @@ def test_reencrypt_rotates_every_column_and_old_key_can_be_removed(world: World,
         again = ax2.reencrypt_secrets().as_dict()
         assert again["pending"] == 0 and again["reencrypted"] == 0 and again["failed"] == 0
         assert _kids(again) == {"t2"}
+        # pending: 0 means no value under the old key is left anywhere, registered or not (SR-05).
+        assert _values_under(pg_urls, "t1") == {}
     finally:
         ax2.close()
 
@@ -112,6 +156,12 @@ def test_reencrypt_rotates_every_column_and_old_key_can_be_removed(world: World,
             state = tx.one("SELECT * FROM axentra_login_states WHERE state_hash = 'hash1'")
         assert ax3.webhooks._secrets_of(ep) == [second_secret, first_secret]
         assert ax3.secrets.decrypt(state["nonce"], ctx + ":nonce") == "nonce-1"
+        assert ax3.secrets.decrypt(state["code_verifier"], ctx + ":code_verifier") == "verifier-1"
+        assert ax3.secrets.decrypt(state["invitation_token"], ctx + ":invitation") == "invite-1"
+        assert ax3.secrets.decrypt(state["host_context"], ctx + ":host_context") == '{"k": "v"}'
+        assert ax3.notify is not None
+        inbox = ax3.notify.list_inbox(Principal(actor=Actor(ActorKind.USER, bob, "bob")), pid, tid).items
+        assert [(i.subject, i.text) for i in inbox] == [("Run R1 failed", "The run R1 failed.")]
     finally:
         ax3.close()
 
