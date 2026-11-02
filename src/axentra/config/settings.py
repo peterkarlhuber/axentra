@@ -322,15 +322,19 @@ class Settings(_Section):
     def secure_cookies(self) -> bool:
         return self.security.public_url.startswith("https://")
 
-    def validate_security(self) -> None:
-        """Refuse insecure production configurations. Called at startup by ``create_app``/CLI."""
+    def validate_security(self, *, keyring_injected: bool = False) -> None:
+        """Refuse insecure production configurations. Called at startup by ``create_app``/CLI.
+
+        ``keyring_injected=True``: the embedding application passes its own keyring to
+        ``Axentra(..., keyring=...)``, so ``security.master_keys_ref`` is not required (inline
+        ``security.master_keys`` stays refused in production)."""
         problems: list[str] = []
         if self.is_production:
             if not self.security.public_url.startswith("https://"):
                 problems.append("security.public_url must use https in production")
             if self.security.master_keys:
                 problems.append("security.master_keys must not be inline in production; use master_keys_ref")
-            if not self.security.master_keys_ref:
+            if not self.security.master_keys_ref and not keyring_injected:
                 problems.append("security.master_keys_ref is required in production")
             if any(o == "*" or not o.startswith("https://") for o in self.security.allowed_origins):
                 problems.append("security.allowed_origins must be explicit https origins in production")

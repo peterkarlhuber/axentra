@@ -113,3 +113,41 @@ def test_join_respects_row_level_security(world, pg_urls):
         join(conn, DbScope.tenant(pid, tid)) as tx,
     ):
         assert tx.scalar("SELECT count(*) FROM axentra_usage_events") == 0
+
+
+def test_injected_keyring_in_production(pg_urls, tmp_path):
+    from axentra.config.secrets import Keyring, generate_key
+    from axentra.config.settings import load_settings
+    from axentra.platform import Axentra
+
+    def prod(**security):  # type: ignore[no-untyped-def]
+        return load_settings(
+            None,
+            environ={},
+            environment="production",
+            mode="multi",
+            database={"url": pg_urls["app"], "pool_max": 2},
+            security={
+                "public_url": "https://api.example",
+                "allowed_origins": ["https://studio.example"],
+                **security,
+            },
+            storage={"local_path": str(tmp_path / "s")},
+        )
+
+    # Without a ref and without an injected keyring: refused, as before.
+    with pytest.raises(ConfigurationError, match="master_keys_ref"):
+        Axentra(prod())
+    # Inline keys stay refused in production even with an injected keyring.
+    with pytest.raises(ConfigurationError, match="inline"):
+        Axentra(prod(master_keys=f"k1:{generate_key()}"), keyring=Keyring.parse(f"k1:{generate_key()}"))
+
+    keyring = Keyring.parse(f"host1:{generate_key()}")
+    ax = Axentra(prod(), keyring=keyring)
+    ax.start()
+    try:
+        assert ax.keyring is keyring
+        token = ax.secrets.encrypt("value", "ctx")
+        assert token.startswith("axs1.host1.") and ax.secrets.decrypt(token, "ctx") == "value"
+    finally:
+        ax.close()
