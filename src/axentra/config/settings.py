@@ -285,6 +285,13 @@ class EventsSettings(_Section):
     backoff_base_seconds: float = Field(2.0, gt=0)
     backoff_max_seconds: float = Field(3600.0, gt=0)
     webhook_max_attempts: int = Field(8, ge=1, le=50)
+    webhook_backoff_base_seconds: float = Field(120.0, gt=0, le=86400)
+    """Wait before the first webhook retry; it doubles with every further attempt (with jitter:
+    between half and all of the step). Webhooks have their own schedule, independent of the job
+    ``backoff_*`` settings, so that a receiver outage of a few hours does not lose deliveries.
+    With the defaults (8 attempts) the 7 retries span about 2 to 4.2 hours."""
+    webhook_backoff_max_seconds: float = Field(21600.0, gt=0, le=7 * 86400)
+    """Upper bound of a single wait between two webhook attempts (before jitter)."""
     webhook_timeout_seconds: float = Field(10.0, gt=0, le=60)
     webhook_response_max_bytes: int = Field(4096, ge=0, le=65536)
     webhook_allow_private_targets: bool = False
@@ -300,6 +307,12 @@ class EventsSettings(_Section):
     sse_keepalive_seconds: float = Field(15.0, gt=0, le=300)
     sse_max_seconds: float = Field(3600.0, gt=0)
     """A stream ends after this time; clients reconnect with ``Last-Event-ID``."""
+
+    @model_validator(mode="after")
+    def _webhook_backoff(self) -> EventsSettings:
+        if self.webhook_backoff_max_seconds < self.webhook_backoff_base_seconds:
+            raise ValueError("webhook_backoff_max_seconds must not be less than webhook_backoff_base_seconds")
+        return self
 
 
 class SearchSettings(_Section):

@@ -78,6 +78,20 @@ class Conflict(AxentraError):
     title = "Conflict"
 
 
+class SetupAlreadyCompleted(Conflict):
+    """First-run setup was attempted although a platform administrator already exists."""
+
+    code = "setup_already_completed"
+    title = "Setup already completed"
+
+
+class EmailTaken(Conflict):
+    """Another user already has this email address (email addresses are unique, case-insensitive)."""
+
+    code = "email_taken"
+    title = "Email address in use"
+
+
 class PreconditionFailed(AxentraError):
     code = "precondition_failed"
     status = 412

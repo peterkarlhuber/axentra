@@ -11,7 +11,7 @@ from axentra.events.cron import CronExpr, next_interval_slot
 from axentra.events.http_client import TargetRefused, parse_target
 from axentra.events.jobs import backoff_delay, check_kind, format_error
 from axentra.events.streams import parse_position
-from axentra.events.webhooks import sign, signature_header, verify_signature
+from axentra.events.webhooks import sign, signature_header, verify_signature, webhook_retry_delay
 
 
 def _t(s: str) -> datetime:
@@ -61,6 +61,42 @@ def test_backoff_is_exponential_jittered_and_capped():
         step = min(30, 2 * 2 ** (attempt - 1))
         assert step / 2 <= d <= step
     assert backoff_delay(500, 2, 30) <= 30
+
+
+def test_webhook_retry_schedule_is_separate_from_job_backoff():
+    events = EventsSettings()
+    # Defaults: 2 minutes doubling, at most 6 hours per wait; the jobs' 2 s backoff is not used.
+    assert (events.webhook_backoff_base_seconds, events.webhook_backoff_max_seconds) == (120.0, 21600.0)
+    rng = random.Random(7)
+    delays = [webhook_retry_delay(n, events, rng=rng) for n in range(1, events.webhook_max_attempts)]
+    for n, d in enumerate(delays, start=1):
+        step = min(21600.0, 120.0 * 2 ** (n - 1))
+        assert step / 2 <= d <= step
+    # Deterministic for a seeded rng, and the same jitter function as jobs.
+    assert delays == [
+        backoff_delay(n, 120.0, 21600.0, rng=r)
+        for r in [random.Random(7)]
+        for n in range(1, events.webhook_max_attempts)
+    ]
+    # The 7 retries of the default 8 attempts span about 2.1 to 4.2 hours.
+    assert 2 * 3600 < sum(delays) <= 15240
+    # Zero jitter draw gives half the step, the largest gives the full step; the cap applies.
+    low, high = random.Random(), random.Random()
+    low.random = lambda: 0.0  # type: ignore[method-assign]
+    high.random = lambda: 1.0  # type: ignore[method-assign]
+    custom = EventsSettings(webhook_backoff_base_seconds=60, webhook_backoff_max_seconds=600)
+    assert webhook_retry_delay(1, custom, rng=low) == 30
+    assert webhook_retry_delay(3, custom, rng=high) == 240
+    assert webhook_retry_delay(20, custom, rng=high) == 600
+
+
+def test_webhook_backoff_settings_are_validated():
+    with pytest.raises(ValueError, match="webhook_backoff_max_seconds"):
+        EventsSettings(webhook_backoff_base_seconds=600, webhook_backoff_max_seconds=60)
+    with pytest.raises(ValueError):
+        EventsSettings(webhook_backoff_base_seconds=0)
+    with pytest.raises(ConfigurationError):
+        load_settings(None, environ={}, events={"webhook_backoff_max_seconds": -1})
 
 
 def test_kind_and_error_formatting():

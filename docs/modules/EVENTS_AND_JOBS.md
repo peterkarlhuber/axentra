@@ -184,8 +184,18 @@ body)`). Compute the HMAC over `f"{t}.".encode() + raw_body`, compare it in cons
 `v1` value, reject timestamps older than about 5 minutes, and deduplicate by event id.
 
 A 2xx response counts as success. Any other response, a timeout or a connection error is retried
-through the job queue with backoff, up to `webhook_max_attempts`. Then the delivery becomes
-`dead`. Redirects are not followed. The first `webhook_response_max_bytes` of the response body
+through the job queue, up to `webhook_max_attempts`. Then the delivery becomes `dead`.
+
+Webhook retries have their own schedule, independent of the job backoff (`backoff_*`, seconds to
+minutes), so that a receiver that is down for a while does not lose events: the wait after
+failed attempt *n* is `min(webhook_backoff_base_seconds * 2^(n-1), webhook_backoff_max_seconds)`,
+with the same "equal jitter" as jobs (a random value between half and all of that step). With the
+defaults (`webhook_backoff_base_seconds` 120, `webhook_backoff_max_seconds` 21600,
+`webhook_max_attempts` 8) the waits are about 2, 4, 8, 16, 32, 64 and 128 minutes (each halved at
+most by jitter): the last attempt runs about **2.1 to 4.2 hours** after the first, so receiver
+outages up to about two hours are always bridged. Raise `webhook_max_attempts` for a longer window
+(each further attempt doubles the wait until the 6 hour cap: 9 attempts about 4.2 to 8.5 hours,
+10 attempts about 6.2 to 12.5 hours). After that, **Redeliver** sends a dead delivery again. Redirects are not followed. The first `webhook_response_max_bytes` of the response body
 are stored with the delivery (status code, duration, error, next attempt). Redeliver queues a
 delivery again (`409` while one is queued or running). Test sends a signed `axentra.ping`
 synchronously (no retries) and returns the recorded delivery.
@@ -291,7 +301,9 @@ Shapes (see `openapi/axentra-v1.json`):
 
 `lease_seconds` (60), `poll_interval_seconds` (1), `listen_notify` (true), `reap_interval_seconds`
 (15), `scheduler_interval_seconds` (5), `default_max_attempts` (5), `backoff_base_seconds` (2),
-`backoff_max_seconds` (3600), `webhook_max_attempts` (8), `webhook_timeout_seconds` (10),
+`backoff_max_seconds` (3600), `webhook_max_attempts` (8), `webhook_backoff_base_seconds` (120;
+greater than 0, at most 86400), `webhook_backoff_max_seconds` (21600; at least the base, at most
+604800), `webhook_timeout_seconds` (10),
 `webhook_response_max_bytes` (4096), `webhook_allow_private_targets` (false; in production only
 with `webhook_allow_private_targets_in_production`), `webhook_allow_http`
 (false; refused in production), `sse_poll_seconds` (1), `sse_reauth_seconds` (15),
