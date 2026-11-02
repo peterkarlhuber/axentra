@@ -6,6 +6,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+### Fixed
+- An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
+  Before, it restored the scope of the moment `joined()` began, so a service call (for example an
+  authorization read) inside a `join(conn, scope)` block emptied that block's scope: under
+  row-level security the next statements of the block saw no rows (`UsageService.record_in` found
+  no meter). Superuser test roles hid it.
+
 ### Added
 - `tests/integration/test_job_delivery_semantics.py`: a worker that lost its lease keeps running its
   handler while the retry runs it again (at least once); `max_attempts=1` makes the job `dead`;
@@ -30,6 +37,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   context stored encrypted with the login state, returned as `LoginResult.context`),
   `finish(start_session=False)` and `LoginResult.identity` (issuer, subject, verified address,
   name). Column `axentra_login_states.host_context` (migration `0009`).
+- Database roles (docs/architecture/EMBEDDING.md#database-roles): `axentra.data.roles`
+  (`grant_runtime_role`, `inspect_role`), `axentra db grant-runtime-role ROLE`,
+  `axentra db inspect-role [ROLE]` and `axentra migrate --grant-runtime-role ROLE` give a runtime
+  role data privileges only (refusing superuser, `BYPASSRLS` and owning roles; the migration
+  bookkeeping stays read-only for it). `Database.role_info()` reports `table_owner`;
+  `check_role(allow_table_owner=...)` and `database.allow_table_owner` (default `true`) refuse an
+  owning role in production. The compose stacks grant `axentra_app` after `migrate`.
+  `AXENTRA_TEST_SPLIT_ROLES=1` runs the test suite with separate owner and runtime roles.
+- `Database.on_pool(pool)`: Axentra borrows the host application's connection pool (one pool per
+  process; autocommit connections and any row factory work; the pool is never opened or closed by
+  Axentra).
 - Embedding Axentra as a library (docs/architecture/EMBEDDING.md):
   - `axentra.core.errors.problem_details(exc)` maps any exception to a framework-independent
     `ProblemInfo` (status, code, title, redacted detail, extra members, headers such as

@@ -73,6 +73,7 @@ superuser or `BYPASSRLS` role is refused in production unless `database.allow_su
 | `pool_max` | `AXENTRA__DATABASE__POOL_MAX` | `10` | Maximum pooled connections per process |
 | `statement_timeout_ms` | `AXENTRA__DATABASE__STATEMENT_TIMEOUT_MS` | `30000` | `statement_timeout` per connection (0 = none) |
 | `allow_superuser` | `AXENTRA__DATABASE__ALLOW_SUPERUSER` | `false` | Allow a role that bypasses RLS in production. Never set this in production |
+| `allow_table_owner` | `AXENTRA__DATABASE__ALLOW_TABLE_OWNER` | `true` | Allow an application role that owns the RLS-protected tables (it could switch RLS off). `false` refuses it in production: migrate with a separate owner role and `axentra db grant-runtime-role` |
 
 ## `[security]`
 

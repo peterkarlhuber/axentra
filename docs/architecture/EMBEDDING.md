@@ -26,7 +26,34 @@ ax.close()
   `security.master_keys_ref` nor writes a development keyring file, and production does not
   require `master_keys_ref` (every other production check stays, including the refusal of inline
   `security.master_keys`).
-- `database=`: a prepared `axentra.data.Database` (default: built from `settings.database`).
+- `database=`: a prepared `axentra.data.Database` (default: built from `settings.database`), for
+  example one on the host's own pool (next section).
+
+## One connection pool per process
+
+A host that already has a `psycopg_pool.ConnectionPool` to the same database lends it to Axentra
+instead of letting Axentra open a second one, so the process has one connection budget:
+
+```python
+from axentra.data import Database
+
+ax = Axentra(settings, database=Database.on_pool(host_pool), keyring=...)
+```
+
+- Axentra borrows connections and never opens, resizes or closes the pool (`ax.start()` /
+  `ax.close()` leave it alone); the host opens it first and closes it last. Any object with
+  `connection(timeout=None)` (and optionally `get_stats()` for the pool metrics) works.
+- The host's connection settings stay the host's: `autocommit=True` or not, any row factory, its
+  `statement_timeout` and `search_path`. Every Axentra transaction is an explicit transaction
+  block (`BEGIN ... COMMIT` on an autocommit connection) and reads dict rows from its own cursor.
+- Axentra sets only transaction-local settings (`set_config(..., true)`, the scope), so a
+  connection that goes back to the host carries no Axentra scope, after a commit, a rollback or an
+  error alike (tested on one physical connection shared by several tenants:
+  `tests/integration/test_db_roles_and_pool.py`).
+- Size the pool for both: a thread holds one connection for an Axentra service call made outside
+  `joined(...)` (inside it, Axentra uses the host's connection and takes none).
+- `url=` (default: the pool's `conninfo`) is used only by components that open a dedicated
+  connection (`LISTEN`, the job worker's advisory lock).
 
 ## Error mapping
 
@@ -111,8 +138,40 @@ returns the stored event and adds nothing; `enforce=True` behaves like `check_an
 refuses a transaction whose scope does not cover the product and tenant. Authorization is read on
 a pooled connection (committed state) unless the call runs inside `ax.db.joined(...)`.
 
+`join()` may be used inside `joined()`: an Axentra service called within the `join()` block (an
+authorization read, for instance) restores the scope it found on the connection, so the rest of
+the block keeps the `join()` scope. (Before, it restored the scope of the moment `joined()` began,
+which emptied the scope and, under row-level security, hid the rows the block wrote next.)
+
 RLS applies to the host connection only if its role is subject to it (not a superuser, no
-`BYPASSRLS`); services still filter explicitly either way.
+`BYPASSRLS`) and should not own the tables; services still filter explicitly either way.
+
+## Database roles
+
+Row-level security is defense in depth only for a role that is not a superuser, has no
+`BYPASSRLS` and does **not own** the tables: `FORCE ROW LEVEL SECURITY` binds an owner too, but an
+owner may switch it off (`ALTER TABLE ... NO FORCE ROW LEVEL SECURITY`), change policies or drop the
+table. So run migrations (Axentra's and the host's namespaces) as an owner role
+(`database.migration_url_ref`) and serve as a runtime role with data privileges only:
+
+- `axentra.data.roles.grant_runtime_role(owner_url_or_conn, role, schema=None)` (CLI:
+  `axentra db grant-runtime-role ROLE`, or `axentra migrate --grant-runtime-role ROLE`) grants
+  `SELECT, INSERT, UPDATE, DELETE` on every table of the schema, `USAGE, SELECT` on sequences,
+  `EXECUTE` on functions, the same as the owner's default privileges (so later migrations need no
+  new grant) and `CONNECT`; `axentra_schema_migrations` stays read-only for the runtime role. It
+  refuses (nothing granted) a role that is the owner itself, a superuser, has `BYPASSRLS` or owns
+  tables. Idempotent.
+- `inspect_role(conn, role)` / `axentra db inspect-role [ROLE]` (exit 3 when RLS does not fully
+  apply) and `Database.role_info()` report `superuser`, `bypass_rls` and `table_owner`.
+- `Database.check_role(allow_superuser=..., allow_table_owner=...)`; `ax.start()` refuses an owning
+  role in production with `database.allow_table_owner = false` (default `true` for compatibility;
+  a warning is logged in production).
+- Negative tests (`tests/integration/test_db_roles_and_pool.py`): the runtime role sees no rows
+  without a scope, cannot write into another tenant, cannot `ALTER ... NO FORCE / DISABLE ROW LEVEL
+  SECURITY`, drop or create policies, drop, truncate or create tables, replace the scope function,
+  change the migration bookkeeping, `SET ROLE` to the owner or give itself `BYPASSRLS`;
+  `row_security = off` makes a query fail instead of bypassing. `AXENTRA_TEST_SPLIT_ROLES=1` runs
+  the whole suite with an owner role for migrations and such a runtime role for the application.
 
 ## Migrations and the schema gate
 

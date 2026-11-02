@@ -191,17 +191,40 @@ class _Joined(threading.local):
 
     def __init__(self) -> None:
         self.conn: psycopg.Connection[Any] | None = None
-        #: Scope values to restore: [the host's own values, then each open Axentra transaction's].
-        self.scopes: list[_ScopeValues] = []
+        #: The host's own scope values when it joined, restored when the block ends.
+        self.host: _ScopeValues = ("", "", "")
 
 
 class Database:
+    """The connection pool of Axentra's services and their scoped transactions.
+
+    By default Axentra owns a pool built from ``url``. A host application that already has a
+    ``psycopg_pool.ConnectionPool`` to the same database can hand it in instead
+    (:meth:`on_pool`), so the process keeps **one** connection budget: Axentra then borrows
+    connections from it, never opens, resizes or closes it, and works with whatever the host's
+    connections are configured with (autocommit or not, any row factory; see :meth:`on_pool`).
+    """
+
     def __init__(
-        self, url: str, *, min_size: int = 1, max_size: int = 10, statement_timeout_ms: int = 30_000
+        self,
+        url: str = "",
+        *,
+        min_size: int = 1,
+        max_size: int = 10,
+        statement_timeout_ms: int = 30_000,
+        pool: Any = None,
     ) -> None:
-        self.url = url
         self._timeout = statement_timeout_ms
-        self.pool: ConnectionPool[psycopg.Connection[Row]] = ConnectionPool(
+        self._joined = _Joined()
+        if pool is not None:
+            #: A borrowed pool (:meth:`on_pool`): the host opens and closes it.
+            self.owns_pool = False
+            self.pool = pool
+            self.url = url or str(getattr(pool, "conninfo", "") or "")
+            return
+        self.owns_pool = True
+        self.url = url
+        self.pool = ConnectionPool(
             url,
             min_size=min_size,
             max_size=max_size,
@@ -211,17 +234,44 @@ class Database:
             open=False,
             name="axentra",
         )
-        self._joined = _Joined()
+
+    @classmethod
+    def on_pool(cls, pool: Any, *, url: str = "") -> Database:
+        """Axentra's database on a pool the host application owns (one pool per process).
+
+        ``pool`` is a ``psycopg_pool.ConnectionPool`` or any object with the same
+        ``connection(timeout=None)`` context manager (and optionally ``get_stats()`` for the pool
+        metrics). The host keeps every decision about its connections:
+
+        - connections may be ``autocommit=True`` or not, with any row factory: every Axentra
+          transaction is an explicit transaction block (``conn.transaction()``) and every query
+          reads dict rows from its own cursor;
+        - the host configures the session (``statement_timeout``, ``search_path``) of each new
+          connection; Axentra sets nothing at session level, only transaction-local scope
+          settings (``set_config(..., true)``), which end with the transaction, so a connection
+          handed back to the host carries no Axentra scope;
+        - :meth:`open` and :meth:`close` do nothing; the host opens the pool before
+          ``Axentra.start()`` and closes it after ``Axentra.close()``;
+        - ``url`` (default: the pool's ``conninfo``) is used only by components that need a
+          dedicated connection of their own (``LISTEN``, the job worker's advisory lock).
+
+        Size the pool for both: each request or job holds at most one connection at a time on a
+        joined host transaction (:meth:`joined`); an Axentra service call made outside one takes
+        its own.
+        """
+        return cls(url, pool=pool)
 
     def _configure(self, conn: psycopg.Connection[Row]) -> None:
         conn.execute("SELECT set_config('statement_timeout', %s, false)", (str(self._timeout),))
         conn.commit()
 
     def open(self, wait: bool = True, timeout: float = 30.0) -> None:
-        self.pool.open(wait=wait, timeout=timeout)
+        if self.owns_pool:
+            self.pool.open(wait=wait, timeout=timeout)
 
     def close(self) -> None:
-        self.pool.close()
+        if self.owns_pool:
+            self.pool.close()
 
     @contextmanager
     def joined(self, conn: psycopg.Connection[Any]) -> Iterator[None]:
@@ -233,7 +283,8 @@ class Database:
         transaction block (see :func:`join`). Each Axentra transaction:
 
         - sets its scope with ``set_config(..., true)``; when it ends, the scope that was active
-          before it (the enclosing Axentra transaction's, or the host's own values) is set again;
+          before it is set again (the enclosing Axentra transaction's, a :func:`join` scope the
+          host opened inside this block, or the host's own values);
         - returns dict rows whatever the connection's row factory;
         - ignores ``read_only`` (``SET TRANSACTION READ ONLY`` cannot be issued mid-transaction);
         - on an exception, rolls back to its savepoint and re-raises: the host transaction and
@@ -252,13 +303,13 @@ class Database:
             return
         _require_open_transaction(conn)
         state.conn = conn
-        state.scopes = [_read_scope(conn)]
+        state.host = _read_scope(conn)
         try:
             yield
         finally:
-            host = state.scopes[0]
+            host = state.host
             state.conn = None
-            state.scopes = []
+            state.host = ("", "", "")
             if conn.info.transaction_status == pq.TransactionStatus.INTRANS:
                 _set_scope(conn, host)
 
@@ -273,43 +324,81 @@ class Database:
         if state.conn is not None:
             conn = state.conn
             _require_open_transaction(conn)
-            outer = state.scopes[-1]
-            state.scopes.append(_values(scope))
+            # The scope in effect right now, read from the connection (not remembered): the host
+            # may have set one with join() inside joined(), or the enclosing Axentra transaction's.
+            outer = _read_scope(conn)
             try:
                 with conn.transaction():  # a savepoint inside the host transaction
                     _set_scope(conn, _values(scope))
                     yield Tx(conn, scope)
             finally:
-                state.scopes.pop()
                 if conn.info.transaction_status == pq.TransactionStatus.INTRANS:
                     _set_scope(conn, outer)
             return
         with self.pool.connection() as conn, conn.transaction():
-            if read_only:
-                conn.execute("SET TRANSACTION READ ONLY")
-            conn.execute(_SET_SCOPE_SQL, (scope.kind, scope.product_id or "", scope.tenant_id or ""))
+            # conn.transaction() is a BEGIN/COMMIT block on autocommit connections (a borrowed
+            # pool) and on the implicit transaction otherwise: the scope is transaction-local in
+            # both cases.
+            with conn.cursor(row_factory=tuple_row) as cur:
+                if read_only:
+                    cur.execute("SET TRANSACTION READ ONLY")
+                cur.execute(_SET_SCOPE_SQL, _values(scope))
             yield Tx(conn, scope)
 
     def ping(self) -> bool:
         try:
             with self.pool.connection(timeout=5) as conn:
                 conn.execute("SELECT 1")
+                if not conn.autocommit:
+                    conn.rollback()
             return True
         except Exception:
             logger.warning("database ping failed", exc_info=True)
             return False
 
-    def check_role(self, *, allow_superuser: bool) -> dict[str, bool]:
-        """Verify that row-level security applies to the application role."""
+    def role_info(self) -> dict[str, bool]:
+        """How row-level security applies to the role of this pool's connections.
+
+        - ``superuser`` / ``bypass_rls``: the role ignores every policy;
+        - ``table_owner``: the role owns (or may act as the owner of) a table with row-level
+          security in its ``search_path``. FORCE ROW LEVEL SECURITY still applies to it, but an
+          owner can switch it off (``ALTER TABLE ... NO FORCE / DISABLE ROW LEVEL SECURITY``) or
+          drop the table, so a runtime role should not own the tables (run migrations with a
+          separate owner role, ``database.migration_url_ref``).
+        """
         with self.pool.connection() as conn:
-            row = conn.execute(
-                "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
-            ).fetchone()
-            conn.rollback()
-        info = {"superuser": bool(row and row["rolsuper"]), "bypass_rls": bool(row and row["rolbypassrls"])}
+            try:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(
+                        "SELECT r.rolsuper AS superuser, r.rolbypassrls AS bypass_rls,"
+                        " EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+                        "   WHERE c.relkind IN ('r', 'p') AND c.relrowsecurity"
+                        "   AND n.nspname = ANY (current_schemas(false))"
+                        "   AND pg_has_role(current_user, c.relowner, 'MEMBER')) AS table_owner"
+                        " FROM pg_roles r WHERE r.rolname = current_user"
+                    )
+                    row = cur.fetchone()
+            finally:
+                if not conn.autocommit:
+                    conn.rollback()
+        return {key: bool(row and row[key]) for key in ("superuser", "bypass_rls", "table_owner")}
+
+    def check_role(self, *, allow_superuser: bool, allow_table_owner: bool = True) -> dict[str, bool]:
+        """Verify that row-level security applies to the application role (see :meth:`role_info`).
+
+        Refuses a superuser or ``BYPASSRLS`` role unless ``allow_superuser``, and a role that owns
+        protected tables unless ``allow_table_owner`` (the default, for compatibility; a deployment
+        with separate owner and runtime roles turns it off with ``database.allow_table_owner``)."""
+        info = self.role_info()
         if (info["superuser"] or info["bypass_rls"]) and not allow_superuser:
             raise ConfigurationError(
                 "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated "
                 "application role or set database.allow_superuser = true for local development only"
+            )
+        if info["table_owner"] and not (allow_table_owner or allow_superuser):
+            raise ConfigurationError(
+                "the database role owns tables protected by row-level security and could switch it off; run "
+                "migrations with a separate owner role (database.migration_url_ref) and use a role without "
+                "ownership at runtime, or set database.allow_table_owner = true"
             )
         return info
