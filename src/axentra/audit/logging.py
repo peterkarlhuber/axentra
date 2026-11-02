@@ -6,10 +6,9 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 import json
 import logging
-import re
 from typing import Any
 
-from axentra.core.redaction import redact_text
+from axentra.core.redaction import redact_auth_query, redact_text
 
 request_id_var: ContextVar[str | None] = ContextVar("axentra_request_id", default=None)
 
@@ -51,18 +50,9 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     install_access_log_redaction()
 
 
-# Adapted from peterkarlhuber/nodestro-api src/nodestro_api/identity.py at e7fb1dba1f5521d13ab2d90ac41e101f2c6f5bea (MIT, Copyright (c) 2026 Peter Karlhuber)
-#: Query values that are login secrets: OIDC ``code`` and ``state``, tokens, setup and invitation links.
-_AUTH_QUERY = re.compile(r"(?i)([?&](?:code|state|[a-z_]*token|setup|invitation)=)[^&\s\"']*")
-
-
-def redact_auth_query(text: str) -> str:
-    return _AUTH_QUERY.sub(r"\1[redacted]", text) if "=" in text else text
-
-
 class RedactAuthQuery(logging.Filter):
-    """Replace the values of ``code``, ``state``, ``*token``, ``setup`` and ``invitation`` query
-    parameters in log records (uvicorn's access log prints the full request line)."""
+    """Apply :func:`redact_auth_query` to log records (uvicorn's access log prints the full request
+    line, and its formatter does not go through :class:`JsonFormatter`)."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple):

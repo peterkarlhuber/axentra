@@ -84,12 +84,19 @@ while no platform admin exists.
 
 Authorization code flow with PKCE (`S256`), `state` and `nonce`.
 
-1. `GET /v1/auth/oidc/{provider}/start?return_to=...&invitation=...` creates a login state:
+1. `GET /v1/auth/oidc/{provider}/start?return_to=...` creates a login state. A login that carries
+   an invitation uses `POST /v1/auth/oidc/{provider}/start` with the JSON body
+   `{"return_to": ..., "invitation": "<token>"}` instead (Origin checked like the password login):
+   same login state and login cookie, answered with `200 {"redirect_url": ...}` (the provider URL,
+   or the login page with `?login_error=`) for the frontend to navigate to, so the token is in no
+   URL that a proxy log, the browser history or a `Referer` could record. `invitation=` on the
+   `GET` start still works but is deprecated for that reason. The login state holds a random
    `state` (256 bit), `nonce` (192 bit) and PKCE `code_verifier` (384 bit). The database stores the
    SHA-256 hash of `state`; nonce, verifier and invitation token are encrypted with the secret box
    (context bound to the state hash). The browser gets the login cookie (`__Host-axentra-login`
    on https, `axentra-login` on plain-http development; `HttpOnly`, `SameSite=Lax`, `Path=/`,
-   `Max-Age=600`) holding the `state`, and a `302` to the provider.
+   `Max-Age=600`) holding the `state`, and a `302` to the provider (`GET`) or the provider URL in
+   the body (`POST`).
 2. The provider redirects to `GET /v1/auth/oidc/{provider}/callback?code=...&state=...`. Axentra
    consumes the state exactly once (`DELETE ... RETURNING`), **then** checks in constant time that
    the browser's login cookie equals `state` (login CSRF: a callback URL started in another
@@ -127,7 +134,8 @@ redirects and accept at most 1 MiB.
   has both `allow_signup = true` and `allow_signup_without_email = true` (not combinable with
   `allowed_email_domains`); otherwise the login is refused with `email_not_verified`.
 - An unknown verified email creates a user when the provider has `allow_signup = true`, or when an
-  open invitation exists for that email. With `invitation=<token>` on `start`, the invitation is
+  open invitation exists for that email. With an invitation token on `start` (the `POST` body's
+  `invitation`, or the deprecated `invitation=` query), the invitation is
   also accepted right after the login (tenant membership with the invited role), and the callback
   adds `invitation_accepted=<tenant id>` to the `return_to` query so the frontend does not ask for
   a second confirmation (Studio checks that `/v1/me` lists that tenant before it shows "accepted").
@@ -140,7 +148,16 @@ redirects and accept at most 1 MiB.
 **`return_to`:** a path starting with a single `/` (not `//`, no backslash, no control characters
 or spaces, no `:` before `?`), or an absolute `http(s)` URL whose origin is listed in
 `security.allowed_origins` (or is `security.public_url`), e.g. Axentra Studio on its own origin.
-Anything else becomes `/`. Maximum 2000 characters.
+Anything else becomes `/`. Maximum 2000 characters. `return_to` is stored in plain text and goes
+back to the browser, so it never keeps a secret (`OidcService.stored_return_to`,
+`axentra.core.redaction.strip_secret_params`): query parameters whose percent-decoded name looks
+like a secret (`token`, `*_token`, `invitation`, `setup`, `password`, ...) or whose value holds one
+in any encoding (an `axinv_`/`axk_` token, a JWT, or a nested URL with such a parameter, e.g.
+`return_to=%2Fx%3Ftoken%3D...`) are removed, whatever the path and its spelling (case, trailing
+or repeated slashes, percent-encoding), other parameters keep their exact spelling; a fragment
+holding a secret is dropped, a path holding one makes `return_to` its origin's `/`. An Axentra
+invitation token removed from a `token`/`invitation` parameter is treated like the `invitation`
+field (kept encrypted, accepted after the login of the invited address) unless one was given.
 
 **Errors** never echo provider text. The browser is redirected to the login page with
 `?login_error=<code>`: `security.login_page` (default `/login`) on the origin of `return_to` when
@@ -282,6 +299,7 @@ ax.identity.list_identities(user.id)
 | POST | `/v1/auth/setup` | public (setup token) | `SessionInfo` + cookie |
 | POST | `/v1/auth/login/password` | public (Origin checked) | `SessionInfo` + cookie |
 | GET | `/v1/auth/oidc/{provider}/start` | public | `302` to provider + login cookie; `404` unknown provider |
+| POST | `/v1/auth/oidc/{provider}/start` | public (Origin checked) | `{redirect_url}` + login cookie; `404` unknown provider, `403` foreign Origin |
 | GET | `/v1/auth/oidc/{provider}/callback` | public (state + login cookie) | `302` to `return_to` + session cookie, or `302` to login page `?login_error=` |
 | GET | `/v1/auth/session` | session | `SessionInfo {user, session_id, csrf_token, expires_at, platform_role}` |
 | POST | `/v1/auth/logout` | session | `204` |
@@ -297,8 +315,13 @@ Users endpoints (`/v1/me`, `/v1/users`) are described in the OpenAPI document.
   (expired rows are removed on the next login start and by `purge_expired`).
 - A login state is usable once, by the browser that started it, within ten minutes.
 - `code`, `state`, `*token`, `setup` and `invitation` query values are redacted in the
-  `uvicorn.access` log (a logging filter installed by `create_app` and `configure_logging`);
-  Axentra's own request log records only the path.
+  `uvicorn.access` log (a logging filter installed by `create_app` and `configure_logging`), also
+  when they are percent-encoded inside another parameter (`return_to=%2Fx%3Ftoken%3D...`, any
+  depth, either hex case), together with token-like strings in any encoding; Axentra's own
+  request log records only the path.
+- No invitation token is stored in `axentra_login_states.return_to`, in a redirect `Location` or in
+  the audit trail (see `return_to` above); every response, including the start and callback
+  redirects, carries `Referrer-Policy: no-referrer`.
 
 ## Security notes
 

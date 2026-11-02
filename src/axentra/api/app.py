@@ -46,6 +46,7 @@ PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/v1/auth/setup"),
         ("POST", "/v1/auth/login/password"),
         ("GET", "/v1/auth/oidc/{provider}/start"),
+        ("POST", "/v1/auth/oidc/{provider}/start"),
         ("GET", "/v1/auth/oidc/{provider}/callback"),
         ("POST", "/v1/billing/webhooks/{provider}"),
         ("GET", "/v1/files/download/{token}"),

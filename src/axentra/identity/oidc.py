@@ -32,6 +32,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -46,6 +47,7 @@ from axentra.core.clock import utcnow
 from axentra.core.context import Actor, ActorKind, Principal
 from axentra.core.errors import AxentraError, Forbidden, NotFound
 from axentra.core.ids import new_token
+from axentra.core.redaction import strip_secret_params
 from axentra.data.database import Database, DbScope
 from axentra.identity.models import NewSession
 from axentra.identity.service import IdentityService
@@ -76,6 +78,8 @@ ERROR_CODES = frozenset(
     }
 )
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+#: An Axentra invitation token (``axinv_`` + 256 random bits, URL-safe base64).
+_INVITATION_TOKEN = re.compile(r"axinv_[A-Za-z0-9_-]{16,200}")
 
 
 class OidcLoginError(Exception):
@@ -521,6 +525,28 @@ class OidcService:
     def safe_return_to(self, value: str | None) -> str:
         return safe_return_to(value, self._allowed_origins())
 
+    def stored_return_to(self, value: str | None) -> tuple[str, str | None]:
+        """The ``return_to`` a login state stores: :meth:`safe_return_to` without any query
+        parameter that carries a secret (:func:`~axentra.core.redaction.strip_secret_params`:
+        ``token``, ``*_token``, ``invitation``, ... and token-like values, in any percent-encoding,
+        also nested in another parameter), whatever the path and its spelling. ``return_to`` is
+        stored in plain text and goes back to the browser, so it must never hold a credential.
+
+        Also returns an Axentra invitation token found as ``token``/``invitation`` parameter, so
+        a frontend that put the invitation link itself into ``return_to`` (instead of the
+        ``invitation`` field) still gets it accepted; the token is then kept encrypted like one
+        given as ``invitation``."""
+        target, removed = strip_secret_params(self.safe_return_to(value))
+        adopted = next(
+            (
+                v
+                for name, v in removed
+                if name.strip().lower() in ("token", "invitation") and _INVITATION_TOKEN.fullmatch(v.strip())
+            ),
+            None,
+        )
+        return target, adopted.strip() if adopted else None
+
     def start(
         self,
         provider_id: str,
@@ -535,7 +561,8 @@ class OidcService:
         and handed back by :meth:`finish` (``LoginResult.context``), never shown to the browser or the provider."""
         packed = _pack_context(context)
         client = self.client(provider_id)  # NotFound for unknown providers
-        target = self.safe_return_to(return_to)
+        target, adopted = self.stored_return_to(return_to)
+        invitation = invitation or adopted
         bucket = f"oidc:start:{ip}"
         try:
             self.identity.hit(bucket, self.settings.security.login_rate_per_minute * 6)

@@ -25,6 +25,27 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- Invitation tokens never end up in a stored or logged URL (security review round 3, NF-2/NF-3, the rest of
+  AX-R2):
+  - New `POST /v1/auth/oidc/{provider}/start` with the JSON body `{return_to?, invitation?}` (Origin checked):
+    same login state and login cookie as the `GET` start, answered with `{redirect_url}` (the provider URL, or
+    the login page with `?login_error=`). The invitation token travels only in the body, never in a URL that
+    a proxy log, the browser history or a `Referer` records. `invitation=` on the `GET` start is deprecated
+    (still accepted); the `GET` start without an invitation is unchanged.
+  - `return_to` loses every query parameter that carries a secret before it is stored in
+    `axentra_login_states.return_to` and sent back as the redirect, whatever the path and its spelling
+    (`/invitations/accept/`, other casing, percent-encoding): parameters named like a secret (`token`,
+    `*_token`, `invitation`, `setup`, `password`, ...) after percent-decoding, and parameters whose value holds
+    a token or a nested URL with one in any encoding. A fragment with a secret is dropped. An Axentra
+    invitation token found as `token`/`invitation` there is used like the `invitation` field (kept encrypted,
+    accepted for the invited address). New helpers `strip_secret_params`, `carries_secret` and
+    `fully_unquote` in `axentra.core.redaction`, `OidcService.stored_return_to`.
+  - Redaction matches the percent-encoded form too: the `uvicorn.access` filter (`redact_auth_query`, now in
+    `axentra.core.redaction` and re-exported from `axentra.audit.logging`) redacts `code`, `state`, `*token`,
+    `setup` and `invitation` values inside an encoded `return_to` (`%3Ftoken%3D...`, any depth, either hex
+    case) and also applies `redact_text`; `redact_text` (logs, problems, audit details) masks
+    `axinv_`/`axk_` tokens with an encoded `_` and the values of `*token`, `invitation` and `setup` query
+    parameters, literal or encoded.
 - OIDC callback: when the `invitation` given on `GET /v1/auth/oidc/{provider}/start` was accepted during
   the login, the redirect to `return_to` carries `invitation_accepted=<tenant id>` (re-review AX-R2), so a
   frontend can show the accepted invitation instead of asking for a confirmation that would fail with

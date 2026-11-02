@@ -143,10 +143,19 @@ def oidc_start(
     request: Request,
     ax: Ax,
     return_to: Annotated[str | None, Query(max_length=2000)] = None,
-    invitation: Annotated[str | None, Query(max_length=200)] = None,
+    invitation: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            deprecated=True,
+            description="Deprecated: a URL query is recorded by proxies that log full URLs."
+            " Send the invitation token in the body of `POST /v1/auth/oidc/{provider}/start`.",
+        ),
+    ] = None,
 ) -> Response:
-    """``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``).
-    ``invitation``: an invitation token; lets the invited email sign up and accepts the invitation."""
+    """``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``);
+    query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed.
+    ``invitation``: deprecated, use the ``POST`` start for logins with an invitation."""
     from axentra.identity.oidc import OidcLoginError, login_error_url
 
     oidc = _oidc(ax)
@@ -161,6 +170,57 @@ def oidc_start(
     out = RedirectResponse(started.authorization_url, status_code=302)
     _login_cookie(ax, out, started.state)
     return out
+
+
+class OidcStartRequest(BaseModel):
+    return_to: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Where to continue after the login: a path on the API origin or an absolute URL on"
+        " an allowed origin (else `/`). Query parameters that carry secrets are removed.",
+    )
+    invitation: str | None = Field(
+        default=None,
+        max_length=200,
+        description="An invitation token: lets the invited email sign up and accepts the invitation"
+        " right after the login. Stored encrypted with the login state, never in a URL.",
+    )
+
+
+class OidcStartAnswer(BaseModel):
+    redirect_url: str = Field(
+        description="Where to send the browser now (top-level navigation): the identity provider's"
+        " authorization URL, or the login page with `?login_error=<code>` when the login cannot start."
+    )
+
+
+@router.post(
+    "/oidc/{provider}/start",
+    response_model=OidcStartAnswer,
+    summary="Start an OpenID Connect login with the invitation in the body (no secret in any URL)",
+)
+def oidc_start_post(
+    provider: ProviderId, body: OidcStartRequest, request: Request, response: Response, ax: Ax
+) -> OidcStartAnswer:
+    """The ``GET`` start with the same fields as a JSON body, for logins that carry an invitation
+    token: a URL query ends up in proxy access logs and ``Referer`` headers, a request body does not.
+    Sets the same login cookie (send it with credentials) and answers the URL to navigate to."""
+    from axentra.identity.oidc import OidcLoginError, login_error_url
+
+    # Same protection as the password login: a cross-site page cannot start logins with this browser.
+    check_origin(request)
+    oidc = _oidc(ax)
+    try:
+        started = oidc.start(
+            provider, return_to=body.return_to, invitation=body.invitation or None, ip=client_ip(request)
+        )
+    except OidcLoginError as exc:
+        logger.warning("OIDC login for %s could not start: %s", provider, exc)
+        return OidcStartAnswer(
+            redirect_url=login_error_url(ax.settings.security.login_page, exc.return_to, exc.code)
+        )
+    _login_cookie(ax, response, started.state)
+    return OidcStartAnswer(redirect_url=started.authorization_url)
 
 
 @router.get(

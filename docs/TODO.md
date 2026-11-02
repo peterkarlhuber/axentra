@@ -28,7 +28,7 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
-| P2 | identity | `GET /v1/auth/oidc/{provider}/start?invitation=<token>` carries the invitation token in the query string: Axentra encrypts it at rest and redacts it in its access log, but a reverse proxy or load balancer that logs full URLs still records it (re-review AX-R2 residual). Offer a `POST` start (token in the form body, answered with the redirect) and switch Studio to it |
+| P3 | identity | Remove the deprecated `invitation` query parameter of `GET /v1/auth/oidc/{provider}/start` once no client sends it (Studio uses the `POST` start); removing it is a breaking change of `/v1` and needs a deprecation window |
 | P3 | identity | A failed OIDC login redirects to `<login page>?login_error=...` without the original `return_to`, so a deep link (for example an invitation accept page) is lost; Studio keeps an opened invitation per tab as a workaround. Pass a validated `return_to` along |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
 | P2 | search | Optional vector/semantic search through an adapter (e.g. pgvector with an embedding step; order section 4 L) |
