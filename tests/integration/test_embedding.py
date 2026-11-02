@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from axentra.core.context import Principal
-from axentra.core.errors import ConfigurationError
+from axentra.core.errors import ConfigurationError, NotFound
 from axentra.data.database import DbScope, join
 
 SYSTEM = Principal.system("embed-test")
@@ -151,3 +151,108 @@ def test_injected_keyring_in_production(pg_urls, tmp_path):
         assert token.startswith("axs1.host1.") and ax.secrets.decrypt(token, "ctx") == "value"
     finally:
         ax.close()
+
+
+def _count(admin_url: str, sql: str, params: tuple[object, ...] = ()) -> int:
+    with psycopg.connect(admin_url) as conn:
+        row = conn.execute(sql, params).fetchone()  # type: ignore[arg-type]
+    assert row is not None
+    return int(row[0])
+
+
+def test_services_run_inside_the_host_transaction(world, pg_urls):
+    """Database.joined(): whole services (tenancy, identity, audit) in the host's transaction."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from axentra.core.errors import Conflict
+
+    ax = world.ax
+    with psycopg.connect(pg_urls["app"], autocommit=True) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS host_items (id text PRIMARY KEY)")
+        conn.execute("TRUNCATE host_items")
+
+        def host_work(slug: str) -> tuple[str, str, str]:
+            product = ax.tenancy.create_product(SYSTEM, slug=slug, name=slug.upper())
+            tenant = ax.tenancy.create_tenant(SYSTEM, product.id, slug="t1", name="T1")
+            with ax.db.transaction(DbScope.platform()) as tx:
+                uid = ax.identity.create_user(tx, email=f"{slug}@example.com", name="Host User")
+            ax.tenancy.set_member(SYSTEM, product.id, tenant.id, role="member", user_id=uid)
+            ax.audit.record_standalone(SYSTEM, "host.import", product_id=product.id, target_id=uid)
+            return product.id, tenant.id, uid
+
+        # Host ROLLBACK: none of Axentra's rows remain.
+        conn.execute("BEGIN")
+        conn.execute("SELECT set_config('axentra.scope', 'host-value', true)")
+        with ax.db.joined(conn):
+            pid, tid, uid = host_work("hostrb")
+            # Another thread uses the pool and does not see the uncommitted product.
+            with ThreadPoolExecutor(1) as pool:
+                seen = pool.submit(ax.tenancy.get_product, SYSTEM, pid)
+                with pytest.raises(NotFound):
+                    seen.result()
+                assert pool.submit(lambda: ax.db.joined_connection).result() is None
+            assert ax.db.joined_connection is conn
+        assert ax.db.joined_connection is None
+        assert conn.execute("SELECT current_setting('axentra.scope')").fetchone() == ("host-value",)
+        conn.execute("ROLLBACK")
+        assert _count(pg_urls["admin"], "SELECT count(*) FROM axentra_products WHERE id = %s", (pid,)) == 0
+        assert _count(pg_urls["admin"], "SELECT count(*) FROM axentra_users WHERE id = %s", (uid,)) == 0
+        assert (
+            _count(pg_urls["admin"], "SELECT count(*) FROM axentra_audit_events WHERE target_id = %s", (uid,))
+            == 0
+        )
+
+        # Host COMMIT: everything is there; an Axentra error inside only rolls back its savepoint.
+        conn.execute("BEGIN")
+        conn.execute("INSERT INTO host_items VALUES ('before')")
+        with ax.db.joined(conn):
+            pid, tid, uid = host_work("hostok")
+            with pytest.raises(Conflict):
+                ax.tenancy.create_tenant(SYSTEM, pid, slug="t1", name="Duplicate")
+            conn.execute("INSERT INTO host_items VALUES ('after')")  # the host transaction is usable
+            assert ax.tenancy.get_tenant(SYSTEM, pid, tid).slug == "t1"
+        conn.execute("COMMIT")
+    assert _count(pg_urls["admin"], "SELECT count(*) FROM host_items") == 2
+    assert _count(pg_urls["admin"], "SELECT count(*) FROM axentra_tenants WHERE product_id = %s", (pid,)) == 1
+    assert (
+        _count(
+            pg_urls["admin"],
+            "SELECT count(*) FROM axentra_memberships WHERE tenant_id = %s AND user_id = %s",
+            (tid, uid),
+        )
+        == 1
+    )
+    assert (
+        _count(pg_urls["admin"], "SELECT count(*) FROM axentra_audit_events WHERE action = 'host.import'")
+        == 1
+    )
+    assert [m.user_id for m in ax.tenancy.list_members(SYSTEM, pid, tid)] == [uid]
+
+
+def test_joined_requires_an_open_transaction(world, pg_urls):
+    with psycopg.connect(pg_urls["app"], autocommit=True) as conn:
+        with pytest.raises(ConfigurationError, match="open transaction"), world.ax.db.joined(conn):
+            pass
+        assert world.ax.db.joined_connection is None
+        conn.execute("BEGIN")
+        with world.ax.db.joined(conn):
+            conn.execute("ROLLBACK")  # the host ended its transaction too early
+            with pytest.raises(ConfigurationError, match="IDLE"):
+                world.ax.identity.setup_required()
+
+
+def test_joined_nested_transactions_restore_the_outer_scope(world, pg_urls):
+    db = world.ax.db
+    with psycopg.connect(pg_urls["app"]) as conn, conn.transaction(), db.joined(conn):
+        with db.transaction(DbScope.product("prd_a"), read_only=True) as outer:
+            assert outer.scalar("SELECT current_setting('axentra.product_id')") == "prd_a"
+            with db.transaction(DbScope.platform()) as inner:
+                assert inner.scalar("SELECT current_setting('axentra.scope')") == "platform"
+            assert outer.scalar("SELECT current_setting('axentra.scope')") == "product"
+            with (
+                pytest.raises(psycopg.errors.DivisionByZero),
+                db.transaction(DbScope.tenant("prd_a", "ten_b")) as failing,
+            ):
+                failing.execute("SELECT 1/0")
+            assert outer.scalar("SELECT current_setting('axentra.product_id')") == "prd_a"
+        assert conn.execute("SELECT current_setting('axentra.scope', true)").fetchone() in ((None,), ("",))
