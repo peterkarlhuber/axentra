@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
+from axentra.access.definitions import AccessDefinitionService
 from axentra.access.product_permission_service import ProductPermissionService
 from axentra.access.roles import RoleService
 from axentra.audit.log import AuditLog
@@ -118,6 +119,8 @@ class Axentra:
         self.roles = RoleService(self.db, self.authz, self.audit)
         #: Product-defined permissions: ``ax.permissions.register(product, [ProductPermission(...)])``.
         self.permissions = ProductPermissionService(self.db, self.authz, self.audit)
+        #: Versioned permission and role definitions of embedding products (``apply``; no "last start wins").
+        self.access_definitions = AccessDefinitionService(self.db, self.audit)
         self.api_keys = ApiKeyService(self.db, self.authz, self.audit)
         self.records = RecordService(self.db, self.authz, self.audit)
         self.oidc: OidcService | None = None
@@ -257,9 +260,16 @@ class Axentra:
         if self._started:
             return
         self.db.open()
-        self.db.check_role(
-            allow_superuser=self.settings.database.allow_superuser or not self.settings.is_production
+        relaxed = not self.settings.is_production
+        info = self.db.check_role(
+            allow_superuser=self.settings.database.allow_superuser or relaxed,
+            allow_table_owner=self.settings.database.allow_table_owner or relaxed,
         )
+        if info["table_owner"] and self.settings.is_production:
+            logger.warning(
+                "the database role owns tables protected by row-level security (it could switch RLS off);"
+                " use a separate owner role for migrations (database.allow_table_owner = false enforces it)"
+            )
         if self.settings.database.require_current_schema:
             try:
                 self.require_current_schema()

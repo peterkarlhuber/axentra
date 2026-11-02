@@ -25,11 +25,12 @@ the detail is only logged.
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
 import hashlib
 import hmac
+import json
 import logging
 import threading
 import time
@@ -368,6 +369,30 @@ class OidcClient:
         return claims
 
 
+# -- host context ------------------------------------------------------------------------------------------
+
+#: Largest host context a login may carry (its JSON form).
+MAX_CONTEXT_BYTES = 2048
+
+
+def _pack_context(context: Mapping[str, str] | None) -> str | None:
+    if not context:
+        return None
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in context.items()):
+        raise ValueError("a login context holds strings only")
+    packed = json.dumps(dict(context), sort_keys=True, separators=(",", ":"))
+    if len(packed.encode("utf-8")) > MAX_CONTEXT_BYTES:
+        raise ValueError(f"a login context may hold at most {MAX_CONTEXT_BYTES} bytes")
+    return packed
+
+
+def _unpack_context(packed: str) -> dict[str, str]:
+    data = json.loads(packed)
+    if not isinstance(data, dict):
+        raise ValueError("the login context is not an object")
+    return {str(k): str(v) for k, v in data.items()}
+
+
 # -- the service -----------------------------------------------------------------------------------------
 
 
@@ -381,11 +406,26 @@ class LoginStart:
 
 
 @dataclass(frozen=True)
+class ExternalIdentity:
+    """Who the provider says logged in: the issuer and subject (the key of the identity), the address only when the
+    provider marked it verified (``""`` otherwise) and the display name."""
+
+    provider: str
+    subject: str
+    email: str
+    name: str
+
+
+@dataclass(frozen=True)
 class LoginResult:
-    session: NewSession
+    #: The new Axentra session; ``None`` when the caller asked for none (``finish(start_session=False)``).
+    session: NewSession | None
     user_id: str
     return_to: str
     invitation_accepted: bool = False
+    #: The host context given to :meth:`OidcService.start` (empty when none was given).
+    context: dict[str, str] = field(default_factory=dict)
+    identity: ExternalIdentity | None = None
 
 
 AcceptInvitation = Callable[[Principal, str], Any]
@@ -403,8 +443,12 @@ class OidcService:
         *,
         transport: httpx.BaseTransport | None = None,
         accept_invitation: AcceptInvitation | None = None,
+        redirect_uri: Callable[[str], str] | None = None,
     ) -> None:
+        """``redirect_uri(provider_id)`` names the callback URL registered at the provider when an embedding
+        product serves the callback on its own route (default: ``<public_url>/v1/auth/oidc/<id>/callback``)."""
         self.db = db
+        self._redirect_uri = redirect_uri
         self.settings = settings
         self.identity = identity
         self.secrets = secrets
@@ -430,6 +474,8 @@ class OidcService:
         raise NotFound("unknown login provider")
 
     def redirect_uri(self, provider_id: str) -> str:
+        if self._redirect_uri is not None:
+            return self._redirect_uri(provider_id)
         return f"{self.settings.security.public_url.rstrip('/')}/v1/auth/oidc/{provider_id}/callback"
 
     def client(self, provider_id: str) -> OidcClient:
@@ -467,8 +513,18 @@ class OidcService:
         return safe_return_to(value, self._allowed_origins())
 
     def start(
-        self, provider_id: str, *, return_to: str | None, invitation: str | None = None, ip: str | None = None
+        self,
+        provider_id: str,
+        *,
+        return_to: str | None,
+        invitation: str | None = None,
+        ip: str | None = None,
+        context: Mapping[str, str] | None = None,
     ) -> LoginStart:
+        """Start a login. ``context`` is the embedding product's own data for this login (e.g. which tenant was
+        asked for, the hash of a setup token): at most 2 KiB of string pairs, stored encrypted with the login state
+        and handed back by :meth:`finish` (``LoginResult.context``), never shown to the browser or the provider."""
+        packed = _pack_context(context)
         client = self.client(provider_id)  # NotFound for unknown providers
         target = self.safe_return_to(return_to)
         bucket = f"oidc:start:{ip}"
@@ -489,9 +545,8 @@ class OidcService:
         with self.db.transaction(DbScope.platform()) as tx:
             tx.execute("DELETE FROM axentra_login_states WHERE expires_at < now()")
             tx.execute(
-                "INSERT INTO axentra_login_states"
-                " (state_hash, provider, nonce, code_verifier, return_to, invitation_token, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                "INSERT INTO axentra_login_states (state_hash, provider, nonce, code_verifier, return_to,"
+                " invitation_token, host_context, expires_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     state_hash,
                     provider_id,
@@ -499,6 +554,7 @@ class OidcService:
                     self.secrets.encrypt(verifier, ctx + ":code_verifier"),
                     target,
                     self.secrets.encrypt(invitation, ctx + ":invitation") if invitation else None,
+                    self.secrets.encrypt(packed, ctx + ":host_context") if packed is not None else None,
                     utcnow() + LOGIN_TTL,
                 ),
             )
@@ -516,8 +572,12 @@ class OidcService:
         browser_state: str | None,
         ip: str | None,
         user_agent: str,
+        start_session: bool = True,
     ) -> LoginResult:
-        """Complete a login; raises :class:`OidcLoginError` (``return_to`` set once known)."""
+        """Complete a login; raises :class:`OidcLoginError` (``return_to`` set once known).
+
+        ``start_session=False``: find or create the user but start no Axentra session; an embedding product that
+        binds sessions to its own context (e.g. an active tenant) starts the session itself."""
         provider = self.provider(provider_id)
         if not state:
             raise OidcLoginError("login_expired", "the callback has no state")
@@ -529,7 +589,9 @@ class OidcService:
             raise OidcLoginError("login_expired", "unknown or already used login state")
         return_to: str = row["return_to"]
         try:
-            return self._finish(provider, row, state, code, error, browser_state, ip, user_agent)
+            return self._finish(
+                provider, row, state, code, error, browser_state, ip, user_agent, start_session
+            )
         except OidcLoginError as exc:
             exc.return_to = return_to
             self._audit_denied(provider_id, exc.code)
@@ -545,6 +607,7 @@ class OidcService:
         browser_state: str | None,
         ip: str | None,
         user_agent: str,
+        start_session: bool = True,
     ) -> LoginResult:
         if not browser_state or not hmac.compare_digest(browser_state.encode(), state.encode()):
             # A callback URL started in another browser (login CSRF) or a lost login cookie.
@@ -566,6 +629,11 @@ class OidcService:
                 self.secrets.decrypt(row["invitation_token"], ctx + ":invitation")
                 if row["invitation_token"]
                 else None
+            )
+            context = (
+                _unpack_context(self.secrets.decrypt(row["host_context"], ctx + ":host_context"))
+                if row.get("host_context")
+                else {}
             )
         except Exception as exc:  # wrong key after a keyring change, tampered row
             raise OidcLoginError("login_expired", f"the login state cannot be read: {exc}") from exc
@@ -609,12 +677,25 @@ class OidcService:
         except AxentraError as exc:
             raise OidcLoginError("login_failed", exc.detail) from exc
 
-        session = self.identity.start_session(user_id, f"oidc:{provider.id}", ip=ip, user_agent=user_agent)
+        identity = ExternalIdentity(
+            provider=provider.issuer, subject=str(claims["sub"]), email=email, name=str(name)[:200]
+        )
+        session = (
+            self.identity.start_session(user_id, f"oidc:{provider.id}", ip=ip, user_agent=user_agent)
+            if start_session
+            else None
+        )
         accepted = False
         if invitation and self.accept_invitation is not None:
             principal = Principal(
-                actor=Actor(ActorKind.USER, user_id, session.info.user.display),
-                session_id=session.info.session_id,
+                actor=Actor(
+                    ActorKind.USER,
+                    user_id,
+                    session.info.user.display
+                    if session is not None
+                    else self.identity.get_user(user_id).display,
+                ),
+                session_id=session.info.session_id if session is not None else None,
                 ip=ip,
             )
             try:
@@ -624,7 +705,12 @@ class OidcService:
                 # The login stands; the invitation can still be accepted explicitly.
                 logger.info("invitation not accepted after OIDC login: %s", exc.detail)
         return LoginResult(
-            session=session, user_id=user_id, return_to=row["return_to"], invitation_accepted=accepted
+            session=session,
+            user_id=user_id,
+            return_to=row["return_to"],
+            invitation_accepted=accepted,
+            context=context,
+            identity=identity,
         )
 
     def _invited(self, invitation: str, email: str) -> bool:

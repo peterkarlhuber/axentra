@@ -35,7 +35,7 @@ def _svc(ax: Axentra) -> NotifyService:
 
 class TemplateCreate(BaseModel):
     key: str = Field(min_length=2, max_length=63, pattern=r"^[a-z][a-z0-9_.-]{1,62}$")
-    channel: Literal["email", "sms", "push"] = "email"
+    channel: Literal["email", "sms", "push", "inbox"] = "email"
     category: str = Field(default="transactional", max_length=41)
     name: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=2000)
@@ -46,7 +46,7 @@ class TemplateCreate(BaseModel):
 
 
 class TemplateUpdate(BaseModel):
-    channel: Literal["email", "sms", "push"] | None = None
+    channel: Literal["email", "sms", "push", "inbox"] | None = None
     category: str | None = Field(default=None, max_length=41)
     name: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=2000)

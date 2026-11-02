@@ -5,6 +5,7 @@ from __future__ import annotations
 from psycopg import errors as pg_errors
 
 from axentra.access.authorizer import Authorizer
+from axentra.access.definitions import managed_roles
 from axentra.access.models import PermissionInfo, Role
 from axentra.access.permissions import (
     BUILTIN_ROLES,
@@ -77,6 +78,12 @@ class RoleService:
         return roles
 
     @staticmethod
+    def _refuse_managed(tx: Tx, product_id: str, key: str) -> None:
+        """Roles managed by the product's versioned access definitions are changed only by its code."""
+        if key in managed_roles(tx, product_id):
+            raise Conflict("this role is defined by the product's code; change it there")
+
+    @staticmethod
     def _check(tx: Tx, product_id: str, scope: str, permissions: list[str]) -> list[str]:
         """Built-in names plus the product's active permissions; tenant roles only tenant-scoped ones."""
         catalog: ProductCatalog = load_catalog(tx, product_id)
@@ -145,6 +152,7 @@ class RoleService:
                 (role_id, product_id),
                 what="role",
             )
+            self._refuse_managed(tx, product_id, row["key"])
             if if_match is not None and row["version"] != if_match:
                 raise PreconditionFailed("the role was changed by someone else")
             perms = (
@@ -181,6 +189,7 @@ class RoleService:
                 (role_id, product_id),
                 what="role",
             )
+            self._refuse_managed(tx, product_id, row["key"])
             in_use = tx.scalar(
                 "SELECT (SELECT count(*) FROM axentra_memberships WHERE product_id = %(p)s AND role = %(k)s)"
                 " + (SELECT count(*) FROM axentra_product_members WHERE product_id = %(p)s AND role = %(k)s)",

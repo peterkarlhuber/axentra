@@ -127,7 +127,8 @@ Nodestro's `nodestro.runs:start`). Code in `axentra.access.product_permissions` 
 - **Concurrency.** Declarations of one product serialize on an advisory transaction lock. With
   several processes per product (API, workers), all must register the same definitions: the last
   process that starts wins, so during a rolling deployment a definition may briefly flip between
-  versions.
+  versions. Products that must not flip use versioned access definitions (below); the
+  unversioned registration is then ignored for that product.
 - **Reading the catalog** (`GET /v1/products/{id}/permissions`) needs `roles:read`,
   `api_keys:read` or `permissions:manage` (the role and key editors); unrelated callers get `404`.
 - **Job kinds** are not bound to one product, so `jobs.declare(enqueue_permission=...,
@@ -136,6 +137,33 @@ Nodestro's `nodestro.runs:start`). Code in `axentra.access.product_permissions` 
   tenant permissions only.
 - `Authorizer.has/require` are unchanged: they test membership in the effective grant, which now
   includes active product permissions.
+
+### Versioned access definitions
+
+`axentra.access.definitions` (migration `0009`, table `axentra_access_definitions`, forced RLS on
+`product_id`) lets an embedding product apply its permissions **and** custom roles
+deterministically: `ax.access_definitions.apply(product, AccessDefinitions(revision,
+permissions, roles), applied_by=...)`.
+
+- **Revision and content hash.** The product raises `revision` (a whole number) whenever the
+  content changes. The content hash is the SHA-256 of the canonical JSON of the normalized
+  definitions (order-independent; the revision is not part of it). Both are stored per product.
+- **Decision**, under the same advisory lock as product permission declarations, in one
+  transaction: no stored row or a newer revision → applied (permissions added, updated,
+  re-activated or retired; managed roles created or updated; audit event
+  `access.definitions.apply` with the previous revision and every change); the same revision and
+  hash → `unchanged`, nothing written; an older revision → `stale`, nothing written, a warning
+  logged (an old process never downgrades); the same revision with another hash → `409
+  Conflict`, nothing written, audited with outcome `denied` (two builds disagree about one
+  revision: a release error).
+- **Managed roles** (`roles` of the stored row) are owned by code: `PATCH`/`DELETE` of such a role
+  over the API is `409`. A role a newer revision no longer lists is **released** (kept with its
+  permissions, members keep it, editable again); a role's scope never changes in place.
+- **No last start wins.** A product with a stored row is skipped by `ax.permissions.register` /
+  `sync` (logged), so an older build that still registers in process cannot undo it.
+- **Effect.** Grants are read from the tables on every authorization (no cache): an applied
+  revision and every membership change take effect with the next request in every process.
+- `drift(product, definitions)` reports how the stored state differs (for reconciliation).
 
 ## Authorization rules
 
@@ -336,6 +364,20 @@ identities to an existing account deliberately with `IdentityService.link_identi
 admin, audited). `oidc[].allow_signup_without_email = true` (only with `allow_signup`, not with
 `allowed_email_domains`) lets an identity without a verified email create an account without an
 address; Axentra still never uses an unverified `email` claim.
+
+**OIDC logins on a host product's routes.** An embedding product may run Axentra's
+`OidcService` behind its own routes and cookies: `OidcService(..., redirect_uri=lambda pid: url)`
+names the callback URL registered at the provider; `start(..., context={...})` stores up to 2 KiB
+of the host's own string pairs with the login state, encrypted like the nonce (bound to the state
+hash), and `finish(...)` hands them back in `LoginResult.context` together with
+`LoginResult.identity` (issuer, subject, the address only when verified, name);
+`finish(start_session=False)` finds or creates the user but starts no Axentra session, for hosts
+that bind sessions to their own context. Everything else is unchanged: the state is consumed once
+before any check, the browser must hold the login cookie of exactly this state, PKCE `S256`,
+nonce, exact issuer, audience/`azp`, asymmetric algorithms only, key rotation with a rate-limited
+JWKS refresh, the per-IP rate limit of starts, the disabled-account check, and the audit of
+refused logins. The host must keep its own session rotation (a new session on login and on any
+change of its session context, the old one ended).
 
 ## API keys
 

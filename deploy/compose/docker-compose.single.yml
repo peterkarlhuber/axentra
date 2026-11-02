@@ -49,7 +49,9 @@ services:
 
   migrate:
     <<: *axentra
-    command: ["migrate"]
+    # Afterwards the application role gets data access to every table (and read-only access to the
+    # migration bookkeeping): `axentra db grant-runtime-role`, idempotent.
+    command: ["migrate", "--grant-runtime-role", "axentra_app"]
     restart: "no"
     environment:
       <<: *axentra-env

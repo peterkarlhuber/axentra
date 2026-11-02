@@ -6,11 +6,48 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+### Fixed
+- An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
+  Before, it restored the scope of the moment `joined()` began, so a service call (for example an
+  authorization read) inside a `join(conn, scope)` block emptied that block's scope: under
+  row-level security the next statements of the block saw no rows (`UsageService.record_in` found
+  no meter). Superuser test roles hid it.
+
 ### Added
 - `tests/integration/test_job_delivery_semantics.py`: a worker that lost its lease keeps running its
   handler while the retry runs it again (at least once); `max_attempts=1` makes the job `dead`;
   idempotency keys deduplicate for good. Backs the G-8 decision: Nodestro keeps its own run queue
   (docs/TODO.md, docs/modules/EVENTS_AND_JOBS.md "Limitations").
+- Notify: in-app **inbox** channel (migration `0010_notify_inbox`: channel `inbox`, `read_at`).
+  Inbox messages go to a user id, are stored encrypted and final at enqueue (`sent`, provider
+  `inbox`); the dispatcher never claims them, so they never reach a delivery provider.
+  `NotifyService.list_inbox`, `unread_count`, `mark_read` (the caller's own messages only).
+- Observability for embedding hosts: `register_pool_metrics` (several named pools, label `pool`,
+  with `in_use`), `MetricsRegistry.counter_callback` / `CallbackCounter` (host-kept totals as
+  counters), `CachedCallback` (expensive scrape-time values at most once per TTL), `pool_stats`.
+- Versioned access definitions (migration `0009_access_definitions`, table
+  `axentra_access_definitions`, forced RLS): `ax.access_definitions.apply(product,
+  AccessDefinitions(revision, permissions, roles))` applies an embedding product's permissions and
+  custom roles once per revision (content hash per product, advisory lock, audit event
+  `access.definitions.apply`); an equal revision is a no-op, an older one is never applied
+  (`stale`), the same revision with other content is `409`. Managed roles cannot be changed or
+  deleted over the API; the unversioned `ax.permissions.register` is ignored for such products.
+  `drift()` compares for reconciliation. Replaces "last start wins".
+- `OidcService` for host routes: `redirect_uri=` (callback URL), `start(context=...)` (host
+  context stored encrypted with the login state, returned as `LoginResult.context`),
+  `finish(start_session=False)` and `LoginResult.identity` (issuer, subject, verified address,
+  name). Column `axentra_login_states.host_context` (migration `0009`).
+- Database roles (docs/architecture/EMBEDDING.md#database-roles): `axentra.data.roles`
+  (`grant_runtime_role`, `inspect_role`), `axentra db grant-runtime-role ROLE`,
+  `axentra db inspect-role [ROLE]` and `axentra migrate --grant-runtime-role ROLE` give a runtime
+  role data privileges only (refusing superuser, `BYPASSRLS` and owning roles; the migration
+  bookkeeping stays read-only for it). `Database.role_info()` reports `table_owner`;
+  `check_role(allow_table_owner=...)` and `database.allow_table_owner` (default `true`) refuse an
+  owning role in production. The compose stacks grant `axentra_app` after `migrate`.
+  `AXENTRA_TEST_SPLIT_ROLES=1` runs the test suite with separate owner and runtime roles.
+- `Database.on_pool(pool)`: Axentra borrows the host application's connection pool (one pool per
+  process; autocommit connections and any row factory work; the pool is never opened or closed by
+  Axentra).
 - Embedding Axentra as a library (docs/architecture/EMBEDDING.md):
   - `axentra.core.errors.problem_details(exc)` maps any exception to a framework-independent
     `ProblemInfo` (status, code, title, redacted detail, extra members, headers such as

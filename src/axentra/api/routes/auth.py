@@ -199,6 +199,8 @@ def oidc_callback(
         )
         _login_cookie(ax, out, None)
         return out
+    if result.session is None:  # pragma: no cover - Axentra's own route always starts a session
+        raise RuntimeError("the OIDC login finished without a session")
     out = RedirectResponse(result.return_to, status_code=302)
     _login_cookie(ax, out, None)
     set_session_cookie(ax, out, result.session)

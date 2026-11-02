@@ -32,7 +32,15 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     ax = _ax(args)
     _load_modules(ax, args.load)
     done = ax.migrate(allow_newer=args.allow_newer)
-    print(json.dumps({"applied": done}))
+    out: dict[str, object] = {"applied": done}
+    if args.grant_runtime_role:
+        from axentra.data.roles import grant_runtime_role
+        from axentra.platform import _migration_url
+
+        out["runtime_role"] = grant_runtime_role(
+            _migration_url(ax.settings), args.grant_runtime_role
+        ).as_dict()
+    print(json.dumps(out))
     return 0
 
 
@@ -50,6 +58,37 @@ def cmd_migrate_check(args: argparse.Namespace) -> int:
     result = ax.migration_runner().check(args.namespace or None)
     print(json.dumps(result.as_dict(), indent=2))
     return 0 if result.current else 3
+
+
+def cmd_db_grant_runtime_role(args: argparse.Namespace) -> int:
+    """Grant the runtime role data access to the schema, as the owner (migration) role; idempotent."""
+    from axentra.config.settings import load_settings
+    from axentra.data.roles import grant_runtime_role
+    from axentra.platform import _migration_url
+
+    report = grant_runtime_role(_migration_url(load_settings(args.config)), args.role, schema=args.schema)
+    print(json.dumps(report.as_dict(), indent=2))
+    return 0 if report.connect else 2
+
+
+def cmd_db_inspect_role(args: argparse.Namespace) -> int:
+    """Show how row-level security applies to a role; exit 3 when it is not restricted."""
+    import psycopg
+
+    from axentra.config.settings import load_settings
+    from axentra.data.roles import inspect_role
+    from axentra.platform import _database_url, _migration_url
+
+    settings = load_settings(args.config)
+    with psycopg.connect(_migration_url(settings), autocommit=True) as conn:
+        role = args.role
+        if role is None:
+            with psycopg.connect(_database_url(settings), autocommit=True) as app:
+                row = app.execute("SELECT current_user").fetchone()
+                role = str(row[0]) if row else ""
+        report = inspect_role(conn, role, args.schema)
+    print(json.dumps(report.as_dict(), indent=2))
+    return 0 if report.restricted else 3
 
 
 def cmd_secrets_reencrypt(args: argparse.Namespace) -> int:
@@ -242,11 +281,32 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MODULE",
         help="import a module that registers migrations (setup(ax))",
     )
+    m.add_argument(
+        "--grant-runtime-role",
+        metavar="ROLE",
+        help="afterwards, grant this runtime role data access (as `axentra db grant-runtime-role`)",
+    )
     m.set_defaults(
         func=lambda a: (
             cmd_migrate_check(a) if a.check else cmd_migrate_status(a) if a.status else cmd_migrate(a)
         )
     )
+
+    d = sub.add_parser("db", help="database role tasks (run as the owner role: database.migration_url_ref)")
+    dsub = d.add_subparsers(dest="db_command", required=True)
+    gr = dsub.add_parser(
+        "grant-runtime-role",
+        help="grant a runtime role (no superuser, no BYPASSRLS, owns nothing) data access to the schema, idempotent",
+    )
+    gr.add_argument("role")
+    gr.add_argument("--schema", help="default: the owner connection's current schema")
+    gr.set_defaults(func=cmd_db_grant_runtime_role)
+    ir = dsub.add_parser(
+        "inspect-role", help="show whether row-level security applies to a role; exit 3 if not"
+    )
+    ir.add_argument("role", nargs="?", help="default: the role of database.url")
+    ir.add_argument("--schema")
+    ir.set_defaults(func=cmd_db_inspect_role)
 
     w = sub.add_parser("worker", help="run a background job worker (jobs, schedules, webhooks)")
     w.add_argument("--kinds", help="comma-separated job kinds (default: every registered kind)")

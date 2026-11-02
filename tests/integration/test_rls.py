@@ -20,8 +20,11 @@ def _seed(world):
 
 
 def test_app_role_is_not_superuser(world):
+    from tests.conftest import SPLIT_ROLES
+
     info = world.ax.db.check_role(allow_superuser=False)
-    assert info == {"superuser": False, "bypass_rls": False}
+    # With separate roles (AXENTRA_TEST_SPLIT_ROLES=1) the application role owns no table either.
+    assert info == {"superuser": False, "bypass_rls": False, "table_owner": not SPLIT_ROLES}
 
 
 def test_unfiltered_queries_are_confined(world):

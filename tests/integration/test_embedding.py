@@ -167,9 +167,10 @@ def test_services_run_inside_the_host_transaction(world, pg_urls):
     from axentra.core.errors import Conflict
 
     ax = world.ax
+    with psycopg.connect(pg_urls["owner"], autocommit=True) as owner:  # the host's own migration
+        owner.execute("CREATE TABLE IF NOT EXISTS host_items (id text PRIMARY KEY)")
+        owner.execute("TRUNCATE host_items")
     with psycopg.connect(pg_urls["app"], autocommit=True) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS host_items (id text PRIMARY KEY)")
-        conn.execute("TRUNCATE host_items")
 
         def host_work(slug: str) -> tuple[str, str, str]:
             product = ax.tenancy.create_product(SYSTEM, slug=slug, name=slug.upper())
@@ -256,3 +257,19 @@ def test_joined_nested_transactions_restore_the_outer_scope(world, pg_urls):
                 failing.execute("SELECT 1/0")
             assert outer.scalar("SELECT current_setting('axentra.product_id')") == "prd_a"
         assert conn.execute("SELECT current_setting('axentra.scope', true)").fetchone() in ((None,), ("",))
+
+
+def test_a_service_call_inside_join_inside_joined_keeps_the_join_scope(world, pg_urls):
+    """joined() + join(tenant) + a service whose authorization opens its own (savepoint) transaction:
+    the tenant scope of join() must be back afterwards, or the next read in that scope sees no rows
+    under row-level security (found when Nodestro ran its usage mirror as a non-owner role)."""
+    pid, tid = _setup(world)
+    with psycopg.connect(pg_urls["app"], autocommit=True) as conn:
+        conn.execute("BEGIN")
+        with world.ax.db.joined(conn), join(conn, DbScope.tenant(pid, tid)) as tx:
+            world.ax.authz.require(SYSTEM, "usage:record", pid, tid)  # a joined platform transaction
+            assert conn.execute("SELECT current_setting('axentra.tenant_id')").fetchone() == (tid,)
+            # Meter lookup, counter and event in the join's tenant scope: works only with the scope intact.
+            assert _write(tx, world, pid, tid, key="nested-1").replayed is False
+        conn.execute("COMMIT")
+    assert _counts(pg_urls["admin"], "host.run.start") == (1, 1)

@@ -28,6 +28,21 @@ ax.metrics.histogram("myapp_render_seconds", "Render time").observe(0.2)
 ax.metrics.gauge("myapp_queue_depth", "Depth", callback=lambda: [({}, depth())])
 ```
 
+Embedding hosts (a product that runs Axentra as a library next to its own code) reuse the registry
+instead of building their own:
+
+```python
+from axentra.observability import CachedCallback, register_pool_metrics
+
+# Several named pools (the host's and Axentra's, or one shared pool): <prefix>_db_pool_*{pool="..."}
+register_pool_metrics(ax.metrics, lambda: {"app": app_pool, "axentra": ax.db.pool}, prefix="myapp")
+# Totals the host counts itself, exposed as a counter at scrape time:
+ax.metrics.counter_callback("myapp_ops_total", "Operations", ("outcome",), lambda: [({"outcome": "ok"}, n)])
+# An expensive database count, run at most once a minute (a failure keeps the last value):
+backlog = CachedCallback(count_backlog, 60)
+ax.metrics.gauge("myapp_backlog", "Backlog", callback=lambda: [({}, backlog())])
+```
+
 Metrics are per process (no shared state between API workers); scrape every process (or run one
 worker per container). Each metric keeps at most 2 000 label combinations; more are folded into a
 series whose labels are `other`. Never use ids or user input as label values.

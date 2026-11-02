@@ -3,12 +3,12 @@
 Transactional and product notifications: versioned templates with locale variants, an encrypted
 outbox with asynchronous delivery, providers behind one protocol, per-user preferences, a local
 development mailbox and delivery statistics. Package `axentra.notify`, HTTP routes in
-`axentra.api.routes.notify`, migration `0005_notify.sql`. Module name `notify` (disable it with
+`axentra.api.routes.notify`, migrations `0005_notify.sql` and `0010_notify_inbox.sql`. Module name `notify` (disable it with
 `modules = [...]` without `"notify"`; its routes then disappear and invitations send no email).
 
 ## Concepts
 
-- **Template** (`tpl_`): per product, unique `key`, `channel` (`email` only; `sms`/`push` are
+- **Template** (`tpl_`): per product, unique `key`, `channel` (`email` or `inbox`; `sms`/`push` are
   reserved for future adapters and rejected with 422), `category`, declared `variables`,
   `sample_data` (for previews), `variants` per locale (`subject`, `text`, optional `html`),
   `sensitive` flag, `version` (optimistic concurrency with `If-Match`). Every template needs an
@@ -43,6 +43,16 @@ development mailbox and delivery statistics. Package `axentra.notify`, HTTP rout
     `smtp_ca_file`, optional AUTH with `smtp_username` + `smtp_password_ref` (`env:`/`file:`).
     5xx replies are permanent failures; 4xx, authentication and connection errors are retried.
   - Custom adapters: `ax.notify.set_provider(obj)`.
+
+- **Inbox** (channel `inbox`): an in-app notification for a user, read in the product's own UI. It
+  goes to a user id only (an address is refused with 422), is stored encrypted like any message and
+  is final at enqueue: status `sent`, provider `inbox`. The dispatcher never claims it, so it never
+  reaches a delivery provider (no e-mail, no network). Users without an e-mail address get it too.
+  Preferences (opt-outs) and idempotency keys apply as for e-mail. `read_at` marks it as read.
+  Library: `ax.notify.list_inbox(principal, product_id, tenant_id=None, unread_only=False, limit,
+  cursor)`, `unread_count(...)`, `mark_read(..., message_ids=None)` (all: the caller's own
+  messages only; `notify:preferences` in the tenant, users only). No HTTP routes yet: a host product
+  serves the inbox through its own API.
 
 ## Library usage
 
@@ -162,7 +172,7 @@ provider configuration complete, secrets resolvable; no network calls).
 
 ## Limitations / TODO
 
-- Email only; SMS/push adapters, implicit TLS (SMTPS/465), attachments and per-product sender
+- Email and the in-app inbox only; the inbox has no Axentra HTTP routes or Studio page yet; SMS/push adapters, implicit TLS (SMTPS/465), attachments and per-product sender
   addresses do not exist yet.
 - No unsubscribe links/List-Unsubscribe header; opt-outs only through the preferences API, and only
   for addresses that belong to users.

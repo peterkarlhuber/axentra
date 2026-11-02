@@ -187,8 +187,9 @@ NOTHING` / upsert) so a backfill can be re-run.
 | documents `settings/app` fields `providers.<p>.api_key` (`nodestro:enc:v1:`) | stay in the document, value re-encrypted to `axs1.<kid>....` | section 3.6 | M4 |
 | documents `usage_log` (`UsageEntry`) | `axentra_usage_events` (meters `ai.tokens.input`, `ai.tokens.output`, `ai.cost`) | `idempotency_key` = `nodestro:usage:<entry id>`; amounts as `Decimal`; history backfill optional (Q-9) | M3 |
 | tool approval audit (documents, max 5000 per tenant) | `axentra_audit_events` | `action = 'nodestro.tool_approval.<kind>'`, `actor_kind` user/system, `details` = existing hashes only (`arguments_hash`, never arguments) | M3 |
-| input files on disk `<data_root>/tenants/<id>/...` (`_Blobs`, content-addressed) | `axentra_files` + storage backend (local or S3) | copy per tenant, keep Nodestro's input metadata (documents) and store the Axentra file id beside the old blob id | M8 |
 | `nodestro_jobs`, `nodestro_schedule_firings` | none (G-8 decision, M11 closed) | stay | - |
+| input files on disk `<data_root>/tenants/<id>/...` (`_Blobs`, content-addressed) | `axentra_files` + storage backend (local or S3) | copy per tenant, keep Nodestro's input metadata (documents); the Axentra file id is stored per blob in the tenant collection `file_objects` (one blob is shared by several input files and their cached extraction); implemented: `nodestro_runtime.axentra_storage`, `NODESTRO_FILES_BACKEND` | M8 |
+| `nodestro_jobs`, `nodestro_schedule_firings` | Axentra jobs tables (merged in PR #5) | **drain, do not copy** active jobs (section 7, M11); copy the latest firing slot per schedule so no slot fires twice | M11 |
 | `nodestro_schema_migrations (version, name, applied_at)` | `axentra_schema_migrations (namespace='nodestro', version, name, checksum)` | one-off adoption: insert rows 1-6 with the checksums of the unchanged files | M9 |
 | `nodestro_documents`, `nodestro_files`, `nodestro_chunks`, `nodestro_memory_files`, `nodestro_run_events` | none | stay; get RLS in M10 | - |
 
@@ -225,6 +226,11 @@ Nodestro: `owner`, `admin`, `editor`, `operator`, `viewer` with permissions `rea
 | operator | read, run | `operator` | custom | `tenant:read`, `members:read`, `files:read`, `usage:read`, `notify:preferences` (+ `nodestro.*` after G-1) |
 | viewer | read | `viewer` | built-in | `tenant:read`, `members:read`, `records:read`, `files:read`, `usage:read`, `billing:read` |
 | (operator of the installation, `install`) | install | platform `platform_admin` or product `product_owner` | built-in | only for Axentra Studio; Nodestro keeps `install` local |
+
+Decided (identity completion): Nodestro registers `nodestro.workspace:read|edit|run|admin` (tenant scope) and the
+custom roles `editor`/`operator` as versioned access definitions (`ax.access_definitions.apply`, revision pinned by a
+test); in `axentra` mode Axentra's role definitions decide Nodestro's `read/edit/run/admin` on every request, in
+`nodestro`/`mirror` mode `ROLE_PERMISSIONS` does (both are the same table, registered from it). The original rules:
 
 Rules: Nodestro's `ROLE_PERMISSIONS` is re-keyed to the Axentra role keys and stays the source of Nodestro's
 `read/edit/run/admin` until G-1 exists; `/api/auth/me` keeps answering the Nodestro names (`owner` ... `viewer`) so
@@ -288,7 +294,7 @@ map (so custom roles made in Axentra Studio take effect in Nodestro).
 | session | none (hash is the key) | `ses_<26>` | - |
 | API key | `<12 hex>` | `key_<26>` | mapping table (needed by the legacy verifier) |
 | job | `bigserial` | jobs module (open) | not copied |
-| file | sha256 prefix (16 hex) | `fil_<26>` | Nodestro input metadata stores both |
+| file | sha256 prefix (16 hex) | `fil_<26>` | per-blob mapping document (`file_objects`), keyed by the blob id |
 
 Reads that resolve a Nodestro id go through one cached function per process (`nodestro_axentra_ids` is small and
 append-only).
@@ -600,7 +606,7 @@ Status as of 2026-11-02; see also [EMBEDDING](../architecture/EMBEDDING.md).
 | G-2 | Migration runner: pre-migration backup hook, "schema too new" refusal, a serving gate (`require_current_schema` equivalent with a compatible range), optional non-transactional steps | Nodestro's runner has these; unification (M9) must not lose them | M | Done except a declared compatible range: `before_apply` hook, refusal of a newer schema (`allow_newer`), `require_current`/`database.require_current_schema` gate, `-- axentra:no-transaction` steps, `axentra migrate --check` |
 | G-3 | Users without e-mail (external identity only) | Nodestro users without verified e-mail | S/M | Done: migration `0007`, `allow_signup_without_email`, `link_by_verified_email`, `create_external_user`/`link_identity` |
 | G-4 | Provider-level option "login allowed without membership, access decided by product" (or keep `allow_signup=true`) and DB-clock comparisons for sessions | Same login semantics as Nodestro | S | Done: login never required membership; session, setup-token and invitation expiry on the DB clock |
-| G-5 | "Claim an ownerless tenant" one-time token (tenant bootstrap), or accept it stays Nodestro | Nodestro's bootstrap links | S | Open |
+| G-5 | "Claim an ownerless tenant" one-time token (tenant bootstrap), or accept it stays Nodestro | Nodestro's bootstrap links | S | Decided: stays Nodestro (links must work in every identity mode and after a rollback); the hash travels through Axentra's OIDC login as host context |
 | G-6 | Re-encryption task registry (`axentra secrets reencrypt` with product-registered fields); the CLI command named in `config/secrets.py` does not exist yet | Nodestro's encrypted document fields | S | Done for columns (`axentra secrets reencrypt`, `register_encrypted_column`); no hook for legacy formats or JSON fields |
 | G-7 | Per-product content-type policy in storage (store code/HTML as inert attachments instead of refusing) | Nodestro accepts `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` inputs (`file_formats.CODE_EXTENSIONS`) | S | Done: `settings.storage.blocked_types = "store_inert"` or `inert_extensions` per product, `GET`/`PUT /v1/products/{pid}/storage/policy`; see modules/STORAGE.md |
 | G-8 | Jobs module with Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss", lease fencing, cancel request, leader lock, idempotent schedule slots, event streams | M11 | - | Rejected 2026-11-02 (variant B): Nodestro keeps its run queue permanently; Axentra jobs stay generic and at least once. The guarantee Nodestro needs lives in its run fence, `interrupted` state, tool journal and approval checkpoints, not in the queue; the missing options would be Nodestro semantics in a generic module. Evidence: `tests/integration/test_job_delivery_semantics.py` here, nodestro-runtime `tests/test_job_delivery.py` |
