@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-Channel = Literal["email", "sms", "push"]
+Channel = Literal["email", "sms", "push", "inbox"]
 MessageStatus = Literal["queued", "sending", "sent", "failed", "suppressed"]
 ContentState = Literal["available", "redacted", "purged", "none"]
 
@@ -79,11 +79,29 @@ class Message(BaseModel):
     created_at: datetime
     updated_at: datetime
     sent_at: datetime | None
+    read_at: datetime | None = None
+    """Inbox messages only: when the recipient marked it as read (``None``: unread)."""
     subject: str | None = None
     """The rendered subject while content is available (``None`` if redacted or purged)."""
     content_state: ContentState
     content: MessageContent | None = None
     """Only on single-message reads."""
+
+
+class InboxEntry(BaseModel):
+    """One in-app notification of the current user (channel ``inbox``)."""
+
+    id: str
+    product_id: str
+    tenant_id: str | None
+    template_key: str
+    category: str
+    created_at: datetime
+    read_at: datetime | None
+    subject: str | None
+    """``None`` once the content was purged (retention) or cannot be decrypted any more."""
+    text: str | None
+    content_state: ContentState
 
 
 class MailboxEntry(BaseModel):
