@@ -5,7 +5,8 @@ Status: **alpha**, package `0.1.0.dev0`, HTTP API `v1` (API version `1.0`). Repo
 [`7511a37`](https://github.com/peterkarlhuber/axentra/commit/7511a37ce0876c13e5a9c861e3b9e31b6401d99c)
 (merge of PR #9). All local numbers below were measured on 2026-11-02 on that commit plus the
 one-line test fix in this report's pull request (section 7.3), on Linux (Ubuntu, Python 3.12.3,
-PostgreSQL 16).
+PostgreSQL 16). Later additions are marked: the search module (PR #11, `f80429f`), a second
+flaky-test fix (section 7.3) and the Studio single-product results (PR #4 in Studio, criterion 24).
 
 This report covers the backend (`peterkarlhuber/axentra`). The admin UI has its own report:
 [`docs/AXENTRA_STUDIO_IMPLEMENTATION_REPORT.md` in peterkarlhuber/axentra-studio](https://github.com/peterkarlhuber/axentra-studio/blob/master/docs/AXENTRA_STUDIO_IMPLEMENTATION_REPORT.md)
@@ -223,8 +224,16 @@ The test checked that an API key listing does not contain the secret with
 `secret.split("_")[-1] not in listing`. The secret part of a key (`axk_<26-char id>_<43 chars>`)
 is URL-safe base64 and may itself contain `_`, so the "last segment" was sometimes a single
 character (`'g'`, `'k'`) that appears anywhere in the JSON. The fix in this pull request cuts the
-secret part by position and asserts it has at least 32 characters. A CI rerun on the merge of this
-pull request is needed to show a fully green `master`.
+secret part by position and asserts it has at least 32 characters.
+
+CI on `master` after that merge (`ddc1f53`, PR #10) then failed one job (Python 3.12) in
+`test_security_review.py::test_I4_login_throttling_is_atomic`: 97 password checks passed instead of
+the budget of 50. Cause: the test fires 100 concurrent attempts and can straddle a minute
+boundary; login throttling uses fixed one-minute windows, which by design allow up to twice the
+budget across a boundary (documented in `docs/architecture/SECURITY_MODEL.md`). The counting
+itself is atomic. Reproduced locally by making the window alternate between two minutes (100
+checks passed); the fix pins the window in the test. `master` `f80429f` (PR #11) passed all 11
+jobs on its push run [41381388692](https://github.com/peterkarlhuber/axentra/actions/runs/41381388692).
 
 ### 7.4 Coverage of skips
 
@@ -377,6 +386,8 @@ Axentra (`peterkarlhuber/axentra`, all merged into `master` from `claude/project
 | [#7](https://github.com/peterkarlhuber/axentra/pull/7) | Phase 4: Python and TypeScript SDKs, Taskboard demo, deployment demos | 2026-11-01 23:30 | `3b110feade7511f079abd8f119380ead6db69ed4` |
 | [#8](https://github.com/peterkarlhuber/axentra/pull/8) | Phase 5: Backend hardening (secret re-encryption, limits, docs protection, migration discovery) | 2026-11-01 23:39 | `537484f5f30872400ade683306b4becbd61ac6ac` |
 | [#9](https://github.com/peterkarlhuber/axentra/pull/9) | Security: fix independent review findings F1-F8 and I1-I4 | 2026-11-02 00:49 | `7511a37ce0876c13e5a9c861e3b9e31b6401d99c` |
+| [#10](https://github.com/peterkarlhuber/axentra/pull/10) | Final implementation report, compatibility matrix, TODO refresh, flaky test fix | 2026-11-02 02:50 | `ddc1f533f9bc3c1fcf88cc63fcd71cbf2728fa7e` |
+| [#11](https://github.com/peterkarlhuber/axentra/pull/11) | Search module: tenant-scoped PostgreSQL full-text search | 2026-11-02 03:08 | `f80429f129f76bc019118bd825bef637feaf8ecf` |
 
 Axentra Studio (`peterkarlhuber/axentra-studio`), details in the Studio report:
 
@@ -385,6 +396,8 @@ Axentra Studio (`peterkarlhuber/axentra-studio`), details in the Studio report:
 | [#1](https://github.com/peterkarlhuber/axentra-studio/pull/1) | Phase 1: Studio foundation, design system and Phase 1 admin areas | 2026-11-01 23:39 | `f1351991614f3f60cac1e9405a00207ce111f34a` |
 | [#2](https://github.com/peterkarlhuber/axentra-studio/pull/2) | Phase 2/3: all admin areas, e2e against a real backend in CI, compatibility matrix | 2026-11-02 02:03 | `0aed4fce5dc2e4dc3c662d5fdcd066611077c4da` |
 | [#3](https://github.com/peterkarlhuber/axentra-studio/pull/3) | Adapt Studio to the Axentra security fixes (backend 7511a37) | 2026-11-02 02:21 | `ee7d9f2a9007a1f570d800b2d77e584ddfe6a5cb` |
+| [#4](https://github.com/peterkarlhuber/axentra-studio/pull/4) | Single- and multi-product e2e (CI matrix), template preview fix, CI push trigger `master` | 2026-11-02 03:32 | `4d2df1aed0756abc9b6fcf884f28f3c1e8b9a3f6` |
+| [#5](https://github.com/peterkarlhuber/axentra-studio/pull/5) | Studio implementation report with screenshots | see Studio repository | - |
 
 Important dependency versions are pinned in `deploy/constraints.txt` (container image) and
 `sdk/typescript/package-lock.json`.
@@ -433,20 +446,20 @@ Status values: **met**, **met with limitation**, **not met**, or a pointer to th
 | 11 | Notifications through exchangeable adapters | met with limitation | `test_notify.py`, `test_notify_smtp.py` (local and SMTP providers); email only, SMTP only against an in-process server |
 | 12 | Public API usable from Python and TypeScript | met with limitation | SDKs, `scripts/sdk-e2e.sh` (TS 8, Python 6 passed), CI `sdk-e2e`; Python SDK lacks typed jobs/events/webhooks methods; SDKs not published |
 | 13 | Deployment, migrations, configuration, monitoring, recovery documented and checked | met with limitation | `docs/operations/*`; migrations, health, metrics and database backup/restore tested; image built in CI; compose stacks never started, no production deployment, file-storage backup not tested |
-| 14 | Relevant automated tests and security checks pass | met with limitation | Local: 360 passed/0 skipped, SDK suites, bandit, pip-audit green; CI on `master` `7511a37`: 10/11 jobs green, 1 flaky failure (section 7.3), fixed in this PR, CI rerun pending |
+| 14 | Relevant automated tests and security checks pass | met with limitation | Local: 360 passed/0 skipped, SDK suites, bandit, pip-audit green; CI on `master`: `7511a37` and `ddc1f53` each had one flaky test failure (section 7.3, both test-only, both fixed); `f80429f` green on all 11 jobs |
 | 15 | Nodestro and orkexa repositories unchanged | met | Evidence of the lead (no branch, no PR in 11 repositories); local checkouts clean at the examined commits |
 | 16 | Single-product installation serves one product without central infrastructure | met | `test_deployment_models.py` single tests; demo against `axentra serve` (19 checks, 0 leaks) |
 | 17 | Shared installation serves at least two products without cross-product access | met | `test_multi_product_deployment_isolates_products`; demo (84 checks, 0 leaks); independent review (F2 cross-product user oracle fixed) |
-| 18 | Studio: complete integrated admin UI in its own repository | see Studio report | Studio PRs #1-#3; backend side: all admin areas use `/v1` endpoints from `openapi/axentra-v1.json` |
+| 18 | Studio: complete integrated admin UI in its own repository | see Studio report | Studio PRs #1-#5; backend side: all admin areas use `/v1` endpoints from `openapi/axentra-v1.json` |
 | 19 | Branding with the Axentra logo | see Studio report | - |
 | 20 | UI areas work with real backend endpoints, no dead placeholders | see Studio report | Studio CI e2e runs against a real backend at `7511a37` (186 passed) |
 | 21 | Light mode, dark mode, responsive, tested | see Studio report | Studio e2e desktop and 360 px projects |
 | 22 | UI security: permission limits, sessions, admin actions protected | see Studio report | Enforcement is server-side in Axentra (criteria 2, 4, 6); Studio `e2e/security.spec.ts` |
 | 23 | Central user flows pass automated e2e tests | see Studio report | Studio CI job 125058075685: 186 passed, 0 failed |
-| 24 | Studio works in single- and multi-product configuration | pending Studio single-mode e2e (see Studio report) | Current Studio e2e runs multi-product mode only |
+| 24 | Studio works in single- and multi-product configuration | met with limitation | Studio CI runs the full e2e suite against a `mode = "multi"` and a `mode = "single"` backend (PR #4 run 41383014581: multi 188 passed, single 196 passed, 0 failed); backend refuses product create/archive in single mode with 409 (asserted at API level only; Studio offers no such action there). Backend demos: single 19 checks, multi 84 checks |
 | 25 | Repositories technically and organizationally separate | met | Separate repositories, CI, versions, changelogs, TODO lists; [ADR 0012](adr/0012-studio-separation.md) |
 | 26 | Studio uses Axentra through public interfaces; Axentra never needs Studio | met | Axentra: forbidden imports/dependencies (section 9). Studio: vendored OpenAPI + HTTP only (Studio report) |
-| 27 | Both repositories build and test independently | met with limitation | Axentra CI (11 jobs) and Studio CI (3 jobs) are separate; Studio CI does not run on pushes to Studio `master` (trigger is `main`) |
+| 27 | Both repositories build and test independently | met with limitation | Axentra CI (11 jobs) and Studio CI (3 jobs) are separate; Studio CI runs on pushes to Studio `master` since `4d2df1a` (earlier merge commits had no own run) |
 | 28 | Studio runs with a defined compatible Axentra version | met | `api/BACKEND_REF` pin, `REQUIRED_API`, runtime check of `GET /v1/meta`, [COMPATIBILITY.md](COMPATIBILITY.md) |
 | 29 | Axentra works fully without frontend dependencies | met | Headless wheel install, migrate, serve, health (section 5, 9); CI headless job |
 | 30 | Joint e2e pipeline confirms both components | met with limitation | Studio CI contract + e2e jobs against the pinned backend (180/180 at `a2ca72a`, 186/186 at `7511a37`); runs only on Studio pull requests, multi-product mode only so far, Chromium only, no Axentra-side trigger |
