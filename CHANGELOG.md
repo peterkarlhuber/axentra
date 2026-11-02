@@ -6,6 +6,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+- Docs: Roadmap Phase 6 (Nodestro integration) marked done on the Axentra side; the "last start wins" limitation
+  now names versioned access definitions as the deterministic way.
+
 ### Fixed
 - An Axentra transaction inside `Database.joined()` restores the scope it found on the connection.
   Before, it restored the scope of the moment `joined()` began, so a service call (for example an
