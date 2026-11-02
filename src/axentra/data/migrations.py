@@ -17,12 +17,26 @@ Discovery of product namespaces (so ``axentra migrate`` applies them without cus
   ``lambda: package_migrations("crm", "crm.sql")``).
 - Installed distributions may declare the entry point group ``axentra.migrations`` with the same
   kind of target (disable with ``database.migration_entry_points = false``).
+
+Compatibility checks (:meth:`MigrationRunner.check`): for every namespace the code knows, the
+database may hold *pending* versions (code newer than schema) or *unknown* applied versions
+(schema newer than code, e.g. after a rollback of the application). :meth:`MigrationRunner.migrate`
+refuses to run while a known namespace has unknown versions (``allow_newer=True`` overrides), and
+:meth:`MigrationRunner.require_current` is a serving gate that refuses both (enabled for
+``Axentra.start()`` with ``database.require_current_schema``). Namespaces that are recorded in the
+database but not registered in this process (another product's schema in a shared database) are
+reported, never refused, unless they are named explicitly.
+
+A migration whose file starts with the header comment ``-- axentra:no-transaction`` runs outside
+a transaction (for ``CREATE INDEX CONCURRENTLY`` and similar): its statements are executed one by
+one in autocommit mode and the migration is recorded after the last one. Such a migration cannot
+be rolled back halfway, so write every statement so that it can run again (``IF NOT EXISTS``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
 import hashlib
 import importlib
 from importlib import metadata, resources
@@ -32,12 +46,17 @@ import re
 from typing import Any
 
 import psycopg
+from psycopg.rows import tuple_row
+
+from axentra.core.errors import ConfigurationError
 
 logger = logging.getLogger(__name__)
 
 #: Advisory lock key for migrations ("axentra" folded into 63 bits).
 MIGRATION_LOCK = 0x617865_6E747261
 _NAME = re.compile(r"^(\d{4})_([a-z0-9_]+)\.sql$")
+NO_TRANSACTION_MARKER = "-- axentra:no-transaction"
+_DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +69,141 @@ class Migration:
     @property
     def checksum(self) -> str:
         return hashlib.sha256(self.sql.encode()).hexdigest()
+
+    @property
+    def label(self) -> str:
+        return f"{self.namespace}:{self.version:04d}_{self.name}"
+
+    @property
+    def transactional(self) -> bool:
+        """False when the file's leading comment lines contain ``-- axentra:no-transaction``."""
+        for line in self.sql.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if not stripped.startswith("--"):
+                return True
+            if stripped.lower() == NO_TRANSACTION_MARKER:
+                return False
+        return True
+
+
+def split_statements(sql: str) -> list[str]:
+    """Split SQL into statements at top-level semicolons.
+
+    Understands quoted strings and identifiers, dollar-quoted bodies and comments; used only for
+    ``-- axentra:no-transaction`` migrations, whose statements must be sent one at a time."""
+    out: list[str] = []
+    buf: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c == "-" and sql.startswith("--", i):
+            end = sql.find("\n", i)
+            end = n if end < 0 else end
+            buf.append(sql[i:end])
+            i = end
+        elif c == "/" and sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            buf.append(sql[i:end])
+            i = end
+        elif c in ("'", '"'):
+            j = i + 1
+            while j < n:
+                if sql[j] == c:
+                    if j + 1 < n and sql[j + 1] == c:  # doubled quote
+                        j += 2
+                        continue
+                    break
+                j += 1
+            buf.append(sql[i : j + 1])
+            i = j + 1
+        elif c == "$" and (m := _DOLLAR_TAG.match(sql, i)):
+            tag = m.group(0)
+            end = sql.find(tag, i + len(tag))
+            end = n if end < 0 else end + len(tag)
+            buf.append(sql[i:end])
+            i = end
+        elif c == ";":
+            out.append("".join(buf))
+            buf = []
+            i += 1
+        else:
+            buf.append(c)
+            i += 1
+    out.append("".join(buf))
+    return [s.strip() for s in out if _has_code(s)]
+
+
+def _has_code(statement: str) -> bool:
+    for line in statement.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("--"):
+            return True
+    return False
+
+
+class SchemaNotCurrent(ConfigurationError):
+    """The database schema does not match the code (pending or unknown migrations)."""
+
+    code = "schema_not_current"
+    status = 503
+    title = "Database schema not current"
+
+
+@dataclass(frozen=True, slots=True)
+class NamespaceStatus:
+    """The migration state of one namespace (see :meth:`MigrationRunner.check`)."""
+
+    namespace: str
+    #: Whether the code (this runner) has migrations for the namespace.
+    registered: bool
+    #: Versions known to the code and applied in the database.
+    applied: list[int] = field(default_factory=list)
+    #: Migrations known to the code and not yet applied (code newer than the schema).
+    pending: list[Migration] = field(default_factory=list)
+    #: Versions applied in the database that the code does not know (schema newer than the code).
+    unknown: list[int] = field(default_factory=list)
+    #: Applied versions whose file changed after it was applied.
+    changed: list[int] = field(default_factory=list)
+
+    @property
+    def current(self) -> bool:
+        return not (self.pending or self.unknown or self.changed)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "namespace": self.namespace,
+            "registered": self.registered,
+            "current": self.current,
+            "applied": self.applied,
+            "pending": [m.label for m in self.pending],
+            "unknown": self.unknown,
+            "changed": self.changed,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaCheck:
+    """Result of :meth:`MigrationRunner.check`, one entry per namespace."""
+
+    namespaces: dict[str, NamespaceStatus]
+
+    @property
+    def current(self) -> bool:
+        """True when every checked namespace that the code registers is current."""
+        return all(ns.current for ns in self.namespaces.values() if ns.registered)
+
+    @property
+    def pending(self) -> list[Migration]:
+        return [m for ns in self.namespaces.values() for m in ns.pending]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "current": self.current,
+            "namespaces": [ns.as_dict() for ns in self.namespaces.values()],
+        }
 
 
 def load_directory(namespace: str, directory: Path) -> list[Migration]:
@@ -154,15 +308,19 @@ class MigrationRunner:
             """
         )
 
+    def _applied(self, conn: psycopg.Connection[Any]) -> dict[tuple[str, int], str]:
+        with conn.cursor(row_factory=tuple_row) as cur:
+            cur.execute("SELECT to_regclass('axentra_schema_migrations') IS NOT NULL")
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return {}
+            cur.execute("SELECT namespace, version, checksum FROM axentra_schema_migrations")
+            return {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
     def status(self) -> list[dict[str, object]]:
+        """One row per migration known to the code (see :meth:`check` for unknown versions)."""
         with psycopg.connect(self.url, autocommit=True) as conn:
-            self._ensure_table(conn)
-            applied = {
-                (r[0], r[1]): r[2]
-                for r in conn.execute(
-                    "SELECT namespace, version, checksum FROM axentra_schema_migrations"
-                ).fetchall()
-            }
+            applied = self._applied(conn)
         return [
             {
                 "namespace": m.namespace,
@@ -181,37 +339,131 @@ class MigrationRunner:
         ]
         return sorted(self.migrations, key=lambda m: (ns_order.index(m.namespace), m.version))
 
-    def migrate(self) -> list[str]:
-        """Apply pending migrations; returns the applied ``namespace:version_name`` list."""
+    def _evaluate(self, applied: dict[tuple[str, int], str], namespaces: Sequence[str] | None) -> SchemaCheck:
+        code = self._ordered()
+        known_ns = list(dict.fromkeys(m.namespace for m in code))
+        db_ns = sorted({ns for ns, _ in applied} - set(known_ns))
+        selected = list(namespaces) if namespaces is not None else known_ns + db_ns
+        out: dict[str, NamespaceStatus] = {}
+        for ns in selected:
+            mine = [m for m in code if m.namespace == ns]
+            versions = {m.version for m in mine}
+            done = [m.version for m in mine if (ns, m.version) in applied]
+            out[ns] = NamespaceStatus(
+                namespace=ns,
+                registered=bool(mine) or namespaces is not None,
+                applied=done,
+                pending=[m for m in mine if (ns, m.version) not in applied],
+                unknown=sorted(v for n, v in applied if n == ns and v not in versions),
+                changed=[m.version for m in mine if applied.get((ns, m.version), m.checksum) != m.checksum],
+            )
+        return SchemaCheck(out)
+
+    def check(
+        self, namespaces: Sequence[str] | None = None, *, conn: psycopg.Connection[Any] | None = None
+    ) -> SchemaCheck:
+        """Compare the database with the code, per namespace: applied, pending and unknown versions.
+
+        Without ``namespaces``, every namespace the code registers is checked, and namespaces that
+        only the database knows are listed with ``registered=False`` (they never make the result
+        not current). Named namespaces are always checked strictly. Read-only: never creates the
+        bookkeeping table. ``conn`` reads through an existing connection instead of ``self.url``.
+        """
+        if conn is not None:
+            return self._evaluate(self._applied(conn), namespaces)
+        with psycopg.connect(self.url, autocommit=True) as own:
+            return self._evaluate(self._applied(own), namespaces)
+
+    def require_current(
+        self, namespaces: Sequence[str] | None = None, *, conn: psycopg.Connection[Any] | None = None
+    ) -> SchemaCheck:
+        """Serving gate: raise :class:`SchemaNotCurrent` when a checked namespace has pending,
+        unknown or changed migrations."""
+        result = self.check(namespaces, conn=conn)
+        problems = [
+            f"{ns.namespace}: "
+            + ", ".join(
+                part
+                for part in (
+                    f"pending {[m.label for m in ns.pending]}" if ns.pending else "",
+                    f"unknown applied versions {ns.unknown} (the schema is newer than the code)"
+                    if ns.unknown
+                    else "",
+                    f"changed after apply {ns.changed}" if ns.changed else "",
+                )
+                if part
+            )
+            for ns in result.namespaces.values()
+            if ns.registered and not ns.current
+        ]
+        if problems:
+            raise SchemaNotCurrent("the database schema does not match the code: " + "; ".join(problems))
+        return result
+
+    def migrate(
+        self,
+        *,
+        allow_newer: bool = False,
+        before_apply: Callable[[list[Migration]], None] | None = None,
+    ) -> list[str]:
+        """Apply pending migrations; returns the applied ``namespace:version_name`` list.
+
+        Refused (:class:`~axentra.core.errors.ConfigurationError`) when a namespace registered by
+        the code has applied versions the code does not know (the schema is newer than the code),
+        unless ``allow_newer=True``. ``before_apply`` (for example a backup) is called once with
+        the pending migrations, under the migration lock and only when something is pending; if it
+        raises, nothing is applied."""
         done: list[str] = []
         with psycopg.connect(self.url, autocommit=True) as conn:
             conn.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK,))
             try:
                 self._ensure_table(conn)
-                applied = {
-                    (r[0], r[1]): r[2]
-                    for r in conn.execute(
-                        "SELECT namespace, version, checksum FROM axentra_schema_migrations"
-                    ).fetchall()
-                }
-                for mig in self._ordered():
-                    key = (mig.namespace, mig.version)
-                    if key in applied:
-                        if applied[key] != mig.checksum:
-                            raise RuntimeError(
-                                f"migration {mig.namespace}:{mig.version:04d}_{mig.name} changed after it was applied"
-                            )
-                        continue
-                    with conn.transaction():
-                        conn.execute(mig.sql.encode())
-                        conn.execute(
-                            "INSERT INTO axentra_schema_migrations (namespace, version, name, checksum)"
-                            " VALUES (%s, %s, %s, %s)",
-                            (mig.namespace, mig.version, mig.name, mig.checksum),
+                applied = self._applied(conn)
+                result = self._evaluate(applied, None)
+                for ns in result.namespaces.values():
+                    for version in ns.changed:
+                        mig = next(
+                            m for m in self.migrations if (m.namespace, m.version) == (ns.namespace, version)
                         )
-                    label = f"{mig.namespace}:{mig.version:04d}_{mig.name}"
-                    logger.info("applied migration %s", label)
-                    done.append(label)
+                        raise RuntimeError(f"migration {mig.label} changed after it was applied")
+                newer = {
+                    ns.namespace: ns.unknown
+                    for ns in result.namespaces.values()
+                    if ns.registered and ns.unknown
+                }
+                if newer and not allow_newer:
+                    raise ConfigurationError(
+                        "the database schema is newer than this code: applied migrations unknown to the code: "
+                        + "; ".join(f"{ns} {versions}" for ns, versions in newer.items())
+                        + " (deploy the newer code, or pass allow_newer=True if this is intended)"
+                    )
+                pending = result.pending
+                if pending and before_apply is not None:
+                    before_apply(list(pending))
+                for mig in pending:
+                    self._apply(conn, mig)
+                    logger.info("applied migration %s", mig.label)
+                    done.append(mig.label)
             finally:
                 conn.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK,))
         return done
+
+    @staticmethod
+    def _record(conn: psycopg.Connection[Any], mig: Migration) -> None:
+        conn.execute(
+            "INSERT INTO axentra_schema_migrations (namespace, version, name, checksum)"
+            " VALUES (%s, %s, %s, %s)",
+            (mig.namespace, mig.version, mig.name, mig.checksum),
+        )
+
+    def _apply(self, conn: psycopg.Connection[Any], mig: Migration) -> None:
+        if mig.transactional:
+            with conn.transaction():
+                conn.execute(mig.sql.encode())
+                self._record(conn, mig)
+            return
+        # Autocommit, one statement at a time (a multi-statement string would be one implicit
+        # transaction block, where e.g. CREATE INDEX CONCURRENTLY is not allowed).
+        for statement in split_statements(mig.sql):
+            conn.execute(statement.encode())
+        self._record(conn, mig)

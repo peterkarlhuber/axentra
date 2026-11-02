@@ -78,13 +78,18 @@ class IdentityService:
         return tx.one(f"SELECT {_USER_COLUMNS} FROM {_USER_FROM} WHERE lower(u.email) = lower(%s)", (email,))
 
     def create_user(
-        self, tx: Tx, *, email: str, name: str = "", password: str | None = None, locale: str = "en"
+        self, tx: Tx, *, email: str | None, name: str = "", password: str | None = None, locale: str = "en"
     ) -> str:
-        email = normalize_email(email)
-        if password is not None:
-            check_policy(password, min_length=self.settings.security.password_min_length, email=email)
-        if self.find_user_by_email(tx, email):
-            raise Conflict("a user with this email address exists")
+        """Create a user; ``email=None`` creates a user without an email address (no password)."""
+        if email is None:
+            if password is not None:
+                raise ValidationFailed("a password needs an email address")
+        else:
+            email = normalize_email(email)
+            if password is not None:
+                check_policy(password, min_length=self.settings.security.password_min_length, email=email)
+            if self.find_user_by_email(tx, email):
+                raise Conflict("a user with this email address exists")
         user_id = new_id("usr")
         tx.execute(
             "INSERT INTO axentra_users (id, email, name, password_hash, locale) VALUES (%s, %s, %s, %s, %s)",
@@ -182,6 +187,8 @@ class IdentityService:
             row = tx.one_or_404(
                 "SELECT email, password_hash FROM axentra_users WHERE id = %s FOR UPDATE", (user_id,)
             )
+            if not row["email"]:
+                raise Forbidden("users without an email address cannot use a password")
             if not row["password_hash"]:
                 self_service_mode = self.settings.security.first_password  # a mode, not a secret
                 if self_service_mode == "disabled":
@@ -310,11 +317,11 @@ class IdentityService:
 
     def create_setup_token(self) -> str:
         token = "axsetup_" + new_token()
-        expires = utcnow() + timedelta(minutes=self.settings.security.setup_token_ttl_minutes)
         with self.db.transaction(DbScope.platform()) as tx:
             tx.execute(
-                "INSERT INTO axentra_setup_tokens (token_hash, expires_at) VALUES (%s, %s)",
-                (hash_token(token), expires),
+                "INSERT INTO axentra_setup_tokens (token_hash, expires_at)"
+                " VALUES (%s, now() + make_interval(mins => %s))",
+                (hash_token(token), self.settings.security.setup_token_ttl_minutes),
             )
             self.audit.record(tx, Principal.system("cli"), "identity.setup_token.create")
         return token
@@ -455,12 +462,22 @@ class IdentityService:
         token = new_token()
         session_id = new_id("ses")
         csrf = new_token(24)
-        expires = utcnow() + timedelta(hours=self.settings.security.session_ttl_hours)
         with self.db.transaction(DbScope.platform()) as tx:
-            tx.execute(
+            # Expiry is computed and later checked on the database clock (never the app host's),
+            # so clock skew between API hosts and PostgreSQL cannot lengthen or shorten sessions.
+            expires = tx.scalar(
                 "INSERT INTO axentra_sessions (id, user_id, token_hash, csrf_token, auth_method, ip, user_agent, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (session_id, user_id, hash_token(token), csrf, method, ip, user_agent[:400], expires),
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s)) RETURNING expires_at",
+                (
+                    session_id,
+                    user_id,
+                    hash_token(token),
+                    csrf,
+                    method,
+                    ip,
+                    user_agent[:400],
+                    self.settings.security.session_ttl_hours,
+                ),
             )
             tx.execute("UPDATE axentra_users SET last_login_at = now() WHERE id = %s", (user_id,))
             self.audit.record(
@@ -487,28 +504,23 @@ class IdentityService:
     def resolve_session(
         self, token: str, *, request_id: str | None = None, ip: str | None = None
     ) -> tuple[Principal, SessionInfo]:
-        idle = timedelta(minutes=self.settings.security.session_idle_minutes)
-        now = utcnow()
         with self.db.transaction(DbScope.platform()) as tx:
+            # Absolute and idle expiry are compared with the database clock (see start_session).
             row = tx.one(
-                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.last_seen_at, s.revoked_at, u.status"
+                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.revoked_at, u.status,"
+                " s.expires_at > now() AND s.last_seen_at + make_interval(mins => %s) > now() AS live,"
+                " now() - s.last_seen_at > %s AS touch"
                 " FROM axentra_sessions s JOIN axentra_users u ON u.id = s.user_id WHERE s.token_hash = %s",
-                (hash_token(token),),
+                (self.settings.security.session_idle_minutes, _LAST_SEEN_RESOLUTION, hash_token(token)),
             )
-            if (
-                row is None
-                or row["revoked_at"] is not None
-                or row["status"] != "active"
-                or row["expires_at"] <= now
-                or row["last_seen_at"] + idle <= now
-            ):
+            if row is None or row["revoked_at"] is not None or row["status"] != "active" or not row["live"]:
                 raise Unauthenticated("the session is invalid or expired")
-            if now - row["last_seen_at"] > _LAST_SEEN_RESOLUTION:
+            if row["touch"]:
                 tx.execute("UPDATE axentra_sessions SET last_seen_at = now() WHERE id = %s", (row["id"],))
         user = self.get_user(row["user_id"])
         role = PlatformRole(user.platform_role) if user.platform_role else None
         principal = Principal(
-            actor=Actor(ActorKind.USER, user.id, user.email),
+            actor=Actor(ActorKind.USER, user.id, user.display),
             platform_role=role,
             session_id=row["id"],
             request_id=request_id,
@@ -600,8 +612,24 @@ class IdentityService:
         email_verified: bool,
         allow_signup: bool,
         allowed_domains: list[str],
+        link_by_verified_email: bool = True,
+        allow_signup_without_email: bool = False,
     ) -> str:
-        """Find the user for an external identity; link by verified email or create when allowed."""
+        """Find the user for an external identity ``(provider, subject)``; for an unknown one,
+        link an existing user or create one:
+
+        - With a verified email and ``link_by_verified_email`` (default), an existing user with
+          that email is linked. Otherwise a new user is created when ``allow_signup`` is set or an
+          open invitation exists for the email.
+        - With ``link_by_verified_email=False``, an unknown identity is never linked to an existing
+          user. A new user is created (``allow_signup`` or an invitation); if another user already
+          has the email, the new user is created *without* an email address (only
+          ``allow_signup``; the identity keeps the email for reference), so the existing account is
+          never taken over and never merged.
+        - Without a verified email, a user without an email address is created only when both
+          ``allow_signup`` and ``allow_signup_without_email`` are set; otherwise ``403
+          email_not_verified``.
+        """
         with self.db.transaction(DbScope.platform()) as tx:
             row = tx.one(
                 "SELECT user_id FROM axentra_user_identities WHERE provider = %s AND subject = %s",
@@ -610,31 +638,48 @@ class IdentityService:
             if row:
                 user_id: str = row["user_id"]
             else:
-                if not email or not email_verified:
+                verified = bool(email and email_verified)
+                if verified:
+                    email = normalize_email(email)
+                    if allowed_domains and email.rpartition("@")[2] not in allowed_domains:
+                        raise Forbidden(
+                            "this email domain may not log in", extra={"reason": "domain_not_allowed"}
+                        )
+                elif not (allow_signup and allow_signup_without_email):
                     raise Forbidden(
                         "the identity provider did not confirm an email address",
                         extra={"reason": "email_not_verified"},
                     )
-                email = normalize_email(email)
-                if allowed_domains and email.rpartition("@")[2] not in allowed_domains:
-                    raise Forbidden(
-                        "this email domain may not log in", extra={"reason": "domain_not_allowed"}
-                    )
-                existing = self.find_user_by_email(tx, email)
-                if existing:
+                existing = self.find_user_by_email(tx, email) if verified else None
+                user_email: str | None = email if verified else None
+                how = "created"
+                if existing and link_by_verified_email:
                     user_id = existing["id"]
-                elif allow_signup or tx.one(
-                    "SELECT 1 FROM axentra_invitations WHERE lower(email) = lower(%s) AND accepted_at IS NULL"
-                    " AND revoked_at IS NULL AND expires_at > now() LIMIT 1",
-                    (email,),
+                    how = "linked_by_email"
+                elif existing:
+                    if not allow_signup:
+                        raise Forbidden(
+                            "no account exists for this login", extra={"reason": "signup_disabled"}
+                        )
+                    user_id = self.create_user(tx, email=None, name=name)
+                    user_email = None
+                    how = "created_without_email"
+                elif (
+                    not verified
+                    or allow_signup
+                    or tx.one(
+                        "SELECT 1 FROM axentra_invitations WHERE lower(email) = lower(%s) AND accepted_at IS NULL"
+                        " AND revoked_at IS NULL AND expires_at > now() LIMIT 1",
+                        (email,),
+                    )
                 ):
-                    user_id = self.create_user(tx, email=email, name=name)
+                    user_id = self.create_user(tx, email=user_email, name=name)
                 else:
                     raise Forbidden("no account exists for this login", extra={"reason": "signup_disabled"})
                 tx.execute(
                     "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
                     " VALUES (%s, %s, %s, %s, %s)",
-                    (new_id("uid"), user_id, provider, subject, email),
+                    (new_id("uid"), user_id, provider, subject, email if verified else ""),
                 )
                 self.audit.record(
                     tx,
@@ -642,10 +687,99 @@ class IdentityService:
                     "identity.external.link",
                     target_type="user",
                     target_id=user_id,
-                    details={"provider": provider},
-                    actor_override=("user", user_id, email),
+                    details={"provider": provider, "how": how},
+                    actor_override=("user", user_id, user_email or name[:200]),
                 )
             status = tx.scalar("SELECT status FROM axentra_users WHERE id = %s", (user_id,))
             if status != "active":
                 raise Forbidden("this account is disabled", extra={"reason": "account_disabled"})
         return user_id
+
+    # -- explicit linking (migrations, imports) ---------------------------------------------------
+
+    @staticmethod
+    def _require_platform_admin(principal: Principal) -> None:
+        if principal.platform_role is not PlatformRole.ADMIN:
+            raise Forbidden("only platform admins can manage external identities")
+
+    @staticmethod
+    def _check_identity(provider: str, subject: str) -> None:
+        if not provider or len(provider) > 500 or not subject or len(subject) > 500:
+            raise ValidationFailed("provider and subject must be 1-500 characters")
+
+    def create_external_user(
+        self,
+        principal: Principal,
+        *,
+        provider: str,
+        subject: str,
+        email: str | None = None,
+        email_verified: bool = False,
+        name: str = "",
+    ) -> User:
+        """Create a user together with its external identity (for migrations and imports).
+
+        ``provider`` is the issuer the OIDC login uses (``oidc[].issuer``). The email becomes the
+        user's address only when ``email_verified``; otherwise the user has no email address and
+        the identity row keeps the unverified value for reference. Refuses an identity that
+        exists (``409``) and a verified email that another user has (``409``). Platform admins
+        (or a system principal) only; audited as ``identity.external.create``."""
+        self._require_platform_admin(principal)
+        self._check_identity(provider, subject)
+        user_email = normalize_email(email) if email and email_verified else None
+        with self.db.transaction(DbScope.platform()) as tx:
+            if tx.one(
+                "SELECT 1 FROM axentra_user_identities WHERE provider = %s AND subject = %s",
+                (provider, subject),
+            ):
+                raise Conflict("this external identity is already linked")
+            user_id = self.create_user(tx, email=user_email, name=name)
+            tx.execute(
+                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (new_id("uid"), user_id, provider, subject, (email or "").strip()[:320]),
+            )
+            self.audit.record(
+                tx,
+                principal,
+                "identity.external.create",
+                target_type="user",
+                target_id=user_id,
+                details={"provider": provider, "email_verified": user_email is not None},
+            )
+        return self.get_user(user_id)
+
+    def link_identity(self, principal: Principal, user_id: str, *, provider: str, subject: str) -> None:
+        """Link an external identity to an existing user (for migrations and imports).
+
+        Refuses an identity that is already linked (to this or another user, ``409``) and an
+        unknown user (``404``). Platform admins (or a system principal) only; audited as
+        ``identity.external.link``."""
+        self._require_platform_admin(principal)
+        self._check_identity(provider, subject)
+        with self.db.transaction(DbScope.platform()) as tx:
+            tx.one_or_404("SELECT id FROM axentra_users WHERE id = %s FOR UPDATE", (user_id,), what="user")
+            inserted = tx.one(
+                "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES (%s, %s, %s, %s)"
+                " ON CONFLICT (provider, subject) DO NOTHING RETURNING id",
+                (new_id("uid"), user_id, provider, subject),
+            )
+            if inserted is None:
+                raise Conflict("this external identity is already linked")
+            self.audit.record(
+                tx,
+                principal,
+                "identity.external.link",
+                target_type="user",
+                target_id=user_id,
+                details={"provider": provider, "how": "explicit"},
+            )
+
+    def list_identities(self, user_id: str) -> list[Row]:
+        """The external identities of a user (provider, subject, email, created_at)."""
+        with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+            return tx.all(
+                "SELECT provider, subject, email, created_at FROM axentra_user_identities WHERE user_id = %s"
+                " ORDER BY created_at, id",
+                (user_id,),
+            )

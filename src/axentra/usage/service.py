@@ -653,6 +653,41 @@ class UsageService:
             enforce=True,
         )
 
+    def record_in(
+        self,
+        tx: Tx,
+        principal: Principal,
+        product_id: str,
+        tenant_id: str,
+        meter: str,
+        quantity: Any,
+        idempotency_key: str,
+        occurred_at: datetime | None = None,
+        properties: dict[str, Any] | None = None,
+        *,
+        enforce: bool = False,
+    ) -> RecordResult:
+        """Record usage inside the caller's transaction (e.g. one joined with
+        :func:`axentra.data.database.join`), so it commits or rolls back with the caller's changes.
+
+        Same checks and idempotency as :meth:`record` (``enforce=True``: as
+        :meth:`check_and_record`): replaying an idempotency key returns the stored event and adds
+        nothing. ``tx`` must be in platform scope, the product's scope or this tenant's scope.
+        Authorization is read on a separate pooled connection (committed memberships and keys)."""
+        tx.require_scope(product_id, tenant_id)
+        return self._record(
+            principal,
+            product_id,
+            tenant_id,
+            meter,
+            quantity,
+            idempotency_key,
+            occurred_at,
+            properties,
+            enforce=enforce,
+            tx=tx,
+        )
+
     def _record(
         self,
         principal: Principal,
@@ -665,6 +700,7 @@ class UsageService:
         properties: dict[str, Any] | None,
         *,
         enforce: bool,
+        tx: Tx | None = None,
     ) -> RecordResult:
         self.authz.require(principal, "usage:record", product_id, tenant_id)
         _check_key(meter)
@@ -681,10 +717,11 @@ class UsageService:
             }
         )
         at = self._occurred_at(occurred_at)
-        with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
-            m = self._meter_by_key(tx, product_id, meter)
+
+        def run(t: Tx) -> RecordResult:
+            m = self._meter_by_key(t, product_id, meter)
             return self._record_tx(
-                tx,
+                t,
                 principal,
                 product_id,
                 tenant_id,
@@ -696,6 +733,11 @@ class UsageService:
                 props,
                 enforce=enforce,
             )
+
+        if tx is not None:
+            return run(tx)
+        with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as own:
+            return run(own)
 
     def list_events(
         self,

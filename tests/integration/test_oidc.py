@@ -571,3 +571,57 @@ def test_error_redirect_goes_to_login_page_of_return_to_origin(w: OidcWorld) -> 
     w.idp.tamper = {"aud": "other"}
     _, r = w.login(params={"return_to": "https://evil.example/app"}, email="e@example.com")
     assert r.headers["location"] == "/login?login_error=login_failed"
+
+
+# -- users without email and account linking options ---------------------------------------------
+
+
+def test_identity_without_email_needs_explicit_opt_in(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()  # allow_signup = true, allow_signup_without_email = false (default)
+    _, r = w.login("anon-sub", email=None)
+    assert _error(r) == "email_not_verified"
+    assert _identities(w) == []
+
+
+def test_signup_without_email(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world(allow_signup_without_email=True)
+    b, r = w.login("anon-sub", email=None, name="No Mail")
+    assert _error(r) is None
+    session = b.get("/v1/auth/session").json()
+    user = session["user"]
+    assert user["email"] is None and user["name"] == "No Mail"
+    b.csrf = session["csrf_token"]
+    # The next login with the same subject finds the same user; a second identity another user.
+    b2, _ = w.login("anon-sub", email=None)
+    assert b2.get("/v1/auth/session").json()["user"]["id"] == user["id"]
+    b3, _ = w.login("other-sub", email=None)
+    assert b3.get("/v1/auth/session").json()["user"]["id"] != user["id"]
+    # Listed by the admin with a null email; no password can be set.
+    listed = {u["id"]: u for u in w.admin.get("/v1/users").json()["items"]}
+    assert listed[user["id"]]["email"] is None
+    r = b.post("/v1/me/password", json={"current_password": "", "new_password": "a long new password 1"})
+    assert r.status_code == 403 and "email address" in r.json()["detail"], r.text
+
+
+def test_link_by_verified_email_disabled(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world(link_by_verified_email=False)
+    uid = w.user("bob@example.com")
+    b, r = w.login("bob-sub", email="bob@example.com")
+    assert _error(r) is None
+    new_user = b.get("/v1/auth/session").json()["user"]
+    # Never linked to the existing account: a separate user without an email address.
+    assert new_user["id"] != uid and new_user["email"] is None
+    assert w.login_as("bob@example.com").get("/v1/auth/session").json()["user"]["id"] == uid
+    ids = _identities(w)
+    assert ids[0]["user_id"] == new_user["id"] and ids[0]["email"] == "bob@example.com"
+    # A free address is used for the new user.
+    b2, _ = w.login("carol-sub", email="carol@example.com")
+    assert b2.get("/v1/auth/session").json()["user"]["email"] == "carol@example.com"
+
+
+def test_link_by_verified_email_disabled_without_signup(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world(link_by_verified_email=False, allow_signup=False)
+    w.user("bob@example.com")
+    _, r = w.login("bob-sub", email="bob@example.com")
+    assert _error(r) == "signup_disabled"
+    assert _identities(w) == []

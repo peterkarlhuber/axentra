@@ -16,6 +16,7 @@ The HTTP API (``axentra.api``) is a thin layer over exactly these services.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,11 +26,11 @@ from axentra.access.authorizer import Authorizer
 from axentra.access.roles import RoleService
 from axentra.audit.log import AuditLog
 from axentra.billing.service import BillingService
-from axentra.config.secrets import SecretBox, keyring_from_settings
+from axentra.config.secrets import Keyring, SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
 from axentra.core.errors import ConfigurationError
 from axentra.data.database import Database
-from axentra.data.migrations import Migration, MigrationRunner, discover_migrations
+from axentra.data.migrations import Migration, MigrationRunner, SchemaCheck, discover_migrations
 from axentra.data.record_service import RecordService
 from axentra.data.reencrypt import EncryptedColumn, ReencryptReport, builtin_encrypted_columns, reencrypt
 from axentra.identity.service import IdentityService
@@ -85,8 +86,13 @@ def _dev_keyring_spec(settings: Settings) -> str | None:
 
 
 class Axentra:
-    def __init__(self, settings: Settings, *, database: Database | None = None) -> None:
-        settings.validate_security()
+    def __init__(
+        self, settings: Settings, *, database: Database | None = None, keyring: Keyring | None = None
+    ) -> None:
+        """``database``: a prepared :class:`Database` (default: built from ``settings.database``).
+        ``keyring``: the master keys, when the embedding application loads them itself (default:
+        ``security.master_keys_ref`` / ``master_keys``; then the ref is not required in production)."""
+        settings.validate_security(keyring_injected=keyring is not None)
         self.settings = settings
         self.db = database or Database(
             _database_url(settings),
@@ -94,8 +100,14 @@ class Axentra:
             max_size=settings.database.pool_max,
             statement_timeout_ms=settings.database.statement_timeout_ms,
         )
-        self.keyring = keyring_from_settings(
-            _dev_keyring_spec(settings), settings.security.master_keys_ref, production=settings.is_production
+        self.keyring = (
+            keyring
+            if keyring is not None
+            else keyring_from_settings(
+                _dev_keyring_spec(settings),
+                settings.security.master_keys_ref,
+                production=settings.is_production,
+            )
         )
         self.secrets = SecretBox(self.keyring)
         self.audit = AuditLog(self.db)
@@ -189,8 +201,40 @@ class Axentra:
         )
         return runner
 
-    def migrate(self) -> list[str]:
-        return self.migration_runner().migrate()
+    def migrate(
+        self,
+        *,
+        allow_newer: bool = False,
+        before_apply: Callable[[list[Migration]], None] | None = None,
+    ) -> list[str]:
+        """Apply pending migrations (see :meth:`MigrationRunner.migrate` for the arguments)."""
+        return self.migration_runner().migrate(allow_newer=allow_newer, before_apply=before_apply)
+
+    def schema_status(self, namespaces: Sequence[str] | None = None) -> SchemaCheck:
+        """Compare the database schema with the code (read through the application pool)."""
+        runner = self.migration_runner()
+        with self.db.pool.connection() as conn:
+            try:
+                return runner.check(namespaces, conn=conn)
+            finally:
+                conn.rollback()
+
+    def require_current_schema(self, namespaces: Sequence[str] | None = None) -> SchemaCheck:
+        """Serving gate: raise ``SchemaNotCurrent`` on pending or unknown migrations."""
+        runner = self.migration_runner()
+        with self.db.pool.connection() as conn:
+            try:
+                return runner.require_current(namespaces, conn=conn)
+            finally:
+                conn.rollback()
+
+    def schema_ready(self) -> bool:
+        """Readiness check: True when the schema is current (False on any error)."""
+        try:
+            return self.schema_status().current
+        except Exception:
+            logger.warning("schema check failed", exc_info=True)
+            return False
 
     def register_encrypted_column(self, column: EncryptedColumn) -> None:
         """Product backends declare their SecretBox columns so key rotation covers them."""
@@ -209,6 +253,12 @@ class Axentra:
         self.db.check_role(
             allow_superuser=self.settings.database.allow_superuser or not self.settings.is_production
         )
+        if self.settings.database.require_current_schema:
+            try:
+                self.require_current_schema()
+            except Exception:
+                self.db.close()
+                raise
         if self.settings.mode is DeploymentMode.SINGLE:
             self.tenancy.ensure_single_product()
         self._started = True

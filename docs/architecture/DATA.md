@@ -44,7 +44,7 @@ also visible in tenant scope of the same product (see
 - Applied migrations are recorded in `axentra_schema_migrations (namespace, version, name,
   checksum, applied_at)`. A changed file that was already applied stops the run
   ("changed after it was applied"): never edit an applied migration, add a new one.
-- Each migration runs in its own transaction; concurrent runners (several containers starting at
+- Each migration runs in its own transaction (except `-- axentra:no-transaction` files, below); concurrent runners (several containers starting at
   once) serialize on a PostgreSQL advisory lock.
 - Forward only. Rolling back means restoring a backup taken before the migration
   ([BACKUP_RESTORE](../operations/BACKUP_RESTORE.md)); write migrations so that the previous
@@ -59,6 +59,29 @@ also visible in tenant scope of the same product (see
   name; off with `database.migration_entry_points = false`). `ax.migrate()` additionally applies
   migrations passed to `register_migrations`. The same migration registered twice is applied
   once; two different migrations claiming one `namespace:version` are refused.
+- **Schema newer than code.** `MigrationRunner.check(namespaces=None)` (CLI
+  `axentra migrate --check [--namespace NS]`, exit code 3 when not current) reports per namespace
+  the applied versions, the pending ones (code newer than schema), the **unknown** ones (applied in
+  the database but not in the code: the schema is newer than the code, e.g. after rolling back the
+  application) and changed checksums. `migrate()` refuses with a `ConfigurationError` while a
+  namespace the code registers has unknown versions (`allow_newer=True` / `--allow-newer`
+  overrides) and refuses changed checksums before applying anything. Namespaces recorded in the
+  database that this process does not register at all (another product's schema in a shared
+  database) are listed with `registered: false` and never block, unless named explicitly.
+- **Pre-migration hook.** `migrate(before_apply=fn)` (also `ax.migrate(before_apply=fn)`) calls
+  `fn(pending)` once, under the migration advisory lock, only when something is pending, e.g. to
+  take a backup. If it raises, nothing is applied and the error propagates.
+- **Serving gate.** `MigrationRunner.require_current(namespaces)` / `ax.require_current_schema()`
+  raise `SchemaNotCurrent` (`503`, code `schema_not_current`) on pending, unknown or changed
+  migrations. With `database.require_current_schema = true` (default false), `Axentra.start()`
+  runs the gate (through the application pool, which needs `SELECT` on
+  `axentra_schema_migrations`) and `/v1/health/ready` reports a `schema` check.
+- **Non-transactional steps.** A file whose leading comment lines contain
+  `-- axentra:no-transaction` runs outside a transaction, statement by statement in autocommit
+  mode (for `CREATE INDEX CONCURRENTLY`, or `ALTER TYPE ... ADD VALUE` before PostgreSQL 12), and
+  is recorded after its last statement. It cannot be rolled back halfway: make every statement
+  re-runnable (`IF NOT EXISTS`, `CREATE OR REPLACE`). Statements are split at top-level
+  semicolons (quotes, dollar quotes and comments are respected).
 - Backups: `pg_dump` must run as a superuser or a dedicated backup role with `BYPASSRLS`
   (`pg_read_all_data`); forced RLS makes dumps as the owner or the application role fail
   ([BACKUP_RESTORE](../operations/BACKUP_RESTORE.md#database-backup)).

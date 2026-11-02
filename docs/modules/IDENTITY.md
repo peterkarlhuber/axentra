@@ -10,10 +10,18 @@ Connect), HTTP: `src/axentra/api/routes/auth.py`, `users.py`.
 
 ## Concepts
 
-- **User** (`axentra_users`): email (unique, case-insensitive), name, locale, preferences,
-  `status` `active|disabled`, optional Argon2id password hash, optional platform role
+- **User** (`axentra_users`): email (unique, case-insensitive, **optional**), name, locale,
+  preferences, `status` `active|disabled`, optional Argon2id password hash, optional platform role
   (`platform_admin`, `platform_viewer`). A user created by an OIDC login has no password
   (`has_password: false`).
+- **Users without an email address** (`email: null`, migration `0007`): created by an OIDC login
+  whose provider sends no verified email (only with `allow_signup_without_email`), by an OIDC
+  login with `link_by_verified_email = false` whose address belongs to another user, or by
+  `create_user(email=None)` / `create_external_user(...)` in library code. They cannot log in with
+  a password or set one, and cannot accept an invitation (invitations are bound to an address);
+  add them to tenants with `set_member(user_id=...)`. Notifications to them by user id are
+  recorded as `suppressed` with `last_error = "the recipient has no email address"`. Audit events
+  and actor labels use the name (or the id) instead of the address.
 - **External identity** (`axentra_user_identities`): the pair (issuer, subject) of an OIDC
   provider, linked to exactly one user. The email address is never the identity key.
 - **Session** (`axentra_sessions`): the browser holds a random 256-bit token in an `HttpOnly`,
@@ -47,6 +55,10 @@ a stolen session from becoming a permanent password login that bypasses the iden
 
 - Absolute lifetime `security.session_ttl_hours` (default 12), idle timeout
   `security.session_idle_minutes` (default 120; `last_seen_at` is updated at most once a minute).
+- **Database clock.** `expires_at` is computed as `now() + ttl` in PostgreSQL, and absolute and
+  idle expiry are checked against PostgreSQL's `now()`, never the API host's clock, so clock skew
+  between hosts cannot lengthen or shorten sessions. Setup tokens and invitations follow the same
+  rule. Login throttling windows and the ten-minute OIDC login state still use the host clock.
 - Changing requests with the session cookie need the `X-Axentra-CSRF` header (from
   `GET /v1/auth/session`) and an allowed `Origin`.
 - **Revocation semantics.** A session ends on logout, on revocation (own sessions via
@@ -104,7 +116,16 @@ redirects and accept at most 1 MiB.
 
 - A known (issuer, subject) logs in as its user (even if the email changed at the provider).
 - Otherwise the email is used only when the ID token says `email_verified: true` (the boolean,
-  not the string). A verified email of an existing user links the identity to that user.
+  not the string). A verified email of an existing user links the identity to that user
+  (`link_by_verified_email = true`, the default).
+- With `link_by_verified_email = false`, an unknown identity is **never** linked to an existing
+  user by email. It gets a new user: with the address when it is free, or **without an address**
+  when another user already has it (needs `allow_signup`; otherwise `signup_disabled`). The
+  existing account is never touched; the identity row keeps the verified address for reference,
+  and an operator can link identities explicitly (see Library usage).
+- An identity without a verified email creates a user without an address only when the provider
+  has both `allow_signup = true` and `allow_signup_without_email = true` (not combinable with
+  `allowed_email_domains`); otherwise the login is refused with `email_not_verified`.
 - An unknown verified email creates a user when the provider has `allow_signup = true`, or when an
   open invitation exists for that email. With `invitation=<token>` on `start`, the invitation is
   also accepted right after the login (tenant membership with the invited role); if accepting
@@ -196,7 +217,8 @@ allow_signup = true
 Fields: `id` (lowercase, digits, dashes; part of the redirect URI), `name` (shown on the login
 page via `GET /v1/meta`), `issuer`, `client_id`, `client_secret_ref` / `client_secret` (inline only
 outside production), `scopes` (default `openid email profile`), `allow_signup` (default false),
-`allowed_email_domains`, `token_endpoint_auth_method` (`client_secret_basic` default,
+`allowed_email_domains`, `link_by_verified_email` (default true), `allow_signup_without_email`
+(default false, needs `allow_signup`), `token_endpoint_auth_method` (`client_secret_basic` default,
 `client_secret_post`, or `none` for a public client using PKCE only).
 
 Provider notes: Entra ID v2 ID tokens usually carry no `email_verified` claim. Axentra then
@@ -228,6 +250,24 @@ result = ax.oidc.finish("keycloak", state=state, code=code, error=None,
                         browser_state=cookie_value, ip="203.0.113.7", user_agent="...")
 # -> result.session.token is the session token, result.return_to the target
 ```
+
+Imports and migrations create or link external identities explicitly (platform admins or a
+system principal; audited as `identity.external.create` / `identity.external.link`; an identity
+that exists is refused with `409`):
+
+```python
+from axentra.core.context import Principal
+
+system = Principal.system("import")
+user = ax.identity.create_external_user(
+    system, provider="https://sso.example.com/realms/acme", subject="248289761001",
+    email="jane@example.com", email_verified=True, name="Jane",
+)  # email_verified=False (or no email): the user has no address
+ax.identity.link_identity(system, user.id, provider="https://login.example.org", subject="abc")
+ax.identity.list_identities(user.id)
+```
+
+`provider` is the issuer string an OIDC login uses (`oidc[].issuer`).
 
 `ax.oidc` is `None` when no providers are configured. Tests inject an `httpx` transport with
 `ax.oidc.use_transport(transport)`; no network is used then.
@@ -271,4 +311,5 @@ Users endpoints (`/v1/me`, `/v1/users`) are described in the OpenAPI document.
 - No `private_key_jwt` client authentication, no `prompt`/`login_hint`/`acr_values` parameters.
 - No per-tenant providers: providers are configured per installation.
 - `amr`/`acr` (MFA evidence) are not evaluated.
-- No UI for linking several identities to one user or for unlinking.
+- No UI or HTTP API for linking several identities to one user or for unlinking (library only:
+  `create_external_user`, `link_identity`).

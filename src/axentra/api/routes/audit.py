@@ -132,6 +132,8 @@ def effective_settings(principal: CurrentPrincipal, ax: Ax) -> EffectiveSettings
                 "issuer": p.issuer,
                 "allow_signup": p.allow_signup,
                 "allowed_email_domains": p.allowed_email_domains,
+                "link_by_verified_email": p.link_by_verified_email,
+                "allow_signup_without_email": p.allow_signup_without_email,
             }
             for p in s.oidc
         ],

@@ -10,11 +10,20 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from axentra.core.errors import AxentraError
-from axentra.core.redaction import redact_text
+from axentra.core.errors import PROBLEM_BASE, AxentraError, ProblemInfo, problem_details
+from axentra.core.errors import problem as make_problem
+
+__all__ = [
+    "PROBLEM_BASE",
+    "axentra_error_handler",
+    "http_error_handler",
+    "problem",
+    "problem_response",
+    "unhandled_error_handler",
+    "validation_error_handler",
+]
 
 logger = logging.getLogger("axentra.http")
-PROBLEM_BASE = "https://axentra.dev/problems/"
 _STATUS_CODES = {
     400: "bad_request",
     401: "unauthenticated",
@@ -28,25 +37,25 @@ _STATUS_CODES = {
 }
 
 
+def problem_response(request: Request, info: ProblemInfo) -> JSONResponse:
+    """Render a :class:`~axentra.core.errors.ProblemInfo` as ``application/problem+json``."""
+    return JSONResponse(
+        info.body(request_id=getattr(request.state, "request_id", None)),
+        status_code=info.status,
+        media_type="application/problem+json",
+        headers=info.headers or None,
+    )
+
+
 def problem(request: Request, status: int, code: str, title: str, detail: str, **extra: Any) -> JSONResponse:
-    body = {
-        "type": PROBLEM_BASE + code,
-        "title": title,
-        "status": status,
-        "code": code,
-        "detail": redact_text(detail),
-        "request_id": getattr(request.state, "request_id", None),
-        **extra,
-    }
-    headers = {"Retry-After": "60"} if status == 429 else None
-    return JSONResponse(body, status_code=status, media_type="application/problem+json", headers=headers)
+    return problem_response(request, make_problem(status, code, title, detail, extra=extra))
 
 
 async def axentra_error_handler(request: Request, exc: AxentraError) -> JSONResponse:
-    if exc.status >= 500:
+    info = problem_details(exc)
+    if info.internal:
         logger.error("internal error: %s", exc, exc_info=exc)
-        return problem(request, 500, "internal", "Internal error", "An internal error occurred.")
-    return problem(request, exc.status, exc.code, exc.title, exc.detail, **exc.extra)
+    return problem_response(request, info)
 
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -63,4 +72,4 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> J
 
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error("unhandled error", exc_info=exc)
-    return problem(request, 500, "internal", "Internal error", "An internal error occurred.")
+    return problem_response(request, problem_details(exc))

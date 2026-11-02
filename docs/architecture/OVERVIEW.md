@@ -174,6 +174,9 @@ Boundaries to keep in mind when embedding:
   them from a thread pool, as FastAPI does for `def` routes ([ADR 0004](../adr/0004-sync-core.md)).
 - **One database, one pool per process.** Size `database.pool_max` x processes below the
   server's `max_connections`.
+- **Embedding details** (error mapping for your web layer, running Axentra writes in your own
+  transaction, the schema gate, an injected keyring, version checks):
+  [EMBEDDING](EMBEDDING.md).
 
 ## Repository layout
 
