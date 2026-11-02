@@ -72,6 +72,7 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | Pri | Area | Item |
 |---|---|---|
 | P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md`: generic gaps G-1 (product-defined permissions), G-3, G-4, G-6 (re-encryption registry) and G-7 (per-product content-type policy) are done; G-2 follow-ups are listed above. Nodestro uses Axentra as a library in its server profile (Python 3.11+ only via an extra marker; see nodestro-runtime docs/AXENTRA.md) |
+| P3 | notify | Inbox channel: HTTP routes and an Axentra Studio page (today a host serves it through its own API, as Nodestro does) |
 | P3 | integration | Remaining plan gaps: G-5 (claim token for ownerless tenants, stays Nodestro for now), G-8 (jobs semantics differ from Nodestro's: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss"; Nodestro keeps its own queue) |
 
 ## Known limitations

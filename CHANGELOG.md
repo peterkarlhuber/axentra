@@ -7,6 +7,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 ## [Unreleased]
 
 ### Added
+- Notify: in-app **inbox** channel (migration `0010_notify_inbox`: channel `inbox`, `read_at`).
+  Inbox messages go to a user id, are stored encrypted and final at enqueue (`sent`, provider
+  `inbox`); the dispatcher never claims them, so they never reach a delivery provider.
+  `NotifyService.list_inbox`, `unread_count`, `mark_read` (the caller's own messages only).
+- Observability for embedding hosts: `register_pool_metrics` (several named pools, label `pool`,
+  with `in_use`), `MetricsRegistry.counter_callback` / `CallbackCounter` (host-kept totals as
+  counters), `CachedCallback` (expensive scrape-time values at most once per TTL), `pool_stats`.
 - Embedding Axentra as a library (docs/architecture/EMBEDDING.md):
   - `axentra.core.errors.problem_details(exc)` maps any exception to a framework-independent
     `ProblemInfo` (status, code, title, redacted detail, extra members, headers such as

@@ -2198,7 +2198,8 @@
             "enum": [
               "email",
               "sms",
-              "push"
+              "push",
+              "inbox"
             ],
             "title": "Channel",
             "type": "string"
@@ -2310,6 +2311,18 @@
               }
             ],
             "title": "Provider Message Id"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
           },
           "recipient": {
             "title": "Recipient",
@@ -6051,7 +6064,8 @@
             "enum": [
               "email",
               "sms",
-              "push"
+              "push",
+              "inbox"
             ],
             "title": "Channel",
             "type": "string"
@@ -6171,7 +6185,8 @@
             "enum": [
               "email",
               "sms",
-              "push"
+              "push",
+              "inbox"
             ],
             "title": "Channel",
             "type": "string"
@@ -6250,7 +6265,8 @@
                 "enum": [
                   "email",
                   "sms",
-                  "push"
+                  "push",
+                  "inbox"
                 ],
                 "type": "string"
               },

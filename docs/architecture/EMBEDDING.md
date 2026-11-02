@@ -141,3 +141,17 @@ static `project.version`. Supported ways to read it:
 Pin a compatible range in the host's dependencies (`axentra>=0.y,<0.(y+1)` before 1.0) and compare
 `axentra.API_VERSION` when the host also serves Axentra's HTTP API
 ([VERSIONING](VERSIONING.md)).
+
+## Metrics and notifications of a host
+
+A host that does not serve Axentra's HTTP API still uses its observability and notify modules:
+
+- **Metrics.** Register the host's metrics on `ax.metrics` and render `ax.metrics.render()` from the
+  host's own (protected) endpoint. `register_pool_metrics(ax.metrics, pools, prefix=...)` exports
+  the host's and Axentra's pools by name (one series per distinct pool, so a shared pool appears
+  once), `counter_callback` exposes totals the host counts itself, `CachedCallback` bounds
+  expensive database-derived values. See [OBSERVABILITY](../operations/OBSERVABILITY.md).
+- **In-app notifications.** Templates with channel `inbox` and `enqueue_system(...,
+  idempotency_key=...)` give the host durable, per-user, exactly-once-per-key inbox messages
+  without any delivery provider; the host reads them with `list_inbox` / `mark_read` for its own
+  authenticated users. See [NOTIFY](../modules/NOTIFY.md).
