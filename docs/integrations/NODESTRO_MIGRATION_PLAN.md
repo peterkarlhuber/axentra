@@ -187,8 +187,9 @@ NOTHING` / upsert) so a backfill can be re-run.
 | documents `settings/app` fields `providers.<p>.api_key` (`nodestro:enc:v1:`) | stay in the document, value re-encrypted to `axs1.<kid>....` | section 3.6 | M4 |
 | documents `usage_log` (`UsageEntry`) | `axentra_usage_events` (meters `ai.tokens.input`, `ai.tokens.output`, `ai.cost`) | `idempotency_key` = `nodestro:usage:<entry id>`; amounts as `Decimal`; history backfill optional (Q-9) | M3 |
 | tool approval audit (documents, max 5000 per tenant) | `axentra_audit_events` | `action = 'nodestro.tool_approval.<kind>'`, `actor_kind` user/system, `details` = existing hashes only (`arguments_hash`, never arguments) | M3 |
-| input files on disk `<data_root>/tenants/<id>/...` (`_Blobs`, content-addressed) | `axentra_files` + storage backend (local or S3) | copy per tenant, keep Nodestro's input metadata (documents) and store the Axentra file id beside the old blob id | M8 |
 | `nodestro_jobs`, `nodestro_schedule_firings` | none (G-8 decision, M11 closed) | stay | - |
+| input files on disk `<data_root>/tenants/<id>/...` (`_Blobs`, content-addressed) | `axentra_files` + storage backend (local or S3) | copy per tenant, keep Nodestro's input metadata (documents); the Axentra file id is stored per blob in the tenant collection `file_objects` (one blob is shared by several input files and their cached extraction); implemented: `nodestro_runtime.axentra_storage`, `NODESTRO_FILES_BACKEND` | M8 |
+| `nodestro_jobs`, `nodestro_schedule_firings` | Axentra jobs tables (merged in PR #5) | **drain, do not copy** active jobs (section 7, M11); copy the latest firing slot per schedule so no slot fires twice | M11 |
 | `nodestro_schema_migrations (version, name, applied_at)` | `axentra_schema_migrations (namespace='nodestro', version, name, checksum)` | one-off adoption: insert rows 1-6 with the checksums of the unchanged files | M9 |
 | `nodestro_documents`, `nodestro_files`, `nodestro_chunks`, `nodestro_memory_files`, `nodestro_run_events` | none | stay; get RLS in M10 | - |
 
@@ -293,7 +294,7 @@ map (so custom roles made in Axentra Studio take effect in Nodestro).
 | session | none (hash is the key) | `ses_<26>` | - |
 | API key | `<12 hex>` | `key_<26>` | mapping table (needed by the legacy verifier) |
 | job | `bigserial` | jobs module (open) | not copied |
-| file | sha256 prefix (16 hex) | `fil_<26>` | Nodestro input metadata stores both |
+| file | sha256 prefix (16 hex) | `fil_<26>` | per-blob mapping document (`file_objects`), keyed by the blob id |
 
 Reads that resolve a Nodestro id go through one cached function per process (`nodestro_axentra_ids` is small and
 append-only).
