@@ -72,7 +72,8 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | Pri | Area | Item |
 |---|---|---|
 | P2 | integration | `docs/integrations/NODESTRO_MIGRATION_PLAN.md`: generic gaps G-1 (product-defined permissions), G-3, G-4, G-6 (re-encryption registry) and G-7 (per-product content-type policy) are done; G-2 follow-ups are listed above. Nodestro uses Axentra as a library in its server profile (Python 3.11+ only via an extra marker; see nodestro-runtime docs/AXENTRA.md) |
-| P3 | integration | Remaining plan gaps: G-5 (claim token for ownerless tenants, stays Nodestro for now), G-8 (jobs semantics differ from Nodestro's: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss"; Nodestro keeps its own queue) |
+| P3 | integration | Remaining plan gap: G-5 (claim token for ownerless tenants, stays Nodestro for now) |
+| Rejected | jobs | G-8 "jobs module with Nodestro's semantics" (configurable at-most-once delivery, unique active key per `(tenant, kind, ref)`, interrupt-on-lease-loss callbacks, product capacity gates): rejected by architecture decision 2026-11-02. Nodestro's no-duplicate guarantee lives in its run fence, interrupted state, tool journal and approval checkpoints, not in the queue, so these options would be Nodestro semantics in a generic module that no other product needs; Nodestro keeps its run queue permanently (M11 closed; nodestro-runtime `docs/AXENTRA.md`). Axentra jobs stay at least once (`max_attempts=1` for no retry); evidence: `tests/integration/test_job_delivery_semantics.py` |
 
 ## Known limitations
 

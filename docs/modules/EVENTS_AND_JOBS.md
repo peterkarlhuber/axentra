@@ -301,6 +301,13 @@ with `webhook_allow_private_targets_in_production`), `webhook_allow_http`
 ## Limitations
 
 - No exactly-once execution and no global ordering (see Guarantees).
+- No at-most-once mode beyond `max_attempts=1` (a lost lease then makes the job `dead`, but the
+  old worker's handler is not stopped and nothing marks the product's own record), and no unique
+  key for *active* jobs only (idempotency keys deduplicate until retention). A product whose work
+  must never repeat a paid or external effect keeps a queue with those semantics of its own
+  (Nodestro does for its runs, gap G-8) or makes every effect idempotent at its target.
+  `tests/integration/test_job_delivery_semantics.py` shows the at-least-once behaviour after a
+  lost lease with a still-running handler.
 - The webhook timeout applies to connect and to each socket read, not to the whole request. A
   server that trickles bytes can hold a worker slot longer, bounded by
   `webhook_response_max_bytes`.

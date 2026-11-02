@@ -48,7 +48,7 @@ commits and re-checks every finding here.
 | Billing | `axentra.billing` | Not needed by Nodestro today |
 | Notifications (e-mail, in-app mailbox, preferences) | `axentra.notify.service.NotifyService` | Yes (new function for Nodestro) |
 | Metrics, tracing | `axentra.observability` | Yes |
-| Events, jobs, webhooks, leader lock, schedules | merged after this analysis (axentra PR #5, `33dce58`); Nodestro-specific semantics still to verify | **Partly blocked** (gap G-8) |
+| Events, jobs, webhooks, leader lock, schedules | merged after this analysis (axentra PR #5, `33dce58`) | Generic work only; Nodestro's run queue stays (G-8 decided 2026-11-02) |
 | Realtime (SSE) | not present (`docs/TODO.md` P2) | Blocked |
 
 ## 1. Nodestro functions that could use Axentra
@@ -69,8 +69,8 @@ services inside Nodestro's processes, against the same PostgreSQL database (deci
 | F-9 | Migration runner | `PostgresDatabase.migrate` (`nodestro_schema_migrations`, backup hook, schema gate) | `MigrationRunner` (namespaces, checksums, advisory lock) | Library, after gap G-2 |
 | F-10 | Configuration and secret files | `server_settings.ServerSettings` (`*_FILE` variables) | `axentra.config.settings` (`*_ref` = `env:`/`file:`) | Nodestro builds Axentra settings from its own |
 | F-11 | Encrypted tenant secrets (provider API keys) | `server_settings.SecretBox`, `workspace._seal` | `SecretBox` (`axs1.<kid>...`, keyring, rotation) | Library + legacy decryptor; gives Nodestro key rotation |
-| F-12 | Job queue, leases, reaper, cancel | `jobs.JobQueue`, `nodestro_jobs` | Axentra jobs module (merged in PR #5; semantics per G-8 open) | Blocked (G-8) |
-| F-13 | Scheduler leader lock and schedule slots | `jobs.LeaderLock`, `jobs.ScheduleFirings` | Axentra jobs/scheduler (merged in PR #5; semantics per G-8 open) | Blocked (G-8) |
+| F-12 | Job queue, leases, reaper, cancel | `jobs.JobQueue`, `nodestro_jobs` | Axentra jobs module (merged in PR #5) | Stays Nodestro (G-8 decided 2026-11-02, variant B) |
+| F-13 | Scheduler leader lock and schedule slots | `jobs.LeaderLock`, `jobs.ScheduleFirings` | Axentra jobs/scheduler (merged in PR #5) | Stays Nodestro (G-8 decided 2026-11-02, variant B) |
 | F-14 | Run event log for multi-replica streaming | `jobs.PostgresEventLog`, `nodestro_run_events` | Axentra event streams (not present) | Blocked; stays Nodestro until then |
 | F-15 | Input files (uploads per tenant on the data volume) | `input_files.InputFiles`, `_Blobs` (orkexa `LocalFileStore`), `server_app.TenantFiles` | `StorageService` (local/S3, quotas, SHA-256, signed URLs) | Library behind `_Blobs`-shaped adapter |
 | F-16 | Audit (tool approvals, capped at 5000 per tenant) | `tool_approvals.record_audit/audit_events` | `AuditLog.record` (append-only, redacted, same transaction) | Dual-write, later read |
@@ -99,7 +99,6 @@ JSONB per `(tenant, collection, id)`) - Nodestro's workflows, runs and settings 
 | `nodestro_api/api_keys.py`: `ApiKeys` storage in the `api_keys` document collection | `axentra_api_keys` + Nodestro grant table | M6 |
 | `nodestro_runtime/server_settings.py`: `SecretBox` as the writer | `axentra.config.secrets.SecretBox` | M4 (legacy decrypt kept until M12) |
 | `nodestro_runtime/storage_postgres.py`: `PostgresDatabase` pool and `migrate` | `axentra.data.database.Database`, `MigrationRunner` | M9 (runner), M10 (pool) |
-| `nodestro_runtime/jobs.py`: `JobQueue`, `LeaderLock`, `ScheduleFirings`; tables `nodestro_jobs`, `nodestro_schedule_firings` | Axentra jobs module | M11 (only after G-8) |
 | `nodestro_api/server_app.py`: `DatabaseHealth` | Axentra readiness check | M7 (optional) |
 
 ### 2.2 Become adapters (Nodestro interface kept, Axentra underneath)
@@ -117,7 +116,6 @@ Adapters keep Nodestro's call sites unchanged, which is what makes every phase r
 | `AuditBridge` | `tool_approvals.record_audit` | `AuditLog.record` (dual-write) |
 | `UsageBridge` | `UsageLog.record` | `UsageService.record` (idempotency key = entry id) |
 | `ErrorBridge` | Nodestro error JSON (`{"detail","code","params"}`), `NodestroError` | translates `AxentraError` subclasses (section 4.5) |
-| `AxentraQueue` (M11 only) | `JobQueue`, `LeaderLock`, `ScheduleFirings` | Axentra jobs module |
 
 ### 2.3 Stay Nodestro-specific (never move to Axentra)
 
@@ -127,7 +125,8 @@ gateway, policy); MCP client, server, OAuth and vault; knowledge (`nodestro_file
 `tsvector`, `PostgresIndex`, `nodestro_memory_files`); publications and the published-API business logic
 (`ServingCore` minus key verification: limits, idempotency, SSE events); schedules and batches as product objects;
 pricing (`pricing.py`, `pricing_sync.py`, `cost_tracking.py`); examples and library; file format detection
-(`file_formats.py`) and file delivery to agents; the run event log until Axentra has event streams; the
+(`file_formats.py`) and file delivery to agents; the run job queue, its worker, leader lock and schedule slots
+(`jobs.py`, `worker.py`; decided under G-8); the run event log until Axentra has event streams; the
 document store (`nodestro_documents`); and the **desktop and local profiles** (SQLite, `launch.py`,
 `local_access.py`, desktop vault key), which have no PostgreSQL and therefore never use Axentra.
 
@@ -189,7 +188,7 @@ NOTHING` / upsert) so a backfill can be re-run.
 | documents `usage_log` (`UsageEntry`) | `axentra_usage_events` (meters `ai.tokens.input`, `ai.tokens.output`, `ai.cost`) | `idempotency_key` = `nodestro:usage:<entry id>`; amounts as `Decimal`; history backfill optional (Q-9) | M3 |
 | tool approval audit (documents, max 5000 per tenant) | `axentra_audit_events` | `action = 'nodestro.tool_approval.<kind>'`, `actor_kind` user/system, `details` = existing hashes only (`arguments_hash`, never arguments) | M3 |
 | input files on disk `<data_root>/tenants/<id>/...` (`_Blobs`, content-addressed) | `axentra_files` + storage backend (local or S3) | copy per tenant, keep Nodestro's input metadata (documents) and store the Axentra file id beside the old blob id | M8 |
-| `nodestro_jobs`, `nodestro_schedule_firings` | Axentra jobs tables (merged in PR #5) | **drain, do not copy** active jobs (section 7, M11); copy the latest firing slot per schedule so no slot fires twice | M11 |
+| `nodestro_jobs`, `nodestro_schedule_firings` | none (G-8 decision, M11 closed) | stay | - |
 | `nodestro_schema_migrations (version, name, applied_at)` | `axentra_schema_migrations (namespace='nodestro', version, name, checksum)` | one-off adoption: insert rows 1-6 with the checksums of the unchanged files | M9 |
 | `nodestro_documents`, `nodestro_files`, `nodestro_chunks`, `nodestro_memory_files`, `nodestro_run_events` | none | stay; get RLS in M10 | - |
 
@@ -527,7 +526,7 @@ but should follow for the same EOL reason (Q-12). The desktop bundle (CPython 3.
 | Errors | every `AxentraError` class mapped; no 500 from an Axentra error; status codes the studio and SDK expect |
 | Usage and audit | duplicate usage entries ignored (idempotency key); `Decimal` amounts; audit rows carry no arguments or secrets; audit in the same transaction where the adapter shares a connection |
 | Files | copy per tenant, SHA-256 verified; read Axentra first with disk fallback; quotas; content types Nodestro accepts (`.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` are blocked by Axentra storage today, gap G-7); download only as attachment |
-| Jobs (M11) | at most one active job per `(tenant, kind, ref)`; no retry after lease loss (run marked interrupted); cancel queued/running; one leader; each schedule slot once across the switch; drain procedure |
+| Jobs (M11, closed) | proven on Nodestro's own queue instead of a switch: nodestro-runtime `tests/test_job_delivery.py`, `test_jobs.py`, `test_run_fencing.py`, `test_worker_approvals.py`, `test_worker_checkpoints.py` |
 | RLS (M10) | every Nodestro table refuses cross-tenant reads with a forged query under the runtime role; worker and housekeeping in platform scope; the whole Nodestro suite under a non-owner role |
 | Pins | `check_versions.py` with the axentra entry; image contains `versions.json` with axentra; desktop build contains no axentra |
 | Rollback | each flag switched back (`primary` -> `shadow` -> `off`) with live traffic in a staging copy; restore from the pre-step backup |
@@ -562,7 +561,7 @@ useful without Nodestro and are tracked like any other Axentra work.
 | M8 | Files: input files to Axentra storage (removes the shared data volume between api and worker) | M5, G-7 | medium | M/L |
 | M9 | Migration runner unification: Nodestro migrations as namespace `nodestro` in `MigrationRunner`, adoption of versions 1-6 | M2, G-2 | medium | M |
 | M10 | Pool unification (Nodestro store on `axentra.data.Database`) and RLS on `nodestro_*` tables | M9 | high | L |
-| M11 | Jobs, leader lock, schedules: switch with a drained queue | G-8, M10 | high | L |
+| M11 | Closed by architecture decision (2026-11-02): run jobs, leader lock and schedule slots stay on Nodestro's queue; see G-8 | - | - | - |
 | M12 | Contract: remove mirrors, legacy tables, legacy decrypt, legacy `ndk_` path (announced), old code | all, rollback windows passed | medium | M |
 
 Why this order: append-only writes first (nothing can be read wrong); secrets next because the value is high
@@ -604,7 +603,7 @@ Status as of 2026-11-02; see also [EMBEDDING](../architecture/EMBEDDING.md).
 | G-5 | "Claim an ownerless tenant" one-time token (tenant bootstrap), or accept it stays Nodestro | Nodestro's bootstrap links | S | Open |
 | G-6 | Re-encryption task registry (`axentra secrets reencrypt` with product-registered fields); the CLI command named in `config/secrets.py` does not exist yet | Nodestro's encrypted document fields | S | Done for columns (`axentra secrets reencrypt`, `register_encrypted_column`); no hook for legacy formats or JSON fields |
 | G-7 | Per-product content-type policy in storage (store code/HTML as inert attachments instead of refusing) | Nodestro accepts `.html`, `.js`, `.sh`, `.php`, `.ps1`, `.bat` inputs (`file_formats.CODE_EXTENSIONS`) | S | Done: `settings.storage.blocked_types = "store_inert"` or `inert_extensions` per product, `GET`/`PUT /v1/products/{pid}/storage/policy`; see modules/STORAGE.md |
-| G-8 | Jobs module with Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss", lease fencing, cancel request, leader lock, idempotent schedule slots, event streams | M11 | L (planned anyway, P0 in TODO) | Jobs module exists; semantics differ on several points |
+| G-8 | Jobs module with Nodestro's semantics: unique active job per `(tenant, kind, ref)`, "never retry, interrupt on lease loss", lease fencing, cancel request, leader lock, idempotent schedule slots, event streams | M11 | - | Rejected 2026-11-02 (variant B): Nodestro keeps its run queue permanently; Axentra jobs stay generic and at least once. The guarantee Nodestro needs lives in its run fence, `interrupted` state, tool journal and approval checkpoints, not in the queue; the missing options would be Nodestro semantics in a generic module. Evidence: `tests/integration/test_job_delivery_semantics.py` here, nodestro-runtime `tests/test_job_delivery.py` |
 
 ## 10. Risk register
 
@@ -631,7 +630,7 @@ Status as of 2026-11-02; see also [EMBEDDING](../architecture/EMBEDDING.md).
 | Block | Effort |
 | --- | --- |
 | Axentra prerequisites G-1 ... G-7 | M (each S/M) |
-| G-8 jobs/events module | L (part of Axentra's own roadmap) |
+| G-8 jobs/events module | none (rejected, Nodestro keeps its queue) |
 | M1 + M2 + M3 | S each |
 | M4 secrets | M |
 | M5 identity and tenancy | L |
@@ -639,7 +638,7 @@ Status as of 2026-11-02; see also [EMBEDDING](../architecture/EMBEDDING.md).
 | M7 notifications, metrics | S/M |
 | M8 files | M/L |
 | M9 runner, M10 pool + RLS | M, L |
-| M11 jobs | L |
+| M11 jobs | none (closed by decision) |
 | M12 contract/cleanup | M |
 
 S = up to a few days, M = one to two weeks, L = several weeks, each including tests, review and the security phase.

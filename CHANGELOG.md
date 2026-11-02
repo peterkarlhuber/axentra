@@ -7,6 +7,10 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 ## [Unreleased]
 
 ### Added
+- `tests/integration/test_job_delivery_semantics.py`: a worker that lost its lease keeps running its
+  handler while the retry runs it again (at least once); `max_attempts=1` makes the job `dead`;
+  idempotency keys deduplicate for good. Backs the G-8 decision: Nodestro keeps its own run queue
+  (docs/TODO.md, docs/modules/EVENTS_AND_JOBS.md "Limitations").
 - Embedding Axentra as a library (docs/architecture/EMBEDDING.md):
   - `axentra.core.errors.problem_details(exc)` maps any exception to a framework-independent
     `ProblemInfo` (status, code, title, redacted detail, extra members, headers such as
