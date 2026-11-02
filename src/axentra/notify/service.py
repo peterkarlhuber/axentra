@@ -68,6 +68,7 @@ _VAR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,200}$")
 MAX_LOCALES = 20
 MAX_OPT_OUTS = 50
+NO_EMAIL_ADDRESS = "the recipient has no email address"
 _TEMPLATE_FIELDS = (
     "channel",
     "category",
@@ -611,6 +612,7 @@ class NotifyService:
                     raise ValidationFailed("only email templates can be sent")
                 user_locale: str | None = None
                 user_id: str | None = None
+                no_address = False
                 if to_user_id is not None:
                     user = tx.one(
                         "SELECT id, email, locale, status FROM axentra_users WHERE id = %s", (to_user_id,)
@@ -626,6 +628,9 @@ class NotifyService:
                     if user["status"] != "active":
                         raise ValidationFailed("the recipient user is disabled")
                     email, user_locale, user_id = user["email"], user["locale"], user["id"]
+                    # A user without an email address (external identity only) is not an error:
+                    # the message is recorded as suppressed with the reason, nothing is sent.
+                    no_address = not email
                     lookup_user = user_id
                 else:
                     if restrict_emails and not tx.one(
@@ -642,14 +647,13 @@ class NotifyService:
                     )
                     lookup_user = found["id"] if found else None
                     user_locale = found["locale"] if found else None
-                assert email is not None
                 rendered = render_variant(
                     {k: v.model_dump() for k, v in template.variants.items()},
                     locale or user_locale or fallback_locale,
                     values,
                 )
-                suppressed = False
-                if lookup_user is not None and template.category not in LOCKED_CATEGORIES:
+                suppressed = no_address
+                if not suppressed and lookup_user is not None and template.category not in LOCKED_CATEGORIES:
                     suppressed = bool(
                         tx.scalar(
                             "SELECT EXISTS (SELECT 1 FROM axentra_notify_preferences WHERE product_id = %s"
@@ -685,7 +689,7 @@ class NotifyService:
                         template.version,
                         template.channel,
                         template.category,
-                        email,
+                        email or "",
                         user_id,
                         rendered.locale,
                         *enc,
@@ -695,7 +699,11 @@ class NotifyService:
                         idempotency_key,
                         request_hash,
                         principal.actor.id,
-                        f"recipient opted out of category {template.category}" if suppressed else None,
+                        NO_EMAIL_ADDRESS
+                        if no_address
+                        else f"recipient opted out of category {template.category}"
+                        if suppressed
+                        else None,
                     ),
                 )
                 self.audit.record(
@@ -706,7 +714,12 @@ class NotifyService:
                     target_id=mid,
                     product_id=product_id,
                     tenant_id=tenant_id,
-                    details={"template_key": template.key, "status": status, "category": template.category},
+                    details={
+                        "template_key": template.key,
+                        "status": status,
+                        "category": template.category,
+                        **({"reason": "no_email_address"} if no_address else {}),
+                    },
                 )
                 row = tx.one_or_404("SELECT * FROM axentra_notify_messages WHERE id = %s", (mid,))
         except pg_errors.UniqueViolation:
@@ -1107,7 +1120,9 @@ class NotifyService:
                 variables={
                     "product_name": product["name"],
                     "tenant_name": tenant["name"],
-                    "inviter_name": (inviter["name"] or inviter["email"]) if inviter else product["name"],
+                    "inviter_name": (inviter["name"] or inviter["email"] or product["name"])
+                    if inviter
+                    else product["name"],
                     "role": inv.role,
                     "accept_url": url,
                     "expires_at": inv.expires_at.strftime("%Y-%m-%d %H:%M UTC"),

@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 class User(BaseModel):
     id: str
-    email: str
+    email: str | None
+    """``None`` for users without an email address (e.g. an external identity without a verified
+    email claim); they cannot log in with a password or accept email-bound invitations."""
     name: str
     status: Literal["active", "disabled"]
     locale: str
@@ -18,6 +20,11 @@ class User(BaseModel):
     last_login_at: datetime | None = None
     has_password: bool = False
     platform_role: str | None = None
+
+    @property
+    def display(self) -> str:
+        """A label for logs and audit events: the email, else the name, else the id."""
+        return self.email or self.name or self.id
 
 
 class Session(BaseModel):

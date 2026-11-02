@@ -600,6 +600,8 @@ class OidcService:
                 email_verified=bool(email),
                 allow_signup=allow_signup,
                 allowed_domains=allowed_domains,
+                link_by_verified_email=provider.link_by_verified_email,
+                allow_signup_without_email=provider.allow_signup_without_email,
             )
         except Forbidden as exc:
             reason = str(exc.extra.get("reason", "login_failed"))
@@ -611,7 +613,7 @@ class OidcService:
         accepted = False
         if invitation and self.accept_invitation is not None:
             principal = Principal(
-                actor=Actor(ActorKind.USER, user_id, session.info.user.email),
+                actor=Actor(ActorKind.USER, user_id, session.info.user.display),
                 session_id=session.info.session_id,
                 ip=ip,
             )

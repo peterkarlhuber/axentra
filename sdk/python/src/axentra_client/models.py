@@ -76,7 +76,7 @@ class Meta(AxentraModel):
 
 class User(AxentraModel):
     id: str
-    email: str
+    email: str | None = None
     name: str
     locale: str
     status: str
@@ -153,7 +153,7 @@ class Membership(AxentraModel):
     product_id: str
     tenant_id: str
     user_id: str
-    email: str
+    email: str | None = None
     name: str
     role: str
     created_at: datetime
@@ -164,7 +164,7 @@ class ProductMember(AxentraModel):
 
     product_id: str
     user_id: str
-    email: str
+    email: str | None = None
     name: str
     role: str
     created_at: datetime

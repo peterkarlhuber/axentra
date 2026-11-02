@@ -23,7 +23,7 @@ from pathlib import Path
 import tomllib
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from axentra.core.errors import ConfigurationError
 
@@ -142,6 +142,13 @@ class OidcProviderSettings(_Section):
     allow_signup: bool = False
     """Create unknown users on first login; otherwise only invited/existing users may log in."""
     allowed_email_domains: list[str] = Field(default_factory=list)
+    link_by_verified_email: bool = True
+    """Link an unknown identity to the existing user with the same verified email (account
+    linking across providers). ``false``: never link by email; a new user is created instead
+    (without an email address when the address belongs to another user; needs ``allow_signup``)."""
+    allow_signup_without_email: bool = False
+    """Together with ``allow_signup``: create a user without an email address for an unknown
+    identity whose provider sends no verified email (otherwise ``email_not_verified``)."""
     token_endpoint_auth_method: Literal["client_secret_basic", "client_secret_post", "none"] = (
         "client_secret_basic"  # noqa: S105 (a method name, not a secret)
     )
@@ -153,6 +160,14 @@ class OidcProviderSettings(_Section):
         if not v.replace("-", "").isalnum() or not v.islower():
             raise ValueError("provider id must be lowercase alphanumeric with dashes")
         return v
+
+    @model_validator(mode="after")
+    def _signup_without_email(self) -> OidcProviderSettings:
+        if self.allow_signup_without_email and not self.allow_signup:
+            raise ValueError("allow_signup_without_email requires allow_signup")
+        if self.allow_signup_without_email and self.allowed_email_domains:
+            raise ValueError("allow_signup_without_email cannot be combined with allowed_email_domains")
+        return self
 
 
 class StorageSettings(_Section):

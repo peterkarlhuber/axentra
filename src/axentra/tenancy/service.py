@@ -298,7 +298,7 @@ class TenancyService:
             rows = tx.all(
                 "SELECT m.product_id, m.user_id, u.email, u.name, m.role, m.created_at"
                 " FROM axentra_product_members m JOIN axentra_users u ON u.id = m.user_id"
-                " WHERE m.product_id = %s ORDER BY u.email",
+                " WHERE m.product_id = %s ORDER BY u.email NULLS LAST, u.id",
                 (product_id,),
             )
         return [ProductMember.model_validate(r) for r in rows]
@@ -684,7 +684,8 @@ class TenancyService:
         self.authz.require(principal, "members:read", product_id, tenant_id)
         with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
             rows = tx.all(
-                self._MEMBER_SQL + " WHERE m.product_id = %s AND m.tenant_id = %s ORDER BY u.email",
+                self._MEMBER_SQL
+                + " WHERE m.product_id = %s AND m.tenant_id = %s ORDER BY u.email NULLS LAST, u.id",
                 (product_id, tenant_id),
             )
         return [Membership.model_validate(r) for r in rows]
@@ -873,7 +874,8 @@ class TenancyService:
             if inv is None or inv["accepted_at"] or inv["revoked_at"] or inv["expires_at"] <= utcnow():
                 raise NotFound("the invitation is invalid or expired")
             email = tx.scalar("SELECT email FROM axentra_users WHERE id = %s", (principal.user_id,))
-            if str(email).lower() != inv["email"].lower():
+            # Bound to the address: a user without an email address can never accept by match.
+            if not email or str(email).lower() != inv["email"].lower():
                 self.audit.record(
                     tx,
                     principal,
