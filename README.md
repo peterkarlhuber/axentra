@@ -80,7 +80,7 @@ PostgreSQL integration tests. **planned** means it does not exist in this codeba
 | `realtime` | Server-sent events for events and jobs (database polling) | implemented; no WebSockets |
 | `billing` | Plans, subscriptions, entitlements, payment provider adapters (manual, fake, Stripe) | implemented (Stripe adapter not tested against Stripe) |
 | `notify` | Email templates, outbox, delivery (local, SMTP), preferences | implemented (email only) |
-| `search` | PostgreSQL full-text search, search adapters | planned (not implemented) |
+| `search` | Tenant-scoped PostgreSQL full-text search (ranking, highlights), pluggable search adapters | implemented (no vector search, no external adapters shipped) |
 
 Endpoint catalog: [docs/architecture/API_V1_ENDPOINTS.md](docs/architecture/API_V1_ENDPOINTS.md);
 the authoritative contract is [openapi/axentra-v1.json](openapi/axentra-v1.json).

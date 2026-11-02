@@ -10,7 +10,7 @@ Status as of 2026-11-02. Evidence for every phase: [AXENTRA_IMPLEMENTATION_REPOR
 |---|---|---|
 | 0 | Architecture, branding, foundations | done |
 | 1 | Backend foundation + Studio v1 | done (backend PRs #1, #2) |
-| 2 | Infrastructure modules + UI | done except search (backend PRs #3-#5); no full-text search |
+| 2 | Infrastructure modules + UI | done (backend PRs #3-#5; search module added later, no vector search) |
 | 3 | SaaS business services + UI | done (backend PR #4) |
 | 4 | Developer experience + complete Studio | done for the backend (PR #7); open items in TODO.md |
 | 5 | Hardening and acceptance | in progress (PRs #8, #9; open verification items in TODO.md) |
@@ -33,13 +33,14 @@ roles and permissions, settings, light/dark mode, branding, responsive layout.
 
 Implemented in this repository: everything listed for the backend.
 
-## Phase 2: Infrastructure modules + UI (done except search)
+## Phase 2: Infrastructure modules + UI (done)
 
 Storage (local, S3-compatible), events/jobs/webhooks, usage metering, first realtime channel
 (server-sent events), more audit and observability (metrics, tracing). Studio: files, jobs and
 events, usage overview and charts, audit and monitoring views. Module documentation:
-`docs/modules/*`, `docs/operations/OBSERVABILITY.md`. Not implemented: the search module
-(PostgreSQL full-text search, search adapters; see TODO.md).
+`docs/modules/*`, `docs/operations/OBSERVABILITY.md`. Search: tenant-scoped PostgreSQL full-text
+search with a pluggable adapter interface (`docs/modules/SEARCH.md`); vector search and external
+adapters are open (see TODO.md).
 
 ## Phase 3: SaaS business services + UI (done)
 

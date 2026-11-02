@@ -50,9 +50,9 @@ uses the authorizer and the audit log, which is why `data` and `access` referenc
 package level. `access` uses `identity` only for token hashing.
 
 The diagram shows the Phase 1 foundation. The later domain packages (`storage`, `events` with
-jobs, schedules, webhooks and SSE, `usage`, `billing`, `notify`, `observability`) follow the same
+jobs, schedules, webhooks and SSE, `usage`, `billing`, `notify`, `search`, `observability`) follow the same
 rules (no web framework, `core` at the bottom, `usage` never imports `billing`; enforced by
-import-linter) and are documented in `docs/modules/`. A search module is not implemented. Current
+import-linter) and are documented in `docs/modules/`. Current
 status: [AXENTRA_IMPLEMENTATION_REPORT.md](../AXENTRA_IMPLEMENTATION_REPORT.md).
 
 ## Layering rules

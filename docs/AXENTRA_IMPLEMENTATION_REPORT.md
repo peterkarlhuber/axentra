@@ -66,7 +66,7 @@ have only been tested against local fakes. Section 12 lists every open limitatio
   [architecture/DEPLOYMENT_MODELS.md](architecture/DEPLOYMENT_MODELS.md).
 
 Migrations (forward-only, checksummed, advisory-locked): `0001_foundation`, `0002_events`,
-`0003_storage`, `0004_usage_billing`, `0005_notify`, plus product namespaces through the
+`0003_storage`, `0004_usage_billing`, `0005_notify`, `0006_search`, plus product namespaces through the
 `axentra.migrations` entry point group (used by the Taskboard example).
 
 ## 2. Implemented modules and actual scope
@@ -88,7 +88,7 @@ lists are missing (named). **not implemented** = no code exists.
 | I Billing | implemented + tested (partial) | Plans, subscriptions with a state machine, trials, entitlements feeding usage quotas, providers `manual`, `fake` (test double with signed webhooks) and `stripe` (REST adapter) | Stripe adapter only tested over `httpx.MockTransport`, never against Stripe; no proration, invoices, taxes, portal | `test_billing.py` (9), `test_usage_billing_units.py` (7) |
 | J Notify | implemented + tested (partial) | Versioned email templates (de/en), safe renderer, encrypted outbox, idempotent send, preferences, local mailbox and SMTP (STARTTLS) providers, dispatcher with leases and backoff, delivery stats | Email only (no SMS/push); SMTP tested only against an in-process `aiosmtpd` server; per-tenant send rate limits | `test_notify.py` (21), `test_notify_smtp.py` (5), `test_notify_render.py` (6) |
 | K Audit and observability | implemented + tested | Append-only redacted audit trail in the same transaction, JSON logs with request ids, `/v1/health/live` and `/v1/health/ready`, Prometheus `/metrics` (token-protected), optional OpenTelemetry tracing, retention purge | OTLP export tested only with an in-memory span processor, never against a collector | `test_observability.py` (5 + 6 unit), audit assertions throughout |
-| L Search and realtime | **partial** | Realtime: SSE streams `GET .../events/stream` and `.../jobs/stream` (database polling every `events.sse_poll_seconds`) | **Search is not implemented**: no PostgreSQL full-text search, no search adapters, no vector search (list endpoints have substring `q` filters only). `search` appears in the module list of `GET /v1/meta` without any code behind it. No WebSockets | `test_events_jobs.py::test_job_changes_stream_positions_follow_commit_order` |
+| L Search and realtime | implemented + tested (partial) | Search ([modules/SEARCH.md](modules/SEARCH.md)): tenant-scoped PostgreSQL full-text index (migration `0006_search`, table `axentra_search_documents` with forced RLS, generated `tsvector`, GIN index), index upsert/delete by kind + ref id through `ax.search` and `PUT`/`DELETE .../search/documents/{kind}/{ref_id}` (`search:index`, audited), ranked query with `ts_rank`, HTML-escaped `ts_headline` highlights, kind filter and cursor paging (`GET .../search`, `search:query`), configurable text search configuration (`search.language`, default `simple`), pluggable `SearchAdapter` protocol with the PostgreSQL adapter as default. Realtime: SSE streams `GET .../events/stream` and `.../jobs/stream` (database polling every `events.sse_poll_seconds`) | Search: no vector/semantic search, no external adapters shipped, no prefix/fuzzy matching or accent folding, one language per installation, tenant scope only (no cross-tenant product search, no per-document visibility), offset paging bounded by `search.max_offset`, no bulk/reindex API, no typed Python SDK methods. No WebSockets | `test_search.py` (11), `test_search_unit.py` (6), `test_events_jobs.py::test_job_changes_stream_positions_follow_commit_order` |
 | API | implemented + tested | FastAPI `/v1`, RFC 9457 problems, security headers, CORS, body limit, optional rate limit, route protection registry, committed OpenAPI | Problem responses not described in the OpenAPI | `test_openapi.py`, `test_route_protection.py` |
 | CLI | implemented + tested | `serve`, `migrate`, `worker`, `admin setup-token`, `openapi export [--check]`, `storage purge`, `notify-dispatch`, `maintenance`, `keys generate`, `secrets reencrypt` | Administration over HTTP | used in tests and section 5 |
 
@@ -319,8 +319,10 @@ request (criterion 24). Only Chromium is tested.
 The full prioritized list is [TODO.md](TODO.md). The most important points:
 
 **Not implemented or partial (functional scope)**
-- Search module: no PostgreSQL full-text search, no search adapters, no vector search; `search` is
-  nevertheless listed in `GET /v1/meta` `modules`. No WebSockets.
+- Search module: PostgreSQL full-text search over a tenant-scoped index is implemented (see
+  [modules/SEARCH.md](modules/SEARCH.md)); still missing are vector/semantic search, external
+  search adapters, prefix/fuzzy matching and accent folding, and product-wide search across
+  tenants. No WebSockets.
 - No MFA (TOTP/WebAuthn), no password reset or email verification flows, no data subject export or
   erasure, no users without an email address.
 - Product-defined permissions: the permission catalog is closed, so product resources reuse
@@ -450,4 +452,5 @@ Status values: **met**, **met with limitation**, **not met**, or a pointer to th
 | 30 | Joint e2e pipeline confirms both components | met with limitation | Studio CI contract + e2e jobs against the pinned backend (180/180 at `a2ca72a`, 186/186 at `7511a37`); runs only on Studio pull requests, multi-product mode only so far, Chromium only, no Axentra-side trigger |
 
 No acceptance criterion is marked "not met" for the backend. The functional scope item "Search"
-(order section 4 L) is not implemented; it is not a numbered acceptance criterion but is an open gap.
+(order section 4 L) is implemented as PostgreSQL full-text search with a pluggable adapter
+interface; optional vector search is not implemented (no adapter), see section 12.

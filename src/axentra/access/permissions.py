@@ -79,6 +79,8 @@ CATALOG: tuple[PermissionDef, ...] = (
     PermissionDef("billing:read", "tenant", "View subscription and entitlements"),
     PermissionDef("notify:send", "tenant", "Send notifications"),
     PermissionDef("notify:preferences", "tenant", "Manage notification preferences"),
+    PermissionDef("search:query", "tenant", "Search the tenant's search index"),
+    PermissionDef("search:index", "tenant", "Add, replace and remove documents in the tenant's search index"),
 )
 
 BY_NAME: dict[str, PermissionDef] = {p.name: p for p in CATALOG}
@@ -113,11 +115,22 @@ _TENANT_MEMBER = frozenset(
         "billing:read",
         "notify:send",
         "notify:preferences",
+        "search:query",
     }
 )
 _TENANT_VIEWER = frozenset(
-    {"tenant:read", "members:read", "records:read", "files:read", "usage:read", "billing:read"}
+    {
+        "tenant:read",
+        "members:read",
+        "records:read",
+        "files:read",
+        "usage:read",
+        "billing:read",
+        "search:query",
+    }
 )
+#: Tenant permissions that only read data although their name does not end in ``:read``.
+TENANT_READ_LIKE = frozenset({"search:query"})
 
 BUILTIN_ROLES: dict[str, BuiltinRole] = {
     r.key: r
@@ -138,14 +151,18 @@ BUILTIN_ROLES: dict[str, BuiltinRole] = {
             "product",
             "Reads everything in the product and manages tenant members up to its own permissions"
             " (in practice: viewers)",
-            (PRODUCT & READS) | {"product:read", "members:manage"} | (TENANT & READS) | {"tenant:read"},
+            (PRODUCT & READS)
+            | {"product:read", "members:manage"}
+            | (TENANT & READS)
+            | TENANT_READ_LIKE
+            | {"tenant:read"},
         ),
         BuiltinRole(
             "product_viewer",
             "Product viewer",
             "product",
             "Read-only access to the product",
-            (PRODUCT & READS) | {"product:read"} | (TENANT & READS) | {"tenant:read"},
+            (PRODUCT & READS) | {"product:read"} | (TENANT & READS) | TENANT_READ_LIKE | {"tenant:read"},
         ),
         BuiltinRole("tenant_owner", "Owner", "tenant", "Full control of the tenant", _TENANT_ADMIN),
         BuiltinRole(
@@ -158,7 +175,9 @@ BUILTIN_ROLES: dict[str, BuiltinRole] = {
 
 PLATFORM_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "platform_admin": ALL,
-    "platform_viewer": READS | {"product:read", "tenant:read", "platform:settings", "platform:audit"},
+    "platform_viewer": READS
+    | TENANT_READ_LIKE
+    | {"product:read", "tenant:read", "platform:settings", "platform:audit"},
 }
 
 
