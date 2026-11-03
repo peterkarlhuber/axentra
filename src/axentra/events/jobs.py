@@ -417,6 +417,7 @@ class JobService:
         self.handlers: dict[str, Handler] = {}
         self.kinds: dict[str, JobKindSpec] = {}
         self.skip_callbacks: dict[str, Callable[[Job, str], None]] = {}
+        self.max_runtime: dict[str, float] = {}
 
     # -- registry ------------------------------------------------------------------------------
 
@@ -428,15 +429,26 @@ class JobService:
         replace: bool = False,
         enqueue_permission: str | None = None,
         permissions: Iterable[str] | None = None,
+        max_runtime_seconds: float | None = None,
     ) -> None:
         """Register the handler of a job kind (in every worker process that should run it).
 
         ``enqueue_permission`` and ``permissions`` declare the kind (see :class:`JobKindSpec` and
         :meth:`declare`). Without them only ``jobs:manage`` holders can enqueue the kind through
-        the API and the handler holds all product and tenant permissions."""
+        the API and the handler holds all product and tenant permissions.
+
+        ``max_runtime_seconds``: the worker stops renewing the lease of a job of this kind once its
+        handler ran that long, so a hung handler loses the job (``ctx.lease_lost``) and the attempt
+        is retried after the lease expires (at least once). ``None``: no limit."""
         check_kind(kind)
         if kind in self.handlers and not replace:
             raise ValueError(f"a handler for job kind {kind!r} is already registered")
+        if max_runtime_seconds is not None and max_runtime_seconds <= 0:
+            raise ValueError("max_runtime_seconds must be positive")
+        if max_runtime_seconds is None:
+            self.max_runtime.pop(kind, None)
+        else:
+            self.max_runtime[kind] = float(max_runtime_seconds)
         if enqueue_permission is not None or permissions is not None:
             self.declare(kind, enqueue_permission=enqueue_permission, permissions=permissions, replace=True)
         self.handlers[kind] = handler

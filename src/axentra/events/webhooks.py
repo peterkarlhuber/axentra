@@ -50,6 +50,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DELIVER_KIND = "axentra.webhook.deliver"
+#: Time a delivery job may take beyond ``webhook_timeout_seconds`` before its lease is no longer renewed.
+DELIVERY_RUNTIME_MARGIN_SECONDS = 30.0
 SIGNATURE_HEADER = "Axentra-Signature"
 PING_TYPE = "axentra.ping"
 MAX_EVENT_TYPES = 50
@@ -144,7 +146,13 @@ class WebhookService:
         self.secrets = secrets
         self.queue = queue
         events.fanouts.append(self._fan_out)
-        events.jobs.register(DELIVER_KIND, self._deliver_job)
+        # One attempt is bounded by webhook_timeout_seconds (http_client); the margin covers the
+        # database work around it. Past that, a hung delivery stops holding its lease.
+        events.jobs.register(
+            DELIVER_KIND,
+            self._deliver_job,
+            max_runtime_seconds=settings.events.webhook_timeout_seconds + DELIVERY_RUNTIME_MARGIN_SECONDS,
+        )
         events.jobs.on_skip(DELIVER_KIND, self._skipped)
 
     # -- validation ----------------------------------------------------------------------------

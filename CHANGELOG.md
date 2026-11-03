@@ -33,6 +33,11 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   redelivered). The scheduler skips schedules of archived products and suspended tenants (schedule kept,
   `events.schedule.skip` audit event once per inactive period). Behaviour change for handlers that relied
   on full permissions in schedule jobs created by users or API keys.
+- Webhook delivery attempts have a total deadline (audit round 2, AX2-02): `events.webhook_timeout_seconds`
+  now bounds connect, TLS handshake, request, response headers and body together (before it applied to
+  each socket operation, so a receiver that trickled bytes could hold a worker slot for hours). New
+  `max_runtime_seconds` for `ax.jobs.register`: the worker stops renewing the lease of an attempt that runs
+  longer; webhook deliveries declare timeout + 30 s.
 - The `GET` OIDC start no longer acts on an invitation (security review round 4, R4-1, login-CSRF-like). It is
   a plain link without an `Origin` check, so a cross-site link to
   `GET /v1/auth/oidc/{provider}/start?invitation=<token>` (or with the token inside `return_to`) made a browser

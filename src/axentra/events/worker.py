@@ -6,7 +6,9 @@ a background thread of a product backend. Every worker:
 - claims due jobs of its kinds (``FOR UPDATE SKIP LOCKED``), at most ``concurrency`` at a time,
   woken by ``LISTEN/NOTIFY`` and polling every ``events.poll_interval_seconds`` as a fallback;
 - renews the leases of its running jobs every ``lease/3`` seconds (a separate thread, so a busy
-  handler never delays it) and passes cancellation requests to the handlers;
+  handler never delays it) and passes cancellation requests to the handlers; a job whose kind
+  declares ``max_runtime_seconds`` is no longer renewed once it ran longer (it is retried after
+  its lease expires);
 - re-queues jobs of crashed workers whose lease expired (any worker, ``SKIP LOCKED``);
 - fires due schedules and purges old finished jobs while it holds the scheduler leader lock.
 
@@ -84,6 +86,7 @@ class JobContext:
     _cancel: bool = False
     _lost: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _started: float = field(default_factory=time.monotonic, repr=False)
 
     @property
     def scope(self) -> DbScope:
@@ -314,8 +317,23 @@ class JobWorker:
     def _heartbeats(self) -> None:
         interval = max(0.2, self.ax.settings.events.lease_seconds / 3)
         while not self._hb_stop.wait(interval):
+            now = time.monotonic()
+            limits = self.ax.jobs.max_runtime
             with self._running_lock:
-                ids = list(self._running)
+                ids = []
+                for jid, (ctx, _) in self._running.items():
+                    limit = limits.get(ctx.job.kind)
+                    if limit is not None and now - ctx._started > limit:
+                        if not ctx.lease_lost:
+                            logger.warning(
+                                "job %s (%s) ran longer than %.0f s; its lease is no longer renewed",
+                                jid,
+                                ctx.job.kind,
+                                limit,
+                            )
+                        ctx._update(False, False)
+                        continue
+                    ids.append(jid)
             if not ids:
                 continue
             try:

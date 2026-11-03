@@ -2,16 +2,25 @@
 
 AX2-01: a schedule's jobs must not keep the full handler permissions after its creator lost access,
         and nothing runs for a suspended tenant or an archived product (skipped with a reason).
+AX2-02: one webhook delivery attempt has a total deadline (a slow-drip receiver cannot hold a
+        worker), and the worker stops renewing the lease of a job that runs past its kind's limit.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
+import socket
+import threading
+import time
 from typing import Any
 
+import pytest
+
+from axentra.config.settings import EventsSettings
 from axentra.core.clock import utcnow
 from axentra.data.database import DbScope
-from axentra.events.worker import JobWorker
+from axentra.events.http_client import post_json
+from axentra.events.worker import JobContext, JobWorker
 from tests.integration.conftest import World
 from tests.integration.test_events_webhooks_api import Receiver, lworld, receiver
 
@@ -165,3 +174,100 @@ def test_ax2_01_webhook_delivery_of_suspended_tenant_is_skipped(lworld: World, r
         )
     assert [r["status"] for r in rows] == ["dead"]
     assert rows[0]["last_error"].startswith("skipped: ")
+
+
+# -- AX2-02 ------------------------------------------------------------------------------------
+
+
+class SlowReceiver:
+    """A TCP server that reads the request, then sends its response one byte every ``gap`` seconds."""
+
+    def __init__(self, response: bytes, gap: float = 0.25) -> None:
+        self.response = response
+        self.gap = gap
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(4)
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.sock.getsockname()[1]}/hook"
+
+    def _serve(self) -> None:
+        try:
+            conn, _ = self.sock.accept()
+        except OSError:
+            return
+        with conn:
+            conn.recv(65536)
+            for i in range(len(self.response)):
+                if self.stopped.wait(self.gap):
+                    return
+                try:
+                    conn.sendall(self.response[i : i + 1])
+                except OSError:
+                    return
+
+    def close(self) -> None:
+        self.stopped.set()
+        self.sock.close()
+        self.thread.join(5)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        b"HTTP/1.1 200 OK\r\nX-Pad: " + b"a" * 200 + b"\r\nContent-Length: 0\r\n\r\n",  # slow headers
+        b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\n\r\n" + b"b" * 200,  # slow body
+    ],
+    ids=["headers", "body"],
+)
+def test_ax2_02_webhook_attempt_has_total_deadline(response: bytes) -> None:
+    settings = EventsSettings(
+        webhook_timeout_seconds=1.0, webhook_allow_private_targets=True, webhook_allow_http=True
+    )
+    server = SlowReceiver(response)
+    started = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError):
+            post_json(server.url, b"{}", {"Content-Type": "application/json"}, settings, production=False)
+    finally:
+        server.close()
+    assert time.monotonic() - started < 3.0
+
+
+def test_ax2_02_worker_stops_renewing_lease_past_max_runtime(ax_factory: Any) -> None:
+    ax = ax_factory(events={"lease_seconds": 1, "listen_notify": False, "poll_interval_seconds": 0.05})
+    lost: list[float] = []
+
+    def hang(ctx: JobContext) -> None:
+        started = time.monotonic()
+        while time.monotonic() - started < 5:
+            if ctx.lease_lost:
+                lost.append(time.monotonic() - started)
+                return
+            time.sleep(0.05)
+
+    ax.jobs.register("demo.hang", hang, max_runtime_seconds=0.5)
+    ax.jobs.queue.enqueue(_product_only(ax), None, "demo.hang", {})
+    worker = JobWorker(ax, kinds=["demo.hang"], scheduler=False, housekeeping=False, listen=False)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 8
+        while not lost and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        worker.stop(timeout=6)
+    assert lost and lost[0] < 3.0, "a job past its max runtime still had its lease renewed"
+
+
+def _product_only(ax: Any) -> str:
+    from axentra.core.ids import new_id
+
+    pid = new_id("prd")
+    with ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("INSERT INTO axentra_products (id, slug, name) VALUES (%s, 'hang', 'Hang')", (pid,))
+    return str(pid)

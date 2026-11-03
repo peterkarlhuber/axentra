@@ -7,17 +7,21 @@
   ``events.webhook_allow_private_targets`` is set (tests, development).
 - The connection goes to the checked address itself (no second DNS lookup, which defeats DNS
   rebinding); TLS still verifies the certificate for the host name (SNI).
-- Redirects are not followed, timeouts apply to connect and every read, and only the first
-  ``webhook_response_max_bytes`` of the response body are read.
+- Redirects are not followed and only the first ``webhook_response_max_bytes`` of the response
+  body are read. ``webhook_timeout_seconds`` is the **total** budget of one attempt (connect, TLS
+  handshake, sending, response headers and body): a receiver that answers slowly byte by byte is
+  cut off at the deadline, so one delivery never holds a worker longer than the timeout.
 """
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 import http.client
 import ipaddress
 import socket
 import ssl
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -122,24 +126,81 @@ def resolve_target(target: Target, settings: EventsSettings) -> list[str]:
     return addrs
 
 
+class _Deadline:
+    """Aborts a connection's socket when the total time budget of an attempt is used up.
+
+    Socket timeouts bound each single operation only, so a receiver that sends one byte just
+    before every timeout could keep a delivery open for hours. A timer shuts the socket down at
+    the deadline, which makes any blocked connect/send/recv return at once."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self.expired = False
+        self._lock = threading.Lock()
+        self._sock: socket.socket | None = None
+        self._done = False
+        self._timer = threading.Timer(seconds, self._expire)
+        self._timer.daemon = True
+
+    def start(self) -> None:
+        self._timer.start()
+
+    def watch(self, sock: socket.socket) -> None:
+        with self._lock:
+            self._sock = sock
+            expired = self.expired
+        if expired:
+            self._shutdown(sock)
+
+    def _expire(self) -> None:
+        with self._lock:
+            if self._done:
+                return
+            self.expired = True
+            sock = self._sock
+        if sock is not None:
+            self._shutdown(sock)
+
+    @staticmethod
+    def _shutdown(sock: socket.socket) -> None:
+        # The plain socket method also for TLS sockets: no TLS state change from this thread.
+        with contextlib.suppress(OSError):
+            socket.socket.shutdown(sock, socket.SHUT_RDWR)
+
+    def cancel(self) -> bool:
+        """Stop the timer; ``True`` when the deadline had already expired."""
+        with self._lock:
+            self._done = True
+        self._timer.cancel()
+        return self.expired
+
+
 class _PinnedHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, host: str, port: int, ip: str, timeout: float) -> None:
+    def __init__(self, host: str, port: int, ip: str, timeout: float, deadline: _Deadline) -> None:
         super().__init__(host, port, timeout=timeout)
         self._ip = ip
+        self._deadline = deadline
 
     def connect(self) -> None:
         self.sock = socket.create_connection((self._ip, self.port), self.timeout)
+        self._deadline.watch(self.sock)
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
-    def __init__(self, host: str, port: int, ip: str, timeout: float, context: ssl.SSLContext) -> None:
+    def __init__(
+        self, host: str, port: int, ip: str, timeout: float, context: ssl.SSLContext, deadline: _Deadline
+    ) -> None:
         super().__init__(host, port, timeout=timeout, context=context)
         self._ip = ip
         self._ctx = context
+        self._deadline = deadline
 
     def connect(self) -> None:
         sock = socket.create_connection((self._ip, self.port), self.timeout)
-        self.sock = self._ctx.wrap_socket(sock, server_hostname=self.host)
+        tls = self._ctx.wrap_socket(sock, server_hostname=self.host, do_handshake_on_connect=False)
+        self.sock = tls
+        self._deadline.watch(tls)
+        tls.do_handshake()
 
 
 def post_json(
@@ -155,21 +216,38 @@ def post_json(
     target = parse_target(url, settings, production=production)
     addrs = resolve_target(target, settings)
     timeout = settings.webhook_timeout_seconds
+    deadline = _Deadline(timeout)
     conn: http.client.HTTPConnection
     if target.scheme == "https":
         conn = _PinnedHTTPSConnection(
-            target.host, target.port, addrs[0], timeout, ssl_context or ssl.create_default_context()
+            target.host,
+            target.port,
+            addrs[0],
+            timeout,
+            ssl_context or ssl.create_default_context(),
+            deadline,
         )
     else:
-        conn = _PinnedHTTPConnection(target.host, target.port, addrs[0], timeout)
+        conn = _PinnedHTTPConnection(target.host, target.port, addrs[0], timeout, deadline)
     started = time.perf_counter()
+    deadline.start()
     try:
-        conn.request("POST", target.path, body=body, headers={**headers, "Content-Length": str(len(body))})
-        resp = conn.getresponse()
-        limit = settings.webhook_response_max_bytes
-        raw = resp.read(limit) if limit else b""
-        status = resp.status
+        try:
+            conn.request(
+                "POST", target.path, body=body, headers={**headers, "Content-Length": str(len(body))}
+            )
+            resp = conn.getresponse()
+            limit = settings.webhook_response_max_bytes
+            raw = resp.read(limit) if limit else b""
+            status = resp.status
+        except (OSError, http.client.HTTPException) as exc:
+            if deadline.cancel():
+                raise TimeoutError(f"no complete response within {timeout:g} s") from exc
+            raise
+        if deadline.cancel():
+            raise TimeoutError(f"no complete response within {timeout:g} s")
     finally:
+        deadline.cancel()
         conn.close()
     duration = int((time.perf_counter() - started) * 1000)
     return HttpResult(status=status, body=raw.decode("utf-8", errors="replace"), duration_ms=duration)
