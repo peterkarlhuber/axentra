@@ -20,6 +20,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Problem details `type` URIs are now `urn:axentra:problem:<code>` instead of `https://axentra.dev/problems/<code>`
   (DX-41: that domain belongs to an unrelated company). **Breaking** only for clients that compared `type`
   instead of `code`; Axentra Studio and the SDKs use `code`. See ADR 0009 (amendment).
+- CLI: operator errors (configuration, unreachable database, database errors, unknown `--load` module) print
+  `axentra: <code>: <message>` and exit with status 2 instead of a 20-line traceback (DX-42); new global
+  `--debug` (or `AXENTRA_DEBUG=1`) shows the traceback.
 - New official Axentra logo. `assets/branding/` now holds the two logo masters
   (`axentra-logo-transparent.png`, `axentra-logo-white.png`), the vendored derivation script
   `derive_branding.py` and the derived `axentra-logo.png` (light surfaces),

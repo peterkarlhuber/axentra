@@ -254,6 +254,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="axentra", description="Axentra SaaS backend foundation")
     p.add_argument("--version", action="version", version=f"axentra {__version__}")
     p.add_argument("--config", help="TOML configuration file (default: $AXENTRA_CONFIG)")
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        help="show tracebacks of configuration and database errors (also AXENTRA_DEBUG=1)",
+    )
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("serve", help="run the HTTP API")
@@ -375,9 +380,51 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+#: Exit status of operator errors (configuration, database reachability, missing modules).
+EXIT_OPERATOR_ERROR = 2
+
+
+def _operator_error(exc: BaseException) -> tuple[str, str] | None:
+    """``(code, message)`` for errors an operator causes and can fix, ``None`` for anything else
+    (a bug keeps its traceback)."""
+    import psycopg
+    from psycopg_pool import PoolTimeout
+
+    from axentra.core.errors import AxentraError
+    from axentra.core.redaction import redact_text
+
+    if isinstance(exc, AxentraError):
+        return exc.code, redact_text(str(exc))
+    if isinstance(exc, (psycopg.OperationalError, PoolTimeout)):
+        return "database_unreachable", redact_text(str(exc).strip())
+    if isinstance(exc, psycopg.Error):
+        return "database_error", redact_text(str(exc).strip())
+    if isinstance(exc, ModuleNotFoundError):
+        return "module_not_found", str(exc)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Run a command. Operator errors print ``axentra: <code>: <message>`` and exit with status 2;
+    ``--debug`` (or ``AXENTRA_DEBUG=1``) shows the traceback instead."""
+    import os
+
     args = build_parser().parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except Exception as exc:
+        if args.debug or os.environ.get("AXENTRA_DEBUG", "") not in ("", "0"):
+            raise
+        known = _operator_error(exc)
+        if known is None:
+            raise
+        code, message = known
+        first, *rest = message.splitlines() or [""]
+        print(f"axentra: {code}: {first}", file=sys.stderr)
+        for line in rest:
+            print(f"  {line}", file=sys.stderr)
+        print("axentra: run with --debug for the traceback", file=sys.stderr)
+        return EXIT_OPERATOR_ERROR
 
 
 if __name__ == "__main__":

@@ -481,3 +481,29 @@ def test_dx_41_problem_types_do_not_use_a_foreign_domain(world: World) -> None:
     ]
     for body in bodies:
         assert body["type"] == f"urn:axentra:problem:{body['code']}", body
+
+
+# -- DX-42 -------------------------------------------------------------------------------------
+
+
+def test_dx_42_cli_operator_errors_without_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from axentra.cli import main
+    from axentra.core.errors import ConfigurationError
+
+    monkeypatch.delenv("AXENTRA_DEBUG", raising=False)
+    monkeypatch.delenv("AXENTRA_CONFIG", raising=False)
+    monkeypatch.setenv("AXENTRA__DATABSE__URL", "postgresql://x")  # typo: unknown key
+    assert main(["migrate", "--status"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("axentra: configuration_error: invalid configuration") and "Traceback" not in err
+    assert "--debug" in err
+    with pytest.raises(ConfigurationError):
+        main(["--debug", "migrate", "--status"])
+
+    monkeypatch.delenv("AXENTRA__DATABSE__URL")
+    monkeypatch.setenv("AXENTRA__DATABASE__URL", "postgresql://u:secret-pw@127.0.0.1:1/x?connect_timeout=2")
+    assert main(["migrate", "--status"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("axentra: database_unreachable: ") and "secret-pw" not in err
