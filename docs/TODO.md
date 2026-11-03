@@ -7,7 +7,8 @@ involved. Remove an item in the change that completes it.
 
 Last reviewed: 2026-11-03 (`0.1.0.dev0`, internal backend audit round 2: CI on `master` is green again and
 the security review rounds are closed, so both items were removed; new items from the audit and the DX review
-are marked AX2-NN / DX-NN; AX2-05 and AX2-08 were decided and fixed, so their items were removed).
+are marked AX2-NN / DX-NN; AX2-05 and AX2-08 were decided and fixed, so their items were removed; Studio-facing backend items from the UX
+round 2 are marked AXS-BN).
 
 ## Release and verification
 
@@ -51,6 +52,11 @@ are marked AX2-NN / DX-NN; AX2-05 and AX2-08 were decided and fixed, so their it
 | P2 | events | Webhook deliveries share the job queue and worker slots with all other kinds; attempts are now time-bounded, but a separate concurrency pool or a per-product cap for deliveries is still missing (AX2-02 follow-up) |
 | P3 | events | Webhook URL validation at creation accepts legacy IPv4 notations and any port; delivery already refuses non-global targets after resolving, so this is consistency only. Reject them at creation (AX2-07) |
 | P3 | events | Schedules whose creator lost access keep firing (their jobs now run without permissions); optionally disable a user's schedules when the user loses product access, together with the API key revocation item above (AX2-01 follow-up) |
+| P2 | tenancy | Refused invitation accepts all answer `403 forbidden`, so Studio has to match the English `detail`. Give the three reasons (e-mail mismatch, inactive scope, inviter lost access) their own problem codes or a `reason` member (AXS-B1, UX round 2) |
+| P3 | search | List a tenant's indexed search kinds (for example `GET .../search/kinds` with counts), so clients can offer a picker instead of a free-text kind filter (AXS-B2, UX round 2) |
+| P3 | tenancy | `sort=name` on `GET .../tenants`, so pickers can list the first N tenants by name instead of the oldest N (AXS-B3, UX round 2) |
+| P3 | access | After a key rotation the old key stays `active` with a future `revoked_at`; expose the grace period explicitly (for example `grace_until`) or document it in the OpenAPI (AXS-B4, UX round 2) |
+| P3 | access | Built-in role descriptions are English-only; add a stable description key to the role catalog so clients can translate them (AXS-B5, UX round 2) |
 | P3 | identity | `GET /v1/me` lists every readable tenant (no cap since AX2-03), so for product operators and platform roles the response grows with the number of tenants. Consider an opt-in parameter (for example memberships only, or paging) at the next `/v1` cleanup, coordinated with Studio, which needs only memberships and product-level permissions |
 
 ## Developer experience (Phase 4)
