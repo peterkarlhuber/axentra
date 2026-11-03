@@ -7,10 +7,10 @@
 # Dependencies are pinned by deploy/constraints.txt (see the header there to regenerate).
 # The image runs as an unprivileged user (uid/gid 10001) and contains no compiler or build tools.
 
-ARG PYTHON_IMAGE=python:3.13-slim
+# The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
 
 # --- build: install Axentra and its pinned dependencies into a self-contained venv -------------
-FROM ${PYTHON_IMAGE} AS build
+FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS build
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
@@ -24,7 +24,7 @@ RUN /opt/axentra/bin/pip install --constraint deploy/constraints.txt "/src[${EXT
     && /opt/axentra/bin/axentra --version
 
 # --- runtime ------------------------------------------------------------------------------------
-FROM ${PYTHON_IMAGE} AS runtime
+FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS runtime
 LABEL org.opencontainers.image.title="Axentra" \
       org.opencontainers.image.description="Modular SaaS backend foundation (HTTP API)" \
       org.opencontainers.image.source="https://github.com/peterkarlhuber/axentra" \

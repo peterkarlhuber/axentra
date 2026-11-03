@@ -1,0 +1,38 @@
+# Weekly, grouped update pull requests with a small limit, like the Nodestro repositories. Every action in the
+# workflows is pinned by commit SHA (the version is the trailing comment); Dependabot keeps those pins current, and
+# the digests of the Python base image in the Dockerfiles.
+# pip covers pyproject.toml, the image pins in deploy/constraints.txt and the Python SDK.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directories: [/, /deploy, /sdk/python]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      pip-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories: [/, /examples/taskboard]
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
