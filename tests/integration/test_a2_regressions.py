@@ -4,10 +4,12 @@ AX2-01: a schedule's jobs must not keep the full handler permissions after its c
         and nothing runs for a suspended tenant or an archived product (skipped with a reason).
 AX2-02: one webhook delivery attempt has a total deadline (a slow-drip receiver cannot hold a
         worker), and the worker stops renewing the lease of a job that runs past its kind's limit.
+AX2-03: GET /v1/me lists every tenant (no 200 cap) without one authorization per tenant.
 """
 
 from __future__ import annotations
 
+import contextlib
 from datetime import timedelta
 import socket
 import threading
@@ -16,8 +18,11 @@ from typing import Any
 
 import pytest
 
+from axentra.access.authorizer import Authorizer
 from axentra.config.settings import EventsSettings
 from axentra.core.clock import utcnow
+from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
+from axentra.core.errors import Forbidden, NotFound
 from axentra.data.database import DbScope
 from axentra.events.http_client import post_json
 from axentra.events.worker import JobContext, JobWorker
@@ -271,3 +276,119 @@ def _product_only(ax: Any) -> str:
     with ax.db.transaction(DbScope.platform()) as tx:
         tx.execute("INSERT INTO axentra_products (id, slug, name) VALUES (%s, 'hang', 'Hang')", (pid,))
     return str(pid)
+
+
+# -- AX2-03 ------------------------------------------------------------------------------------
+
+
+def test_ax2_03_me_lists_tenant_beyond_200(world: World) -> None:
+    pid, tid = _pt(world)
+    with world.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute(
+            "INSERT INTO axentra_tenants (id, product_id, slug, name) SELECT 'ten_00x' || lpad(g::text, 4, '0'), %s,"
+            " 'early-' || g, 'Early' FROM generate_series(1, 201) g",
+            (pid,),
+        )
+    world.user("late@example.com")
+    r = world.admin.post(
+        f"/v1/products/{pid}/tenants/{tid}/members", json={"email": "late@example.com", "role": "member"}
+    )
+    assert r.status_code == 201
+    me: dict[str, Any] = world.login_as("late@example.com").get("/v1/me").json()
+    tenants = [t["tenant"]["id"] for p in me["products"] for t in p["tenants"]]
+    assert tenants == [tid]
+    # Product operators and platform admins see every tenant (202 here), not the first 200.
+    admin_me: dict[str, Any] = world.admin.get("/v1/me").json()
+    assert len(admin_me["products"][0]["tenants"]) == 202
+
+
+def test_ax2_03_me_does_not_authorize_per_tenant(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    pid, _ = _pt(world)
+    for i in range(20):
+        world.admin.post(f"/v1/products/{pid}/tenants", json={"slug": f"t{i}", "name": f"T{i}"})
+    calls: list[str | None] = []
+    original = Authorizer.grant
+
+    def counting(
+        self: Authorizer, principal: Principal, product_id: str | None = None, tenant_id: str | None = None
+    ) -> Any:
+        calls.append(tenant_id)
+        return original(self, principal, product_id, tenant_id)
+
+    monkeypatch.setattr(Authorizer, "grant", counting)
+    me = world.admin.get("/v1/me").json()
+    assert len(me["products"][0]["tenants"]) == 21
+    assert [c for c in calls if c is not None] == []
+
+
+def test_ax2_03_tenant_grants_match_grant(world: World) -> None:
+    """``Authorizer.tenant_grants`` must agree with ``Authorizer.grant`` per tenant."""
+    ax, a = world.ax, world.admin
+    pid, t1 = _pt(world)
+    t2 = a.post(f"/v1/products/{pid}/tenants", json={"slug": "t2", "name": "T2"}).json()["id"]
+    t3 = a.post(f"/v1/products/{pid}/tenants", json={"slug": "t3", "name": "T3"}).json()["id"]
+    r = a.post(
+        f"/v1/products/{pid}/roles",
+        json={
+            "key": "auditor",
+            "name": "Auditor",
+            "scope": "tenant",
+            "permissions": ["tenant:read", "records:read"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    users = {e: world.user(e) for e in ("pa@example.com", "m@example.com", "c@example.com", "v@example.com")}
+    assert (
+        a.post(
+            f"/v1/products/{pid}/members", json={"email": "pa@example.com", "role": "product_admin"}
+        ).status_code
+        == 201
+    )
+    for t, e, role in (
+        (t1, "m@example.com", "member"),
+        (t2, "m@example.com", "tenant_admin"),
+        (t1, "c@example.com", "auditor"),
+        (t3, "pa@example.com", "tenant_owner"),
+    ):
+        assert (
+            a.post(f"/v1/products/{pid}/tenants/{t}/members", json={"email": e, "role": role}).status_code
+            == 201
+        )
+    with ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute(
+            "INSERT INTO axentra_platform_roles (user_id, role) VALUES (%s, 'platform_viewer')",
+            (users["v@example.com"],),
+        )
+    assert a.patch(f"/v1/products/{pid}/tenants/{t2}", json={"status": "suspended"}).status_code == 200
+
+    def user(email: str, role: PlatformRole | None = None) -> Principal:
+        return Principal(actor=Actor(ActorKind.USER, users[email]), platform_role=role)
+
+    def key(tenant: str | None) -> Principal:
+        return Principal(
+            actor=Actor(ActorKind.API_KEY, "key_test"),
+            api_key_product_id=pid,
+            api_key_tenant_id=tenant,
+            api_key_permissions=frozenset({"tenant:read", "records:read", "users:read"}),
+        )
+
+    principals = [
+        user("pa@example.com"),
+        user("m@example.com"),
+        user("c@example.com"),
+        user("v@example.com", PlatformRole.VIEWER),
+        Principal(actor=Actor(ActorKind.USER, "usr_admin"), platform_role=PlatformRole.ADMIN),
+        Principal(actor=Actor(ActorKind.USER, "usr_nobody")),
+        key(None),
+        key(t1),
+        key(t2),
+    ]
+    for archived in (False, True):
+        if archived:
+            assert a.post(f"/v1/products/{pid}/archive").status_code == 200
+        for p in principals:
+            expected = {}
+            for t in (t1, t2, t3):
+                with contextlib.suppress(Forbidden, NotFound):
+                    expected[t] = ax.authz.grant(p, pid, t)
+            assert ax.authz.tenant_grants(p, pid) == expected, (p.actor, archived)

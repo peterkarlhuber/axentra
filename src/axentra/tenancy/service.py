@@ -23,7 +23,7 @@ Role assignment rules (see docs/architecture/SECURITY_MODEL.md, "Role ceiling"):
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import timedelta
 import re
 from typing import Any
@@ -546,6 +546,22 @@ class TenancyService:
         return Page[Tenant](
             items=items, next_cursor=encode_cursor([items[-1].id]) if len(rows) > limit else None
         )
+
+    def tenants_by_id(self, product_id: str, tenant_ids: Iterable[str]) -> list[Tenant]:
+        """The tenants of ``product_id`` with these ids, ordered by id, in one query. No
+        authorization: callers pass ids they already authorized (``GET /v1/me``)."""
+        ids = sorted(set(tenant_ids))
+        if not ids:
+            return []
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            rows = tx.all(
+                "SELECT t.*, COALESCE(m.n, 0) AS member_count FROM axentra_tenants t"
+                " LEFT JOIN (SELECT tenant_id, count(*) AS n FROM axentra_memberships"
+                " WHERE product_id = %s AND tenant_id = ANY(%s) GROUP BY tenant_id) m ON m.tenant_id = t.id"
+                " WHERE t.product_id = %s AND t.id = ANY(%s) ORDER BY t.id",
+                (product_id, ids, product_id, ids),
+            )
+        return [Tenant.model_validate(r) for r in rows]
 
     def create_tenant(
         self,

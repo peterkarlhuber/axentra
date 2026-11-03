@@ -9,6 +9,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Fixed
+- `GET /v1/me` listed only tenants among the product's first 200 (by id), so members of later tenants got
+  an empty `tenants` list and lost their tenant permissions in Axentra Studio (audit round 2, AX2-03). It now
+  lists every readable tenant, with the same entries, order and response shape as before; the per-tenant
+  authorization (one round of queries per tenant) is replaced by `Authorizer.tenant_grants`, a fixed number of
+  queries per product, and `TenancyService.tenants_by_id`.
+
 ### Changed
 - New official Axentra logo. `assets/branding/` now holds the two logo masters
   (`axentra-logo-transparent.png`, `axentra-logo-white.png`), the vendored derivation script
