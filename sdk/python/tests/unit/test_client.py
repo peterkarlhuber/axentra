@@ -60,7 +60,7 @@ def aclient(handler: Handler, **kw: Any) -> tuple[AsyncAxentraClient, Recorder]:
 
 def problem(status: int, code: str, **extra: Any) -> httpx.Response:
     body = {
-        "type": f"https://axentra.dev/problems/{code}",
+        "type": f"urn:axentra:problem:{code}",
         "title": code,
         "status": status,
         "code": code,

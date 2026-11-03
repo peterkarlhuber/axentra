@@ -17,6 +17,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   queries per product, and `TenancyService.tenants_by_id`.
 
 ### Changed
+- Problem details `type` URIs are now `urn:axentra:problem:<code>` instead of `https://axentra.dev/problems/<code>`
+  (DX-41: that domain belongs to an unrelated company). **Breaking** only for clients that compared `type`
+  instead of `code`; Axentra Studio and the SDKs use `code`. See ADR 0009 (amendment).
 - New official Axentra logo. `assets/branding/` now holds the two logo masters
   (`axentra-logo-transparent.png`, `axentra-logo-white.png`), the vendored derivation script
   `derive_branding.py` and the derived `axentra-logo.png` (light surfaces),

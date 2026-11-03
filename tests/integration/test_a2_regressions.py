@@ -467,3 +467,17 @@ def test_ax2_04_refused_acceptance_is_audited(world: World) -> None:
     )
     denied = world.ax.audit.list(DbScope.platform(), product_id=pid, action="tenancy.invitation.accept").items
     assert [(e.outcome, e.details.get("reason")) for e in denied] == [("denied", "email_mismatch")]
+
+
+# -- DX-41 -------------------------------------------------------------------------------------
+
+
+def test_dx_41_problem_types_do_not_use_a_foreign_domain(world: World) -> None:
+    """Problem ``type`` URIs are ``urn:axentra:problem:<code>``, not a third-party domain."""
+    bodies = [
+        world.admin.get("/v1/products/prd_missing").json(),
+        world.admin.post("/v1/products", json={}).json(),  # validation error
+        world.browser().get("/v1/me").json(),  # unauthenticated
+    ]
+    for body in bodies:
+        assert body["type"] == f"urn:axentra:problem:{body['code']}", body

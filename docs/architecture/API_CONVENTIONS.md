@@ -60,7 +60,7 @@ reported by `GET /v1/meta` (`product`).
 RFC 9457 problem details, `application/problem+json`:
 
 ```json
-{"type": "https://axentra.dev/problems/not_found", "title": "Not found", "status": 404,
+{"type": "urn:axentra:problem:not_found", "title": "Not found", "status": 404,
  "code": "not_found", "detail": "...", "request_id": "req_..."}
 ```
 
