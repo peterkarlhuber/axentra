@@ -176,6 +176,9 @@ All decisions go through `axentra.access.authorizer.Authorizer`:
    `403 Forbidden`. API keys get `404` for any product or tenant other than their own.
 3. **Product-level view for tenant members.** A user who is only a tenant member of a product
    (no operator role) gets `product:read` at product level, to pick a tenant, and nothing else.
+   With it, `GET /v1/products/{p}/overview` returns counts of the member's own tenants only
+   (`scope: "tenant"`, product-level counters `null`); product-wide counts need `tenants:read`
+   on the product (AX2-05).
 4. **Archived products and suspended tenants.** Platform admins keep full access (to inspect and
    restore). Platform viewers keep read access. Everyone else, including API keys, gets
    `403 Forbidden`. One exception for the tenant *record* (name, slug, status, member count:

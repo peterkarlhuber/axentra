@@ -3530,17 +3530,44 @@ export interface components {
             /** User Id */
             user_id: string;
         };
-        /** ProductOverview */
+        /**
+         * ProductOverview
+         * @description Counts for the product dashboard.
+         *
+         *     ``scope`` tells what the counts cover. ``product``: callers that hold ``tenants:read`` on the
+         *     product (product operators, platform roles, product-wide API keys with that permission) get
+         *     product-wide counts. ``tenant``: every other caller (plain tenant members, product-wide keys
+         *     without ``tenants:read``) gets counts of its own tenants only: ``tenants`` counts the tenants in
+         *     which it holds ``tenant:read``, ``users`` the distinct members of those in which it holds
+         *     ``members:read``, ``records`` the records of those in which it holds ``records:read``; the
+         *     product-level counters ``api_keys``, ``audit_events_24h`` and ``denied_events_24h`` are
+         *     ``null``.
+         */
         ProductOverview: {
-            /** Api Keys */
-            api_keys: number;
-            /** Audit Events 24H */
-            audit_events_24h: number;
-            /** Denied Events 24H */
-            denied_events_24h: number;
+            /**
+             * Api Keys
+             * @description null when scope is tenant
+             */
+            api_keys: number | null;
+            /**
+             * Audit Events 24H
+             * @description null when scope is tenant
+             */
+            audit_events_24h: number | null;
+            /**
+             * Denied Events 24H
+             * @description null when scope is tenant
+             */
+            denied_events_24h: number | null;
             product: components["schemas"]["Product"];
             /** Records */
             records: number;
+            /**
+             * Scope
+             * @description product: product-wide counts; tenant: counts of the caller's own tenants only
+             * @enum {string}
+             */
+            scope: "product" | "tenant";
             /** Tenants */
             tenants: number;
             /** Users */
