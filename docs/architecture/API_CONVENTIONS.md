@@ -70,7 +70,7 @@ RFC 9457 problem details, `application/problem+json`:
 | ------ | ----- |
 | 400 | `bad_request` (unreadable request), `validation_failed`, `invalid_cursor` (malformed or tampered `cursor`), `invalid_signature` (billing provider webhook) |
 | 401 | `unauthenticated` |
-| 403 | `forbidden`, `reauthentication_required` |
+| 403 | `forbidden`, `reauthentication_required`, `backdating_not_permitted` (usage dated before the current billing period, with `period_start`) |
 | 404 | `not_found`, `module_disabled` |
 | 405 | `method_not_allowed` |
 | 409 | `conflict`, `setup_already_completed`, `email_taken`, `mode_not_supported`, `payment_provider_not_configured` |

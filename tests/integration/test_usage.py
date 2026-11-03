@@ -342,3 +342,87 @@ def test_new_tables_force_rls_and_confine_queries(ax, world, pg_urls):
     with ax.db.transaction(DbScope.product(pid2), read_only=True) as tx:
         assert tx.all("SELECT * FROM axentra_usage_meters") == []
         assert tx.all("SELECT * FROM axentra_usage_events") == []
+
+
+def test_backdating_is_limited_to_the_current_billing_period(ax, world):
+    """AX2-08: members keep usage:record, but usage dated before the tenant's current billing
+    period needs usage:manage on the product (product operators, platform admins)."""
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _meter(world, pid)
+    fixed = datetime(2026, 3, 15, 12, 0, tzinfo=UTC)
+    real = ax.usage.clock
+    ax.usage.clock = lambda: fixed
+    try:
+        member = _member(world, pid, tid, "m@example.com")
+        tenant_admin = _member(world, pid, tid, "ta@example.com", role="tenant_admin")
+        inside = datetime(2026, 3, 1, 0, 0, tzinfo=UTC).isoformat()
+        outside = datetime(2026, 2, 28, 23, 59, tzinfo=UTC).isoformat()
+        # Member, inside the current period (calendar month without a subscription): allowed.
+        r = _record(member, pid, tid, "m-in", occurred_at=inside)
+        assert r.status_code == 201, r.text
+        # Member, before the current period: refused with its own problem code.
+        r = _record(member, pid, tid, "m-out", occurred_at=outside)
+        assert r.status_code == 403, r.text
+        body = r.json()
+        assert body["code"] == "backdating_not_permitted"
+        assert body["type"] == "urn:axentra:problem:backdating_not_permitted"
+        assert body["period_start"] == "2026-03-01T00:00:00+00:00"
+        # A tenant admin holds every tenant permission, but not the product-level usage:manage.
+        r = _record(tenant_admin, pid, tid, "ta-out", occurred_at=outside)
+        assert r.status_code == 403 and r.json()["code"] == "backdating_not_permitted"
+        # A tenant-bound key with usage:record only: same rule.
+        r = world.admin.post(
+            f"/v1/products/{pid}/api-keys",
+            json={"name": "ingest", "permissions": ["usage:record"], "tenant_id": tid},
+        )
+        from fastapi.testclient import TestClient
+
+        key = TestClient(world.app, headers={"Authorization": f"Bearer {r.json()['secret']}"})
+        assert _record(key, pid, tid, "k-in", occurred_at=inside).status_code == 201
+        assert _record(key, pid, tid, "k-out", occurred_at=outside).status_code == 403
+        # A product operator with usage:manage may backdate up to the 400-day bound.
+        r = _record(world.admin, pid, tid, "adm-out", occurred_at=outside, quantity=2)
+        assert r.status_code == 201, r.text
+        too_old = (fixed - timedelta(days=401)).isoformat()
+        assert _record(world.admin, pid, tid, "adm-old", occurred_at=too_old).status_code == 422
+        # Nothing was counted for the refused requests.
+        events = world.admin.get(f"/v1/products/{pid}/tenants/{tid}/usage/events").json()["items"]
+        assert sorted(e["idempotency_key"] for e in events) == ["adm-out", "k-in", "m-in"]
+        # A retry of an accepted request stays idempotent after the period has closed.
+        ax.usage.clock = lambda: datetime(2026, 4, 2, 12, 0, tzinfo=UTC)
+        r = _record(member, pid, tid, "m-in", occurred_at=inside)
+        assert r.status_code == 200 and r.json()["replayed"] is True
+        # Omitting occurred_at (server time) is always inside the current period.
+        assert _record(member, pid, tid, "m-now").status_code == 201
+    finally:
+        ax.usage.clock = real
+
+
+def test_backdating_follows_the_tenant_billing_cycle(ax, world):
+    """With a billing cycle (UsagePolicy), the current period is the cycle, not the calendar month."""
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _meter(world, pid)
+    member = _member(world, pid, tid, "m@example.com")
+    fixed = datetime(2026, 3, 20, 12, 0, tzinfo=UTC)
+    cycle_start = datetime(2026, 3, 15, tzinfo=UTC)
+
+    class Policy:
+        def plan_limits(self, tx, product_id, tenant_id):
+            return None
+
+        def billing_period(self, tx, product_id, tenant_id, at):
+            return (cycle_start, datetime(2026, 4, 15, tzinfo=UTC)) if at >= cycle_start else None
+
+    real_clock, real_policy = ax.usage.clock, ax.usage._policy
+    ax.usage.clock = lambda: fixed
+    ax.usage.set_policy(Policy())
+    try:
+        # Same calendar month, but before the cycle started: refused for a member.
+        r = _record(member, pid, tid, "early", occurred_at=datetime(2026, 3, 10, tzinfo=UTC).isoformat())
+        assert r.status_code == 403 and r.json()["period_start"] == cycle_start.isoformat()
+        assert _record(member, pid, tid, "late", occurred_at=cycle_start.isoformat()).status_code == 201
+    finally:
+        ax.usage.clock = real_clock
+        ax.usage.set_policy(real_policy)

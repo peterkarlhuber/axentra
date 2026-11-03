@@ -28,7 +28,14 @@ from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
 from axentra.core.clock import utcnow
 from axentra.core.context import Principal
-from axentra.core.errors import Conflict, NotFound, PreconditionFailed, QuotaExceeded, ValidationFailed
+from axentra.core.errors import (
+    BackdatingNotPermitted,
+    Conflict,
+    NotFound,
+    PreconditionFailed,
+    QuotaExceeded,
+    ValidationFailed,
+)
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
@@ -487,6 +494,20 @@ class UsageService:
             raise ValidationFailed("occurred_at is too far in the past")
         return occurred_at
 
+    def _check_backdate(
+        self, tx: Tx, principal: Principal, product_id: str, tenant_id: str, occurred_at: datetime
+    ) -> None:
+        """Refuse usage dated before the tenant's current billing period (the subscription cycle,
+        otherwise the calendar month) unless the caller holds ``usage:manage`` on the product
+        (AX2-08): tenant members may record usage, but must not change closed periods."""
+        start, _ = self._period(tx, product_id, tenant_id, "billing_period", self.clock())
+        if occurred_at >= start or self.authz.has(principal, "usage:manage", product_id):
+            return
+        raise BackdatingNotPermitted(
+            "usage before the current billing period needs usage:manage on the product",
+            extra={"period_start": start.isoformat()},
+        )
+
     def _replay(self, existing: Row, request_hash: str) -> UsageEvent:
         if existing["request_hash"] != request_hash:
             raise Conflict("the idempotency key was already used with a different request")
@@ -507,6 +528,7 @@ class UsageService:
         *,
         enforce: bool,
         reservation_id: str | None = None,
+        check_backdate: bool = False,
     ) -> RecordResult:
         existing = tx.one(
             _EVENT_SQL + " WHERE e.product_id = %s AND e.tenant_id = %s AND e.idempotency_key = %s",
@@ -520,6 +542,9 @@ class UsageService:
                 replayed=True,
                 quota=self._current_status(tx, product_id, tenant_id, m, self.clock()),
             )
+        if check_backdate:
+            # After the replay lookup, so a retried request stays idempotent across a period change.
+            self._check_backdate(tx, principal, product_id, tenant_id, occurred_at)
         start, end = self._period(tx, product_id, tenant_id, meter["reset_period"], occurred_at)
         counter = self._lock_counter(tx, product_id, tenant_id, meter["id"], start, end)
         limit = self._resolve_limit(meter, self._limit_context(tx, product_id, tenant_id))
@@ -732,6 +757,7 @@ class UsageService:
                 request_hash,
                 props,
                 enforce=enforce,
+                check_backdate=occurred_at is not None,
             )
 
         if tx is not None:

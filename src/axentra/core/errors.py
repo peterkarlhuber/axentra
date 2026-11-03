@@ -79,6 +79,15 @@ class ReauthenticationRequired(Forbidden):
     code = "reauthentication_required"
 
 
+class BackdatingNotPermitted(Forbidden):
+    """Usage dated before the tenant's current billing period needs product-level ``usage:manage``.
+
+    ``extra`` carries ``period_start``: the earliest ``occurred_at`` the caller may use."""
+
+    code = "backdating_not_permitted"
+    title = "Backdating not permitted"
+
+
 class NotFound(AxentraError):
     code = "not_found"
     status = 404

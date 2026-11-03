@@ -4558,7 +4558,10 @@ export interface components {
             enforce?: boolean;
             /** Meter */
             meter: string;
-            /** Occurred At */
+            /**
+             * Occurred At
+             * @description default: server time. At most 5 minutes in the future and 400 days in the past; before the tenant's current billing period only with usage:manage on the product (otherwise 403 backdating_not_permitted)
+             */
             occurred_at?: string | null;
             /** Properties */
             properties?: {

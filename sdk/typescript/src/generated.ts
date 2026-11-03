@@ -4,4 +4,4 @@
 export const GENERATED_API_VERSION = { major: 1, minor: 0 } as const;
 
 /** SHA-256 of the OpenAPI document the types were generated from. */
-export const GENERATED_FROM_SHA256 = '2de35f9b61b8121974d6f5e9fdf3e68d7a059750f73e93b7051eb503d4b0bf9a';
+export const GENERATED_FROM_SHA256 = '72671d90fc3c2ef7ec3e6354a3a5b3e06da8f5fb814b600a54905020d81b5681';
