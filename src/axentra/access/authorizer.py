@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from axentra.access.permissions import BUILTIN_ROLES, PLATFORM, PLATFORM_ROLE_PERMISSIONS
 from axentra.access.product_permissions import ProductCatalog, load_catalog
-from axentra.core.context import ActorKind, Principal
+from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
 from axentra.core.errors import Forbidden, NotFound
 from axentra.data.database import Database, DbScope, Tx
 
@@ -148,6 +148,40 @@ class Authorizer:
         return Grant(
             permissions=frozenset(perms), related=True, product_role=product_role, tenant_role=tenant_role
         )
+
+    def actor_principal(self, actor_id: str | None) -> Principal | None:
+        """The principal of a recorded actor id (``created_by``, ``invited_by``) as it stands *now*:
+        a user with their current platform role, an API key with its current product, tenant and
+        permissions. A disabled or deleted user, or a revoked, expired or deleted key, yields a
+        principal without any relation (every grant is refused). ``None`` for other actors (system
+        callers in process), which callers treat as trusted."""
+        if not actor_id:
+            return None
+        if actor_id.startswith("usr_"):
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one(
+                    "SELECT u.status, pr.role FROM axentra_users u"
+                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id WHERE u.id = %s",
+                    (actor_id,),
+                )
+            if row is None or row["status"] != "active":
+                return Principal(actor=Actor(ActorKind.USER, actor_id))  # no relation: nothing
+            role = PlatformRole(row["role"]) if row["role"] else None
+            return Principal(actor=Actor(ActorKind.USER, actor_id), platform_role=role)
+        if actor_id.startswith("key_"):
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one(
+                    "SELECT product_id, tenant_id, permissions FROM axentra_api_keys WHERE id = %s"
+                    " AND (revoked_at IS NULL OR revoked_at > now()) AND (expires_at IS NULL OR expires_at > now())",
+                    (actor_id,),
+                )
+            return Principal(
+                actor=Actor(ActorKind.API_KEY, actor_id),
+                api_key_product_id=row["product_id"] if row else "-",
+                api_key_tenant_id=row["tenant_id"] if row else None,
+                api_key_permissions=frozenset(row["permissions"]) if row else frozenset(),
+            )
+        return None
 
     def tenant_grants(self, principal: Principal, product_id: str) -> dict[str, Grant]:
         """``grant(principal, product_id, tenant_id)`` for every tenant of the product where that

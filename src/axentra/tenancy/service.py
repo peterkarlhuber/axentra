@@ -82,6 +82,16 @@ def _like(q: str) -> str:
     return "%" + q.replace("%", r"\%").replace("_", r"\_") + "%"
 
 
+class _AcceptDenied(Exception):
+    """An invitation acceptance refused after the token was found (audited as ``denied``)."""
+
+    def __init__(self, invitation: dict[str, Any], reason: str, message: str) -> None:
+        super().__init__(message)
+        self.invitation = invitation
+        self.reason = reason
+        self.message = message
+
+
 class TenancyService:
     def __init__(self, db: Database, settings: Settings, authz: Authorizer, audit: AuditLog) -> None:
         self.db = db
@@ -898,10 +908,56 @@ class TenancyService:
                 tenant_id=tenant_id,
             )
 
+    def _invitation_refusal(self, tx: Tx, inv: dict[str, Any]) -> tuple[str, str] | None:
+        """Why an otherwise valid invitation cannot be accepted *now*, or ``None``.
+
+        The tenant and product must be active, and the inviter must still be allowed to invite
+        with that role (``members:manage`` in the tenant and the role ceiling, evaluated with the
+        inviter's current access), so an invitation does not outlive its sender's rights.
+        Invitations created in process by a system caller have no inviter to check."""
+        scope = tx.one(
+            "SELECT p.status AS product_status, t.status AS tenant_status FROM axentra_tenants t"
+            " JOIN axentra_products p ON p.id = t.product_id WHERE t.id = %s AND t.product_id = %s",
+            (inv["tenant_id"], inv["product_id"]),
+        )
+        if scope is None or scope["product_status"] != "active" or scope["tenant_status"] != "active":
+            return "scope_inactive", "the invitation cannot be accepted: the tenant is not active"
+        inviter = self.authz.actor_principal(inv["invited_by"])
+        if inviter is None:
+            return None
+        try:
+            grant = self.authz.require(inviter, "members:manage", inv["product_id"], inv["tenant_id"])
+            self._check_ceiling(tx, inviter, grant, inv["product_id"], "tenant", inv["role"], None)
+        except (Forbidden, NotFound):
+            return (
+                "inviter_lost_access",
+                "the invitation is no longer valid: its sender can no longer grant this role",
+            )
+        return None
+
     def accept_invitation(self, principal: Principal, token: str) -> Membership:
-        """The logged-in user accepts; the invitation's email must match the user's email."""
+        """The logged-in user accepts; the invitation's email must match the user's email, the
+        tenant must be active and the inviter must still hold the right to invite with that role
+        (:meth:`_invitation_refusal`)."""
         if principal.user_id is None:
             raise Forbidden("only users can accept invitations")
+        try:
+            return self._accept_invitation(principal, token)
+        except _AcceptDenied as denied:
+            # Recorded in its own transaction: the refused acceptance changed nothing.
+            self.audit.record_standalone(
+                principal,
+                "tenancy.invitation.accept",
+                outcome="denied",
+                target_type="invitation",
+                target_id=denied.invitation["id"],
+                product_id=denied.invitation["product_id"],
+                tenant_id=denied.invitation["tenant_id"],
+                details={"reason": denied.reason},
+            )
+            raise Forbidden(denied.message) from None
+
+    def _accept_invitation(self, principal: Principal, token: str) -> Membership:
         with self.db.transaction(DbScope.platform()) as tx:
             inv = tx.one(
                 "SELECT *, expires_at <= now() AS expired FROM axentra_invitations WHERE token_hash = %s FOR UPDATE",
@@ -912,17 +968,12 @@ class TenancyService:
             email = tx.scalar("SELECT email FROM axentra_users WHERE id = %s", (principal.user_id,))
             # Bound to the address: a user without an email address can never accept by match.
             if not email or str(email).lower() != inv["email"].lower():
-                self.audit.record(
-                    tx,
-                    principal,
-                    "tenancy.invitation.accept",
-                    outcome="denied",
-                    target_type="invitation",
-                    target_id=inv["id"],
-                    product_id=inv["product_id"],
-                    tenant_id=inv["tenant_id"],
+                raise _AcceptDenied(
+                    inv, "email_mismatch", "this invitation was sent to another email address"
                 )
-                raise Forbidden("this invitation was sent to another email address")
+            refusal = self._invitation_refusal(tx, inv)
+            if refusal is not None:
+                raise _AcceptDenied(inv, *refusal)
             tx.execute(
                 "INSERT INTO axentra_memberships (id, product_id, tenant_id, user_id, role) VALUES (%s,%s,%s,%s,%s)"
                 " ON CONFLICT (tenant_id, user_id) DO NOTHING",

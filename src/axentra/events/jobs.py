@@ -38,7 +38,7 @@ from axentra.access.permissions import (
 )
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
-from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
+from axentra.core.context import Actor, ActorKind, Principal
 from axentra.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
@@ -515,31 +515,7 @@ class JobService:
             if creator and creator.startswith(SCHEDULE_CREATOR_PREFIX):
                 return Principal(actor=Actor(ActorKind.USER, created_by))
             return self._enqueuer(creator)
-        if created_by.startswith("usr_"):
-            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
-                row = tx.one(
-                    "SELECT u.status, pr.role FROM axentra_users u"
-                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id WHERE u.id = %s",
-                    (created_by,),
-                )
-            if row is None or row["status"] != "active":
-                return Principal(actor=Actor(ActorKind.USER, created_by))  # no relation: nothing
-            role = PlatformRole(row["role"]) if row["role"] else None
-            return Principal(actor=Actor(ActorKind.USER, created_by), platform_role=role)
-        if created_by.startswith("key_"):
-            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
-                row = tx.one(
-                    "SELECT product_id, tenant_id, permissions FROM axentra_api_keys WHERE id = %s"
-                    " AND (revoked_at IS NULL OR revoked_at > now()) AND (expires_at IS NULL OR expires_at > now())",
-                    (created_by,),
-                )
-            return Principal(
-                actor=Actor(ActorKind.API_KEY, created_by),
-                api_key_product_id=row["product_id"] if row else "-",
-                api_key_tenant_id=row["tenant_id"] if row else None,
-                api_key_permissions=frozenset(row["permissions"]) if row else frozenset(),
-            )
-        return None
+        return self.authz.actor_principal(created_by)
 
     def principal_for(self, job: Job) -> Principal:
         """The principal a job's handler acts as.

@@ -5,6 +5,8 @@ AX2-01: a schedule's jobs must not keep the full handler permissions after its c
 AX2-02: one webhook delivery attempt has a total deadline (a slow-drip receiver cannot hold a
         worker), and the worker stops renewing the lease of a job that runs past its kind's limit.
 AX2-03: GET /v1/me lists every tenant (no 200 cap) without one authorization per tenant.
+AX2-04: an invitation is not accepted after its inviter lost the right to grant that role, or
+        while the tenant is suspended.
 """
 
 from __future__ import annotations
@@ -392,3 +394,76 @@ def test_ax2_03_tenant_grants_match_grant(world: World) -> None:
                 with contextlib.suppress(Forbidden, NotFound):
                     expected[t] = ax.authz.grant(p, pid, t)
             assert ax.authz.tenant_grants(p, pid) == expected, (p.actor, archived)
+
+
+# -- AX2-04 ------------------------------------------------------------------------------------
+
+
+def _invite_as_tenant_admin(world: World) -> tuple[str, str, str, str]:
+    pid, tid = _pt(world)
+    base = f"/v1/products/{pid}/tenants/{tid}"
+    uid = world.user("ta@example.com")
+    assert (
+        world.admin.post(
+            f"{base}/members", json={"email": "ta@example.com", "role": "tenant_admin"}
+        ).status_code
+        == 201
+    )
+    r = world.login_as("ta@example.com").post(
+        f"{base}/invitations", json={"email": "x@example.com", "role": "tenant_admin"}
+    )
+    assert r.status_code == 201, r.text
+    world.user("x@example.com")
+    return pid, tid, uid, r.json()["token"]
+
+
+def test_ax2_04_invitation_dies_with_inviter_rights(world: World) -> None:
+    pid, tid, uid, token = _invite_as_tenant_admin(world)
+    assert world.admin.delete(f"/v1/products/{pid}/tenants/{tid}/members/{uid}").status_code == 204
+    r = world.login_as("x@example.com").post("/v1/invitations/accept", json={"token": token})
+    assert r.status_code in (403, 404), r.text
+    members = world.admin.get(f"/v1/products/{pid}/tenants/{tid}/members").json()
+    assert all(m["email"] != "x@example.com" for m in members)
+    denied = world.ax.audit.list(DbScope.platform(), product_id=pid, action="tenancy.invitation.accept").items
+    assert denied and denied[0].outcome == "denied" and denied[0].details["reason"] == "inviter_lost_access"
+
+
+def test_ax2_04_invitation_refused_after_inviter_downgrade(world: World) -> None:
+    pid, tid, _, token = _invite_as_tenant_admin(world)
+    r = world.admin.post(
+        f"/v1/products/{pid}/tenants/{tid}/members", json={"email": "ta@example.com", "role": "member"}
+    )
+    assert r.status_code == 201, r.text
+    assert (
+        world.login_as("x@example.com").post("/v1/invitations/accept", json={"token": token}).status_code
+        == 403
+    )
+
+
+def test_ax2_04_invitation_refused_while_tenant_suspended(world: World) -> None:
+    pid, tid, _, token = _invite_as_tenant_admin(world)
+    assert (
+        world.admin.patch(f"/v1/products/{pid}/tenants/{tid}", json={"status": "suspended"}).status_code
+        == 200
+    )
+    x = world.login_as("x@example.com")
+    assert x.post("/v1/invitations/accept", json={"token": token}).status_code == 403
+    # Still open: accepted once the tenant is active again (the inviter kept their rights).
+    assert (
+        world.admin.patch(f"/v1/products/{pid}/tenants/{tid}", json={"status": "active"}).status_code == 200
+    )
+    r = x.post("/v1/invitations/accept", json={"token": token})
+    assert r.status_code == 200, r.text
+    assert r.json()["role"] == "tenant_admin"
+
+
+def test_ax2_04_refused_acceptance_is_audited(world: World) -> None:
+    """The denied audit event of a refused acceptance is kept (it was rolled back with the refusal)."""
+    pid, _, _, token = _invite_as_tenant_admin(world)
+    world.user("other@example.com")
+    assert (
+        world.login_as("other@example.com").post("/v1/invitations/accept", json={"token": token}).status_code
+        == 403
+    )
+    denied = world.ax.audit.list(DbScope.platform(), product_id=pid, action="tenancy.invitation.accept").items
+    assert [(e.outcome, e.details.get("reason")) for e in denied] == [("denied", "email_mismatch")]

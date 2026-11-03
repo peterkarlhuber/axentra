@@ -45,6 +45,12 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   each socket operation, so a receiver that trickled bytes could hold a worker slot for hours). New
   `max_runtime_seconds` for `ax.jobs.register`: the worker stops renewing the lease of an attempt that runs
   longer; webhook deliveries declare timeout + 30 s.
+- Invitation acceptance re-checks the inviter and the scope (audit round 2, AX2-04): `POST /v1/invitations/accept`
+  answers `403` when the tenant is suspended or the product archived, or when the inviter can no longer
+  invite with that role (removed, disabled, downgraded, revoked key; `members:manage` and the role ceiling
+  with the inviter's current access). The `denied` audit event of a refused acceptance is now kept (it was
+  rolled back together with the refusal) and carries `details.reason`. `Authorizer.actor_principal` resolves a
+  recorded actor id to its current principal (also used for job enqueuers).
 - The `GET` OIDC start no longer acts on an invitation (security review round 4, R4-1, login-CSRF-like). It is
   a plain link without an `Origin` check, so a cross-site link to
   `GET /v1/auth/oidc/{provider}/start?invitation=<token>` (or with the token inside `return_to`) made a browser
