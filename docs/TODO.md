@@ -74,7 +74,8 @@ are marked AX2-NN / DX-NN).
 | Pri | Area | Item |
 |---|---|---|
 | P1 | operations | Backup/restore of file storage together with the database (test exists for the database only) |
-| P1 | build | Reproducible container builds: pin the base image by digest, build hatchling from pinned versions, compare digests of two builds |
+| P1 | build | Reproducible container builds: build hatchling from pinned versions and compare digests of two builds (the `python:3.13-slim` base is digest-pinned with a CI check since audit round 2, OPS2-12) |
+| P3 | build | The compose stacks still use `postgres:16` (and other service images) by tag; pin by digest like the application image (OPS2-12 rest) |
 | P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
 | P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
 | P2 | tests | Concurrency tests for `If-Match` races and migration runners started in parallel |

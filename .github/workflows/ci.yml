@@ -5,6 +5,8 @@ on:
     branches: [master]
   pull_request:
 
+# Every action is pinned by commit SHA (the version is the trailing comment); Dependabot keeps the pins current.
+# Checkouts do not keep the token in the Git configuration (persist-credentials: false).
 permissions:
   contents: read
 
@@ -17,8 +19,10 @@ jobs:
     name: Lint, types, architecture, contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       - run: python -m pip install --upgrade pip
@@ -57,8 +61,10 @@ jobs:
     env:
       AXENTRA_TEST_DATABASE_URL: postgresql://postgres:pg@127.0.0.1:5432/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install --upgrade pip
@@ -82,7 +88,7 @@ jobs:
           print(f"tests={suite.get('tests')} failures={suite.get('failures')} errors={suite.get('errors')} skipped={skipped}")
           raise SystemExit(1 if skipped else 0)
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-results-py${{ matrix.python }}-pg${{ matrix.postgres }}
@@ -95,13 +101,18 @@ jobs:
       run:
         working-directory: sdk/typescript
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
       - run: npm ci --no-audit --no-fund
+      # Known vulnerabilities in what the published package depends on (dev tools are not shipped).
+      - name: Dependency audit (runtime dependencies)
+        run: npm audit --omit=dev --audit-level=high
       - name: Generated types match the committed OpenAPI
         run: npm run generate:check
       - run: npm run typecheck
@@ -126,8 +137,10 @@ jobs:
     env:
       AXENTRA_TEST_DATABASE_URL: postgresql://postgres:pg@127.0.0.1:5432/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install --upgrade pip
@@ -171,11 +184,13 @@ jobs:
     env:
       AXENTRA_TEST_DATABASE_URL: postgresql://postgres:pg@127.0.0.1:5432/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: "22"
           cache: npm
@@ -191,8 +206,10 @@ jobs:
     name: Package builds and installs headless
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip build
@@ -213,7 +230,24 @@ jobs:
     name: Container image and compose files
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Base images are pinned by digest
+        run: |
+          python3 -I - <<'PY'
+          import re, sys
+          loose = []
+          for path in ("Dockerfile", "examples/taskboard/Dockerfile"):
+              text = open(path).read()
+              args = dict(re.findall(r"^ARG (\w+)=(\S+)", text, re.M))
+              stages = set(re.findall(r"^FROM \S+ AS (\S+)", text, re.M)) | {"scratch"}
+              for base in re.findall(r"^FROM (\S+)", text, re.M):
+                  base = args.get(base.strip("${}"), base)
+                  if base not in stages and "@sha256:" not in base:
+                      loose.append(f"{path}: {base}")
+          sys.exit(f"not pinned by digest: {loose}" if loose else 0)
+          PY
       - name: Compose files are valid
         run: |
           cp deploy/compose/.env.example deploy/compose/.env
@@ -234,8 +268,10 @@ jobs:
     name: Security scans
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       - run: pip install -e ".[server,oidc,s3]" pip-audit bandit
