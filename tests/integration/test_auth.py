@@ -25,7 +25,7 @@ def test_setup_token_is_single_use(world):
     )
     assert r.status_code == 409  # an admin exists already
     assert r.json()["code"] == "setup_already_completed"
-    assert r.json()["type"].endswith("/setup_already_completed")
+    assert r.json()["type"] == "urn:axentra:problem:setup_already_completed"
     r = world.browser().post(
         "/v1/auth/setup",
         json={"setup_token": "axsetup_wrong", "email": "y@example.com", "password": "another long password"},

@@ -38,7 +38,7 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 function problem(status: number, code: string, extra: Record<string, unknown> = {}): Response {
   return new Response(
     JSON.stringify({
-      type: `https://axentra.dev/problems/${code}`,
+      type: `urn:axentra:problem:${code}`,
       title: code,
       status,
       code,

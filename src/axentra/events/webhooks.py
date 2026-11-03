@@ -34,8 +34,15 @@ from axentra.core.redaction import redact_text
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.events.events import EventService, check_pattern, type_matches
 from axentra.events.http_client import HttpResult, TargetRefused, TargetUnresolvable, parse_target, post_json
-from axentra.events.jobs import JobQueue, PermanentJobError, RetryJob, backoff_delay
-from axentra.events.models import Delivery, Event, NewWebhookSecret, WebhookEndpoint
+from axentra.events.jobs import (
+    SKIPPED_PREFIX,
+    JobQueue,
+    PermanentJobError,
+    RetryJob,
+    backoff_delay,
+    job_scope,
+)
+from axentra.events.models import Delivery, Event, Job, NewWebhookSecret, WebhookEndpoint
 
 if TYPE_CHECKING:
     from axentra.events.worker import JobContext
@@ -43,6 +50,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DELIVER_KIND = "axentra.webhook.deliver"
+#: Time a delivery job may take beyond ``webhook_timeout_seconds`` before its lease is no longer renewed.
+DELIVERY_RUNTIME_MARGIN_SECONDS = 30.0
 SIGNATURE_HEADER = "Axentra-Signature"
 PING_TYPE = "axentra.ping"
 MAX_EVENT_TYPES = 50
@@ -137,7 +146,14 @@ class WebhookService:
         self.secrets = secrets
         self.queue = queue
         events.fanouts.append(self._fan_out)
-        events.jobs.register(DELIVER_KIND, self._deliver_job)
+        # One attempt is bounded by webhook_timeout_seconds (http_client); the margin covers the
+        # database work around it. Past that, a hung delivery stops holding its lease.
+        events.jobs.register(
+            DELIVER_KIND,
+            self._deliver_job,
+            max_runtime_seconds=settings.events.webhook_timeout_seconds + DELIVERY_RUNTIME_MARGIN_SECONDS,
+        )
+        events.jobs.on_skip(DELIVER_KIND, self._skipped)
 
     # -- validation ----------------------------------------------------------------------------
 
@@ -585,6 +601,17 @@ class WebhookService:
                 ),
             )
         return status
+
+    def _skipped(self, job: Job, reason: str) -> None:
+        """The worker did not run a delivery job (product archived or tenant suspended): the
+        delivery ends as ``dead`` with the reason and can be redelivered later."""
+        delivery_id = str(job.payload.get("delivery_id", ""))
+        with self.db.transaction(job_scope(job.product_id, job.tenant_id)) as tx:
+            tx.execute(
+                "UPDATE axentra_webhook_deliveries SET status = 'dead', last_error = %s, next_attempt_at = NULL,"
+                " updated_at = now() WHERE id = %s AND status IN ('pending', 'failed')",
+                (f"{SKIPPED_PREFIX}{reason}", delivery_id),
+            )
 
     def _deliver_job(self, ctx: JobContext) -> dict[str, Any]:
         delivery_id = str(ctx.job.payload.get("delivery_id", ""))

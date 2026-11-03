@@ -58,26 +58,27 @@ class RevokeResult(BaseModel):
 
 @router.get("/me", response_model=Me, summary="Who I am and what I may do, per product and tenant")
 def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
-    from axentra.core.context import Principal
-
+    # Every tenant the caller may read is listed (all of them, ordered by id), including all
+    # tenants of a product for product operators and platform roles. Authorization is computed per
+    # product in one pass (Authorizer.tenant_grants), not per tenant. (A comment, not a docstring:
+    # FastAPI would put a docstring into the OpenAPI contract.)
     user = ax.identity.get_user(principal.user_id) if principal.user_id else None
     products = []
     for product in ax.tenancy.list_products(principal):
         try:
             grant = ax.authz.grant(principal, product.id)
+            grants = ax.authz.tenant_grants(principal, product.id)
         except (NotFound, Forbidden):
             continue
-        tenants = []
-        page = ax.tenancy.list_tenants(Principal.system("me"), product.id, limit=200)
-        for tenant in page.items:
-            try:
-                tg = ax.authz.grant(principal, product.id, tenant.id)
-            except (NotFound, Forbidden):
-                continue
-            if tg.permissions & {"tenant:read", "tenants:read"}:
-                tenants.append(
-                    TenantAccess(tenant=tenant, role=tg.tenant_role, permissions=sorted(tg.permissions))
-                )
+        readable = {tid: g for tid, g in grants.items() if g.permissions & {"tenant:read", "tenants:read"}}
+        tenants = [
+            TenantAccess(
+                tenant=tenant,
+                role=readable[tenant.id].tenant_role,
+                permissions=sorted(readable[tenant.id].permissions),
+            )
+            for tenant in ax.tenancy.tenants_by_id(product.id, readable)
+        ]
         products.append(
             ProductAccess(
                 product=product,

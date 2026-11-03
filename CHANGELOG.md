@@ -9,7 +9,20 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Fixed
+- `GET /v1/me` listed only tenants among the product's first 200 (by id), so members of later tenants got
+  an empty `tenants` list and lost their tenant permissions in Axentra Studio (audit round 2, AX2-03). It now
+  lists every readable tenant, with the same entries, order and response shape as before; the per-tenant
+  authorization (one round of queries per tenant) is replaced by `Authorizer.tenant_grants`, a fixed number of
+  queries per product, and `TenancyService.tenants_by_id`.
+
 ### Changed
+- Problem details `type` URIs are now `urn:axentra:problem:<code>` instead of `https://axentra.dev/problems/<code>`
+  (DX-41: that domain belongs to an unrelated company). **Breaking** only for clients that compared `type`
+  instead of `code`; Axentra Studio and the SDKs use `code`. See ADR 0009 (amendment).
+- CLI: operator errors (configuration, unreachable database, database errors, unknown `--load` module) print
+  `axentra: <code>: <message>` and exit with status 2 instead of a 20-line traceback (DX-42); new global
+  `--debug` (or `AXENTRA_DEBUG=1`) shows the traceback.
 - New official Axentra logo. `assets/branding/` now holds the two logo masters
   (`axentra-logo-transparent.png`, `axentra-logo-white.png`), the vendored derivation script
   `derive_branding.py` and the derived `axentra-logo.png` (light surfaces),
@@ -25,6 +38,25 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- Background work follows current access (audit round 2, AX2-01). Jobs fired by a schedule are reduced to
+  what the schedule's creator holds *when the job runs*, like jobs enqueued through `POST /jobs` (before,
+  they kept all handler permissions after the creator was removed or disabled; a job whose schedule was
+  deleted now holds none). Workers no longer run jobs of an archived product or a suspended tenant: they end
+  as `failed` with `last_error` `skipped: ...` and stay retryable (webhook deliveries as `dead`, can be
+  redelivered). The scheduler skips schedules of archived products and suspended tenants (schedule kept,
+  `events.schedule.skip` audit event once per inactive period). Behaviour change for handlers that relied
+  on full permissions in schedule jobs created by users or API keys.
+- Webhook delivery attempts have a total deadline (audit round 2, AX2-02): `events.webhook_timeout_seconds`
+  now bounds connect, TLS handshake, request, response headers and body together (before it applied to
+  each socket operation, so a receiver that trickled bytes could hold a worker slot for hours). New
+  `max_runtime_seconds` for `ax.jobs.register`: the worker stops renewing the lease of an attempt that runs
+  longer; webhook deliveries declare timeout + 30 s.
+- Invitation acceptance re-checks the inviter and the scope (audit round 2, AX2-04): `POST /v1/invitations/accept`
+  answers `403` when the tenant is suspended or the product archived, or when the inviter can no longer
+  invite with that role (removed, disabled, downgraded, revoked key; `members:manage` and the role ceiling
+  with the inviter's current access). The `denied` audit event of a refused acceptance is now kept (it was
+  rolled back together with the refusal) and carries `details.reason`. `Authorizer.actor_principal` resolves a
+  recorded actor id to its current principal (also used for job enqueuers).
 - The `GET` OIDC start no longer acts on an invitation (security review round 4, R4-1, login-CSRF-like). It is
   a plain link without an `Origin` check, so a cross-site link to
   `GET /v1/auth/oidc/{provider}/start?invitation=<token>` (or with the token inside `return_to`) made a browser

@@ -16,7 +16,10 @@ summary. Permission names in brackets.
 - `GET /v1/auth/sessions` (own), `DELETE /v1/auth/sessions/{session_id}` (own)
 
 ## Me
-- `GET /v1/me` -> `{user, platform_role, products: [{product, role, permissions[], tenants: [{tenant, role, permissions[]}]}]}`
+- `GET /v1/me` -> `{user, platform_role, products: [{product, role, permissions[], tenants: [{tenant, role, permissions[]}]}]}`.
+  `tenants` lists every tenant of the product the caller may read (`tenant:read` or `tenants:read`
+  there), ordered by id and not truncated: the caller's memberships, and every tenant for product
+  operators and platform roles (so the list grows with the product's tenant count for them).
 - `PATCH /v1/me` `{name?, locale?, preferences?}`; `POST /v1/me/password` `{current_password, new_password}`
   (users without a password: only within `security.fresh_login_minutes` of the login, else `403`
   `reauthentication_required`; never with `security.first_password = "disabled"`)
@@ -41,7 +44,11 @@ summary. Permission names in brackets.
     `product_users:read`: users of the product; otherwise members of this tenant). Others get
     `404` "user not found; invite them by email instead", the same as unknown users: use invitations.
 - `GET/POST /v1/products/{pid}/tenants/{tid}/invitations`, `DELETE .../invitations/{inv_id}` [members:manage] (role ceiling as above)
-- `POST /v1/invitations/accept` `{token}` (authenticated user)
+- `POST /v1/invitations/accept` `{token}` (authenticated user). `403` when the invitation was sent to
+  another address, when the tenant or product is not active, or when the inviter can no longer
+  invite with that role (`members:manage` and the role ceiling are checked again with the inviter's
+  current access); refusals are audited as `tenancy.invitation.accept` with outcome `denied` and
+  `details.reason` (`email_mismatch`, `scope_inactive`, `inviter_lost_access`).
 
 ## Users
 - `GET /v1/users?q=&status=` platform admin: all users; product admin: users of the product (`?product_id=`) [users:read]

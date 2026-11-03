@@ -5,20 +5,20 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last reviewed: 2026-11-02 (`0.1.0.dev0`, after the security review fixes, docs/security/REVIEW-2026-11-01.md,
-and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
+Last reviewed: 2026-11-03 (`0.1.0.dev0`, internal backend audit round 2: CI on `master` is green again and
+the security review rounds are closed, so both items were removed; new items from the audit and the DX review
+are marked AX2-NN / DX-NN).
 
 ## Release and verification
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | tests | Rerun CI on `master` after the flaky-test fix: `7511a37` had 10/11 jobs green, `test_access.py::test_api_key_lifecycle_and_scope` failed on Python 3.13 (fixed in the report PR; see AXENTRA_IMPLEMENTATION_REPORT.md section 7.3) |
 | P1 | operations | No production deployment has been carried out; no production-like environment exists |
 | P1 | tests | No load or performance tests; no capacity figures for the API, workers, SSE or the job queue |
 | P1 | tests | Provider adapters never exercised against live services: Stripe (only `httpx.MockTransport`), S3 (only moto; no MinIO/AWS), SMTP (only an in-process `aiosmtpd`), OIDC (only an in-process stub IdP). Needs a sandbox run without paid calls |
 | P2 | build | Docker images and compose files are built/validated only in CI (no local Docker in the development environment); the compose stacks are never started (see the deployment-test item below) |
 | P2 | platform | Only Linux is tested (CI `ubuntu-latest`); macOS and Windows are untested for the library, CLI and SDKs |
-| P2 | security | Second independent security review after the fixes of PR #9 (the first review covered `537484f`) |
+| P3 | tests | The full suite logs a few "Logging error" tracebacks from background threads that still log after pytest closed the capture; stop/join those threads in the fixtures (AX2-10) |
 
 ## Backend
 
@@ -47,6 +47,13 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 | P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up) |
 | P2 | access | Optional revocation of API keys created by a user when that user loses product access (review 2026-11-01, F5 follow-up; key-created keys already cascade) |
 | P2 | security | Shared rate limiting across API processes (the general limit is an in-memory token bucket per process; only login throttling is shared through PostgreSQL) |
+| P2 | tenancy | `GET /v1/products/{id}/overview` returns product-wide counts (tenants, users, keys, records, audit events) to every caller with `product:read`, including plain tenant members. Restrict them to operators; a compatible fix needs either nullable counters or Studio not requesting the overview for tenant-only members (Studio already ignores non-numeric counters), so it is a coordinated API change (AX2-05) |
+| P2 | usage | The built-in `member` role holds `usage:record`, and `occurred_at` may lie up to 400 days back, so any tenant member can consume the tenant's hard quotas and change past periods. Decide whether `usage:record` moves to admins/keys (Studio offers recording to members today) and whether backdating is limited to the current and previous period, or needs a product-level permission (AX2-08) |
+| P2 | search | Expensive requests reachable with read permissions: search ranks every match before the limit (common terms take seconds on large tenants) and records sorted by time have no composite index per product/tenant/collection. Bounded candidate set or rank cutoff, a shorter statement timeout for search, time-sort indexes, a default per-credential limit for heavy endpoints (AX2-06) |
+| P2 | events | Webhook deliveries share the job queue and worker slots with all other kinds; attempts are now time-bounded, but a separate concurrency pool or a per-product cap for deliveries is still missing (AX2-02 follow-up) |
+| P3 | events | Webhook URL validation at creation accepts legacy IPv4 notations and any port; delivery already refuses non-global targets after resolving, so this is consistency only. Reject them at creation (AX2-07) |
+| P3 | events | Schedules whose creator lost access keep firing (their jobs now run without permissions); optionally disable a user's schedules when the user loses product access, together with the API key revocation item above (AX2-01 follow-up) |
+| P3 | identity | `GET /v1/me` lists every readable tenant (no cap since AX2-03), so for product operators and platform roles the response grows with the number of tenants. Consider an opt-in parameter (for example memberships only, or paging) at the next `/v1` cleanup, coordinated with Studio, which needs only memberships and product-level permissions |
 
 ## Developer experience (Phase 4)
 
@@ -54,10 +61,13 @@ and for the implementation report docs/AXENTRA_IMPLEMENTATION_REPORT.md).
 |---|---|---|
 | P1 | sdk | Python SDK: typed methods for jobs, events and webhooks (reachable today through `request_json()`) |
 | P2 | sdk | Python SDK: typed methods for the search endpoints (reachable today through `request_json()`) |
-| P1 | api | Document `application/problem+json` error responses in the OpenAPI (today only FastAPI's default 422 `HTTPValidationError` is listed, which does not match the real body) |
+| P1 | api | Document `application/problem+json` error responses in the OpenAPI (today only FastAPI's default 422 `HTTPValidationError` is listed, which does not match the real body), and declare `securitySchemes` (session cookie, bearer API key); confirmed open by the DX review (DX-43) |
 | P2 | sdk | Publish `@axentra/sdk` (npm) and `axentra-client` (PyPI); release process and provenance |
 | P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin) |
 | P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
+| P3 | cli | A command that fails after creating its `Axentra` instance (for example a database error in `axentra worker --once`) exits without closing the connection pool, so the pool threads delay the exit by about 20 seconds |
+| P3 | branding | The product name collides with an unrelated company that owns `axentra.dev` (problem type URIs no longer use that domain, DX-41); decide on naming/branding before a public release |
+| P3 | sdk | `npm audit` reports moderate advisories for the TypeScript SDK's development dependency `minimatch` (none in the production tree); update when a fixed release is in range (AX2-09) |
 
 ## Hardening (Phase 5)
 

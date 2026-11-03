@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 from axentra.access.permissions import BUILTIN_ROLES, PLATFORM, PLATFORM_ROLE_PERMISSIONS
 from axentra.access.product_permissions import ProductCatalog, load_catalog
-from axentra.core.context import ActorKind, Principal
+from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
 from axentra.core.errors import Forbidden, NotFound
 from axentra.data.database import Database, DbScope, Tx
 
@@ -148,6 +148,119 @@ class Authorizer:
         return Grant(
             permissions=frozenset(perms), related=True, product_role=product_role, tenant_role=tenant_role
         )
+
+    def actor_principal(self, actor_id: str | None) -> Principal | None:
+        """The principal of a recorded actor id (``created_by``, ``invited_by``) as it stands *now*:
+        a user with their current platform role, an API key with its current product, tenant and
+        permissions. A disabled or deleted user, or a revoked, expired or deleted key, yields a
+        principal without any relation (every grant is refused). ``None`` for other actors (system
+        callers in process), which callers treat as trusted."""
+        if not actor_id:
+            return None
+        if actor_id.startswith("usr_"):
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one(
+                    "SELECT u.status, pr.role FROM axentra_users u"
+                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id WHERE u.id = %s",
+                    (actor_id,),
+                )
+            if row is None or row["status"] != "active":
+                return Principal(actor=Actor(ActorKind.USER, actor_id))  # no relation: nothing
+            role = PlatformRole(row["role"]) if row["role"] else None
+            return Principal(actor=Actor(ActorKind.USER, actor_id), platform_role=role)
+        if actor_id.startswith("key_"):
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one(
+                    "SELECT product_id, tenant_id, permissions FROM axentra_api_keys WHERE id = %s"
+                    " AND (revoked_at IS NULL OR revoked_at > now()) AND (expires_at IS NULL OR expires_at > now())",
+                    (actor_id,),
+                )
+            return Principal(
+                actor=Actor(ActorKind.API_KEY, actor_id),
+                api_key_product_id=row["product_id"] if row else "-",
+                api_key_tenant_id=row["tenant_id"] if row else None,
+                api_key_permissions=frozenset(row["permissions"]) if row else frozenset(),
+            )
+        return None
+
+    def tenant_grants(self, principal: Principal, product_id: str) -> dict[str, Grant]:
+        """``grant(principal, product_id, tenant_id)`` for every tenant of the product where that
+        call would not raise, computed in one transaction with a fixed number of queries (instead
+        of one authorization per tenant). Raises ``NotFound`` for an unknown product.
+
+        It applies the same rules as :meth:`grant` (kept next to it; a test compares both)."""
+        with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+            product = tx.one("SELECT status FROM axentra_products WHERE id = %s", (product_id,))
+            if product is None:
+                raise NotFound("product not found")
+            product_active = product["status"] == "active"
+            catalog: ProductCatalog = load_catalog(tx, product_id)
+
+            if principal.actor.kind is ActorKind.API_KEY or (
+                principal.actor.kind is ActorKind.SYSTEM and principal.api_key_product_id is not None
+            ):
+                if principal.api_key_product_id != product_id or not product_active:
+                    return {}
+                sql = "SELECT id FROM axentra_tenants WHERE product_id = %s AND status = 'active'"
+                params: list[object] = [product_id]
+                if principal.api_key_tenant_id is not None:
+                    sql += " AND id = %s"
+                    params.append(principal.api_key_tenant_id)
+                key_perms = (principal.api_key_permissions - PLATFORM) & catalog.known
+                return {r["id"]: Grant(permissions=key_perms, related=True) for r in tx.all(sql, params)}
+
+            platform_role = principal.platform_role.value if principal.platform_role is not None else None
+            platform_perms = catalog.platform_role(platform_role)
+            if principal.is_platform_admin:
+                return {
+                    r["id"]: Grant(permissions=platform_perms, related=True)
+                    for r in tx.all("SELECT id FROM axentra_tenants WHERE product_id = %s", (product_id,))
+                }
+            user_id = principal.user_id
+            custom: dict[str, frozenset[str]] = {
+                r["key"]: frozenset(r["permissions"])
+                for r in tx.all(
+                    "SELECT key, permissions FROM axentra_roles WHERE product_id = %s", (product_id,)
+                )
+            }
+            prow = tx.one(
+                "SELECT role FROM axentra_product_members WHERE product_id = %s AND user_id = %s",
+                (product_id, user_id),
+            )
+            product_role = prow["role"] if prow else None
+            if product_role or platform_perms:
+                rows = tx.all(
+                    "SELECT t.id, t.status, m.role FROM axentra_tenants t LEFT JOIN axentra_memberships m"
+                    " ON m.tenant_id = t.id AND m.product_id = t.product_id AND m.user_id = %s"
+                    " WHERE t.product_id = %s",
+                    (user_id, product_id),
+                )
+            else:
+                rows = tx.all(
+                    "SELECT t.id, t.status, m.role FROM axentra_memberships m JOIN axentra_tenants t"
+                    " ON t.id = m.tenant_id AND t.product_id = m.product_id"
+                    " WHERE m.product_id = %s AND m.user_id = %s",
+                    (product_id, user_id),
+                )
+        product_perms = catalog.role_permissions(product_role, custom)
+        out: dict[str, Grant] = {}
+        for r in rows:
+            tenant_role = r["role"]
+            if not (product_role or tenant_role or platform_perms):
+                continue
+            if not product_active or r["status"] != "active":
+                if platform_perms:
+                    out[r["id"]] = Grant(permissions=platform_perms, related=True)
+                continue
+            perms = (
+                platform_perms
+                | product_perms
+                | (catalog.role_permissions(tenant_role, custom) & catalog.tenant_mask)
+            )
+            out[r["id"]] = Grant(
+                permissions=perms, related=True, product_role=product_role, tenant_role=tenant_role
+            )
+        return out
 
     def require(
         self,

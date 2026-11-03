@@ -38,7 +38,7 @@ from axentra.access.permissions import (
 )
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
-from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
+from axentra.core.context import Actor, ActorKind, Principal
 from axentra.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
@@ -61,6 +61,10 @@ MAX_PAYLOAD_BYTES = 64_000
 MAX_RESULT_BYTES = 64_000
 MAX_ERROR_CHARS = 2000
 NOTIFY_CHANNEL = "axentra_jobs"
+#: ``created_by`` of jobs fired by a schedule: ``schedule:<schedule id>``.
+SCHEDULE_CREATOR_PREFIX = "schedule:"
+#: ``last_error`` prefix of jobs the worker skipped without running them (see :meth:`JobService.skip_reason`).
+SKIPPED_PREFIX = "skipped: "
 
 
 class PermanentJobError(Exception):
@@ -412,6 +416,8 @@ class JobService:
         self.queue = JobQueue(db, settings)
         self.handlers: dict[str, Handler] = {}
         self.kinds: dict[str, JobKindSpec] = {}
+        self.skip_callbacks: dict[str, Callable[[Job, str], None]] = {}
+        self.max_runtime: dict[str, float] = {}
 
     # -- registry ------------------------------------------------------------------------------
 
@@ -423,15 +429,26 @@ class JobService:
         replace: bool = False,
         enqueue_permission: str | None = None,
         permissions: Iterable[str] | None = None,
+        max_runtime_seconds: float | None = None,
     ) -> None:
         """Register the handler of a job kind (in every worker process that should run it).
 
         ``enqueue_permission`` and ``permissions`` declare the kind (see :class:`JobKindSpec` and
         :meth:`declare`). Without them only ``jobs:manage`` holders can enqueue the kind through
-        the API and the handler holds all product and tenant permissions."""
+        the API and the handler holds all product and tenant permissions.
+
+        ``max_runtime_seconds``: the worker stops renewing the lease of a job of this kind once its
+        handler ran that long, so a hung handler loses the job (``ctx.lease_lost``) and the attempt
+        is retried after the lease expires (at least once). ``None``: no limit."""
         check_kind(kind)
         if kind in self.handlers and not replace:
             raise ValueError(f"a handler for job kind {kind!r} is already registered")
+        if max_runtime_seconds is not None and max_runtime_seconds <= 0:
+            raise ValueError("max_runtime_seconds must be positive")
+        if max_runtime_seconds is None:
+            self.max_runtime.pop(kind, None)
+        else:
+            self.max_runtime[kind] = float(max_runtime_seconds)
         if enqueue_permission is not None or permissions is not None:
             self.declare(kind, enqueue_permission=enqueue_permission, permissions=permissions, replace=True)
         self.handlers[kind] = handler
@@ -483,34 +500,22 @@ class JobService:
         return spec.permissions
 
     def _enqueuer(self, created_by: str | None) -> Principal | None:
-        """The user or API key that enqueued a job through :meth:`enqueue` (``None`` otherwise)."""
+        """The user or API key that enqueued a job through :meth:`enqueue`, or that created the
+        schedule which fired it (``schedule:<id>``); ``None`` for jobs enqueued in process."""
         if not created_by:
             return None
-        if created_by.startswith("usr_"):
+        if created_by.startswith(SCHEDULE_CREATOR_PREFIX):
+            schedule_id = created_by.removeprefix(SCHEDULE_CREATOR_PREFIX)
             with self.db.transaction(DbScope.platform(), read_only=True) as tx:
-                row = tx.one(
-                    "SELECT u.status, pr.role FROM axentra_users u"
-                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id WHERE u.id = %s",
-                    (created_by,),
-                )
-            if row is None or row["status"] != "active":
-                return Principal(actor=Actor(ActorKind.USER, created_by))  # no relation: nothing
-            role = PlatformRole(row["role"]) if row["role"] else None
-            return Principal(actor=Actor(ActorKind.USER, created_by), platform_role=role)
-        if created_by.startswith("key_"):
-            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
-                row = tx.one(
-                    "SELECT product_id, tenant_id, permissions FROM axentra_api_keys WHERE id = %s"
-                    " AND (revoked_at IS NULL OR revoked_at > now()) AND (expires_at IS NULL OR expires_at > now())",
-                    (created_by,),
-                )
-            return Principal(
-                actor=Actor(ActorKind.API_KEY, created_by),
-                api_key_product_id=row["product_id"] if row else "-",
-                api_key_tenant_id=row["tenant_id"] if row else None,
-                api_key_permissions=frozenset(row["permissions"]) if row else frozenset(),
-            )
-        return None
+                row = tx.one("SELECT created_by FROM axentra_schedules WHERE id = %s", (schedule_id,))
+            if row is None:
+                # The schedule is gone, so its creator cannot be checked: fail closed.
+                return Principal(actor=Actor(ActorKind.USER, created_by))
+            creator = row["created_by"]
+            if creator and creator.startswith(SCHEDULE_CREATOR_PREFIX):
+                return Principal(actor=Actor(ActorKind.USER, created_by))
+            return self._enqueuer(creator)
+        return self.authz.actor_principal(created_by)
 
     def principal_for(self, job: Job) -> Principal:
         """The principal a job's handler acts as.
@@ -519,7 +524,8 @@ class JobService:
         holding the kind's declared permissions (:meth:`handler_permissions`). For jobs that a user
         or API key enqueued through :meth:`enqueue`, the set is further reduced to what that caller
         holds *now* in the job's scope, so a job never does more than its enqueuer could (and nothing
-        once the enqueuer lost access)."""
+        once the enqueuer lost access). Jobs fired by a schedule follow the same rule with the
+        schedule's creator."""
         from axentra.events.worker import job_principal
 
         perms = self.handler_permissions(job.kind)
@@ -531,6 +537,26 @@ class JobService:
                 except (Forbidden, NotFound):
                     perms = frozenset()
         return job_principal(job, perms)
+
+    def skip_reason(self, job: Job) -> str | None:
+        """Why a claimed job must not run, or ``None``. A job of an archived product or a suspended
+        tenant is not run (the same status rule :meth:`Authorizer.grant` applies to every request
+        and to the handler's principal); the worker ends it as ``failed`` with the reason, so it is
+        kept and can be retried once the product or tenant is active again."""
+        from axentra.events.worker import job_principal
+
+        try:
+            self.authz.grant(job_principal(job, frozenset()), job.product_id, job.tenant_id)
+        except Forbidden:
+            return "the product or tenant is not active"
+        except NotFound:
+            return "the product or tenant no longer exists"
+        return None
+
+    def on_skip(self, kind: str, callback: Callable[[Job, str], None]) -> None:
+        """Run ``callback(job, reason)`` when the worker skips a job of ``kind`` (see
+        :meth:`skip_reason`), for kinds that keep their own state next to the job."""
+        self.skip_callbacks[kind] = callback
 
     def handler(self, kind: str) -> Callable[[Handler], Handler]:
         """Decorator form of :meth:`register`."""

@@ -98,7 +98,10 @@ cannot reach another product or tenant. (The authorizer treats a system actor wi
   that declare none (trusted kinds: enqueued by product code, schedules or `jobs:manage` holders);
 - for jobs a user or API key enqueued through `POST /jobs`, further intersected with what that
   enqueuer holds in the job's scope *when the handler runs* (a removed member's queued job can do
-  nothing). `ctx.transaction()` is raw database access in the job's scope (RLS applies) and is not
+  nothing). Jobs fired by a schedule (`created_by = schedule:<id>`) follow the same rule with the
+  schedule's creator: once the creator lost access (or the schedule was deleted) the handler holds
+  no permissions; schedules created in process (`Principal.system`) keep the kind's permissions.
+  `ctx.transaction()` is raw database access in the job's scope (RLS applies) and is not
   limited by these permissions, so handlers must still treat the payload as untrusted input.
 
 **Who may enqueue a kind through the API.** `jobs:manage` holders may enqueue any kind not starting
@@ -124,10 +127,24 @@ register handlers and subscribers. SIGTERM/SIGINT stop claiming new jobs and wai
 shutdown timeout for running handlers, with their leases still renewed. A handler that is still
 running after the timeout loses its lease, and its job is retried elsewhere.
 
+`ax.jobs.register(kind, handler, max_runtime_seconds=N)` limits how long the worker renews the
+lease of one attempt: after `N` seconds the heartbeat stops renewing it, `ctx.lease_lost` turns
+true (handlers should check it and return), and the attempt is retried after the lease expires.
+The handler thread itself cannot be stopped from outside, so it should honour `ctx.lease_lost`.
+
 Every worker reaps expired leases. The worker that holds the scheduler leader lock also fires
 schedules (every `scheduler_interval_seconds`) and runs the hourly retention purge. The purge
 removes finished jobs, delivered or dead deliveries, events with no pending deliveries, and
 schedule firings older than `job_retention_days`.
+
+**Archived products and suspended tenants.** The worker does not run a claimed job of an archived
+product or a suspended tenant (the same status rule the authorizer applies to every request). The
+job ends as `failed` with `last_error` `skipped: the product or tenant is not active`, is kept and can
+be retried (`POST /jobs/{id}/retry`) once the product or tenant is active again. A skipped webhook
+delivery ends as `dead` with the same reason and can be redelivered. The scheduler does not fire
+schedules of an archived product or a suspended tenant: the slot is recorded as a firing without a
+job, the schedule moves on to its next slot and is kept, and the first skipped slot of an inactive
+period records the audit event `events.schedule.skip` (`details.reason = product_or_tenant_inactive`).
 
 ### Schedules
 
@@ -295,7 +312,7 @@ Shapes (see `openapi/axentra-v1.json`):
 - Webhook secrets are encrypted at rest and shown once. Signatures carry a timestamp so receivers
   can reject replays.
 - Changes are audited in the same transaction: `events.job.enqueue|retry|cancel`,
-  `events.schedule.*`, `events.webhook.create|update|delete|rotate_secret|test|redeliver`.
+  `events.schedule.*` (`events.schedule.skip` by the scheduler), `events.webhook.create|update|delete|rotate_secret|test|redeliver`.
 
 ## Configuration (`[events]`)
 
@@ -303,7 +320,10 @@ Shapes (see `openapi/axentra-v1.json`):
 (15), `scheduler_interval_seconds` (5), `default_max_attempts` (5), `backoff_base_seconds` (2),
 `backoff_max_seconds` (3600), `webhook_max_attempts` (8), `webhook_backoff_base_seconds` (120;
 greater than 0, at most 86400), `webhook_backoff_max_seconds` (21600; at least the base, at most
-604800), `webhook_timeout_seconds` (10),
+604800), `webhook_timeout_seconds` (10; the **total** time of one delivery attempt: connect, TLS
+handshake, request, response headers and body; a receiver that trickles bytes is cut off at the
+deadline and the attempt counts as a timeout. The delivery job kind declares
+`max_runtime_seconds` = timeout + 30 s, after which the worker stops renewing its lease),
 `webhook_response_max_bytes` (4096), `webhook_allow_private_targets` (false; in production only
 with `webhook_allow_private_targets_in_production`), `webhook_allow_http`
 (false; refused in production), `sse_poll_seconds` (1), `sse_reauth_seconds` (15),
@@ -320,9 +340,9 @@ with `webhook_allow_private_targets_in_production`), `webhook_allow_http`
   (Nodestro does for its runs, gap G-8) or makes every effect idempotent at its target.
   `tests/integration/test_job_delivery_semantics.py` shows the at-least-once behaviour after a
   lost lease with a still-running handler.
-- The webhook timeout applies to connect and to each socket read, not to the whole request. A
-  server that trickles bytes can hold a worker slot longer, bounded by
-  `webhook_response_max_bytes`.
+- Webhook deliveries share the job queue and worker slots with other kinds; there is no separate
+  pool or per-product cap for deliveries. Each attempt is bounded by `webhook_timeout_seconds`
+  (see below), so slow receivers delay other jobs by at most that per attempt and slot.
 - There is no automatic disabling of endpoints that keep failing, and no per-endpoint rate limit.
 - Cron is UTC only and has no names or macros.
 - Subscribers are in-process: every worker that runs `axentra.event.handle` jobs must register the

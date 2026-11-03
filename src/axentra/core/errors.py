@@ -17,8 +17,10 @@ from typing import Any, ClassVar
 
 from axentra.core.redaction import redact_text
 
-#: Base URI of the ``type`` member of problem details (``PROBLEM_BASE + code``).
-PROBLEM_BASE = "https://axentra.dev/problems/"
+#: Base URI of the ``type`` member of problem details (``PROBLEM_BASE + code``). A URN on purpose:
+#: stable, and not a web domain (``axentra.dev`` belongs to an unrelated company; ADR 0009).
+#: Clients switch on ``code``, never on ``type``.
+PROBLEM_BASE = "urn:axentra:problem:"
 #: ``Retry-After`` (seconds) sent with a 429 when the error names no delay of its own.
 DEFAULT_RETRY_AFTER_SECONDS = 60
 
