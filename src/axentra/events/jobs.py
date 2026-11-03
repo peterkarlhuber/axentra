@@ -61,6 +61,10 @@ MAX_PAYLOAD_BYTES = 64_000
 MAX_RESULT_BYTES = 64_000
 MAX_ERROR_CHARS = 2000
 NOTIFY_CHANNEL = "axentra_jobs"
+#: ``created_by`` of jobs fired by a schedule: ``schedule:<schedule id>``.
+SCHEDULE_CREATOR_PREFIX = "schedule:"
+#: ``last_error`` prefix of jobs the worker skipped without running them (see :meth:`JobService.skip_reason`).
+SKIPPED_PREFIX = "skipped: "
 
 
 class PermanentJobError(Exception):
@@ -412,6 +416,7 @@ class JobService:
         self.queue = JobQueue(db, settings)
         self.handlers: dict[str, Handler] = {}
         self.kinds: dict[str, JobKindSpec] = {}
+        self.skip_callbacks: dict[str, Callable[[Job, str], None]] = {}
 
     # -- registry ------------------------------------------------------------------------------
 
@@ -483,9 +488,21 @@ class JobService:
         return spec.permissions
 
     def _enqueuer(self, created_by: str | None) -> Principal | None:
-        """The user or API key that enqueued a job through :meth:`enqueue` (``None`` otherwise)."""
+        """The user or API key that enqueued a job through :meth:`enqueue`, or that created the
+        schedule which fired it (``schedule:<id>``); ``None`` for jobs enqueued in process."""
         if not created_by:
             return None
+        if created_by.startswith(SCHEDULE_CREATOR_PREFIX):
+            schedule_id = created_by.removeprefix(SCHEDULE_CREATOR_PREFIX)
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                row = tx.one("SELECT created_by FROM axentra_schedules WHERE id = %s", (schedule_id,))
+            if row is None:
+                # The schedule is gone, so its creator cannot be checked: fail closed.
+                return Principal(actor=Actor(ActorKind.USER, created_by))
+            creator = row["created_by"]
+            if creator and creator.startswith(SCHEDULE_CREATOR_PREFIX):
+                return Principal(actor=Actor(ActorKind.USER, created_by))
+            return self._enqueuer(creator)
         if created_by.startswith("usr_"):
             with self.db.transaction(DbScope.platform(), read_only=True) as tx:
                 row = tx.one(
@@ -519,7 +536,8 @@ class JobService:
         holding the kind's declared permissions (:meth:`handler_permissions`). For jobs that a user
         or API key enqueued through :meth:`enqueue`, the set is further reduced to what that caller
         holds *now* in the job's scope, so a job never does more than its enqueuer could (and nothing
-        once the enqueuer lost access)."""
+        once the enqueuer lost access). Jobs fired by a schedule follow the same rule with the
+        schedule's creator."""
         from axentra.events.worker import job_principal
 
         perms = self.handler_permissions(job.kind)
@@ -531,6 +549,26 @@ class JobService:
                 except (Forbidden, NotFound):
                     perms = frozenset()
         return job_principal(job, perms)
+
+    def skip_reason(self, job: Job) -> str | None:
+        """Why a claimed job must not run, or ``None``. A job of an archived product or a suspended
+        tenant is not run (the same status rule :meth:`Authorizer.grant` applies to every request
+        and to the handler's principal); the worker ends it as ``failed`` with the reason, so it is
+        kept and can be retried once the product or tenant is active again."""
+        from axentra.events.worker import job_principal
+
+        try:
+            self.authz.grant(job_principal(job, frozenset()), job.product_id, job.tenant_id)
+        except Forbidden:
+            return "the product or tenant is not active"
+        except NotFound:
+            return "the product or tenant no longer exists"
+        return None
+
+    def on_skip(self, kind: str, callback: Callable[[Job, str], None]) -> None:
+        """Run ``callback(job, reason)`` when the worker skips a job of ``kind`` (see
+        :meth:`skip_reason`), for kinds that keep their own state next to the job."""
+        self.skip_callbacks[kind] = callback
 
     def handler(self, kind: str) -> Callable[[Handler], Handler]:
         """Decorator form of :meth:`register`."""

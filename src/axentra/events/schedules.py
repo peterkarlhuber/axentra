@@ -32,9 +32,16 @@ from axentra.core.context import Principal
 from axentra.core.errors import NotFound, PreconditionFailed, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
-from axentra.data.database import Database, DbScope, Row
+from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.events.cron import CronExpr, next_interval_slot
-from axentra.events.jobs import RESERVED_PREFIX, JobQueue, check_kind, check_payload, job_scope
+from axentra.events.jobs import (
+    RESERVED_PREFIX,
+    SCHEDULE_CREATOR_PREFIX,
+    JobQueue,
+    check_kind,
+    check_payload,
+    job_scope,
+)
 from axentra.events.models import Schedule
 
 logger = logging.getLogger(__name__)
@@ -42,6 +49,8 @@ logger = logging.getLogger(__name__)
 #: Advisory lock key of the scheduler leader ("axsched" folded into 63 bits).
 SCHEDULER_LOCK = 0x61787363686564
 MIN_INTERVAL_SECONDS = 10
+#: Why :meth:`ScheduleService.fire_due` skips a slot (audit detail ``reason``).
+SCHEDULE_SKIP_REASON = "product_or_tenant_inactive"
 
 
 def next_slot(after: datetime, *, interval_seconds: int | None, cron: str | None) -> datetime:
@@ -125,8 +134,11 @@ class ScheduleService:
         fired: list[str] = []
         with self.db.transaction(DbScope.platform()) as tx:
             rows = tx.all(
-                "SELECT * FROM axentra_schedules WHERE enabled AND next_run_at <= %s"
-                " ORDER BY next_run_at LIMIT %s FOR UPDATE SKIP LOCKED",
+                "SELECT s.*, (p.status = 'active' AND (s.tenant_id IS NULL OR t.status = 'active')) AS scope_active"
+                " FROM axentra_schedules s JOIN axentra_products p ON p.id = s.product_id"
+                " LEFT JOIN axentra_tenants t ON t.id = s.tenant_id"
+                " WHERE s.enabled AND s.next_run_at <= %s"
+                " ORDER BY s.next_run_at LIMIT %s FOR UPDATE OF s SKIP LOCKED",
                 (now, limit),
             )
             for row in rows:
@@ -137,6 +149,9 @@ class ScheduleService:
                     )
                 except ValidationFailed:
                     nxt = None
+                if not row["scope_active"]:
+                    self._skip_slot(tx, row, slot, nxt)
+                    continue
                 inserted = tx.execute(
                     "INSERT INTO axentra_schedule_firings (schedule_id, slot, product_id, tenant_id)"
                     " VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
@@ -154,7 +169,7 @@ class ScheduleService:
                         max_attempts=row["max_attempts"],
                         idempotency_key=f"schedule:{row['id']}:{slot.isoformat()}",
                         schedule_id=row["id"],
-                        created_by=f"schedule:{row['id']}",
+                        created_by=f"{SCHEDULE_CREATOR_PREFIX}{row['id']}",
                     )
                     job_id = job.id
                     tx.execute(
@@ -168,6 +183,35 @@ class ScheduleService:
                     (nxt, slot if inserted == 1 else row["last_run_at"], job_id, row["id"]),
                 )
         return fired
+
+    def _skip_slot(self, tx: Tx, row: Row, slot: datetime, nxt: datetime | None) -> None:
+        """Skip a due slot of a schedule whose product is archived or whose tenant is suspended.
+
+        The slot is recorded as a firing without a job (so it is not fired later) and the schedule
+        moves on to its next slot; the schedule itself is kept. The first skipped slot after a
+        fired one records an ``events.schedule.skip`` audit event with the reason."""
+        previous = tx.one(
+            "SELECT job_id FROM axentra_schedule_firings WHERE schedule_id = %s ORDER BY slot DESC LIMIT 1",
+            (row["id"],),
+        )
+        inserted = tx.execute(
+            "INSERT INTO axentra_schedule_firings (schedule_id, slot, product_id, tenant_id)"
+            " VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            (row["id"], slot, row["product_id"], row["tenant_id"]),
+        )
+        tx.execute("UPDATE axentra_schedules SET next_run_at = %s WHERE id = %s", (nxt, row["id"]))
+        if inserted == 1 and (previous is None or previous["job_id"] is not None):
+            logger.info("schedule %s skipped: the product or tenant is not active", row["id"])
+            self.audit.record(
+                tx,
+                Principal.system("scheduler"),
+                "events.schedule.skip",
+                target_type="schedule",
+                target_id=row["id"],
+                product_id=row["product_id"],
+                tenant_id=row["tenant_id"],
+                details={"reason": SCHEDULE_SKIP_REASON, "slot": slot.isoformat()},
+            )
 
     # -- CRUD ----------------------------------------------------------------------------------
 

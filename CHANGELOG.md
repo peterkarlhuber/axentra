@@ -25,6 +25,14 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- Background work follows current access (audit round 2, AX2-01). Jobs fired by a schedule are reduced to
+  what the schedule's creator holds *when the job runs*, like jobs enqueued through `POST /jobs` (before,
+  they kept all handler permissions after the creator was removed or disabled; a job whose schedule was
+  deleted now holds none). Workers no longer run jobs of an archived product or a suspended tenant: they end
+  as `failed` with `last_error` `skipped: ...` and stay retryable (webhook deliveries as `dead`, can be
+  redelivered). The scheduler skips schedules of archived products and suspended tenants (schedule kept,
+  `events.schedule.skip` audit event once per inactive period). Behaviour change for handlers that relied
+  on full permissions in schedule jobs created by users or API keys.
 - The `GET` OIDC start no longer acts on an invitation (security review round 4, R4-1, login-CSRF-like). It is
   a plain link without an `Origin` check, so a cross-site link to
   `GET /v1/auth/oidc/{provider}/start?invitation=<token>` (or with the token inside `return_to`) made a browser

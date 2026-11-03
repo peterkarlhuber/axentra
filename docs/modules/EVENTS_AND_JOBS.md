@@ -98,7 +98,10 @@ cannot reach another product or tenant. (The authorizer treats a system actor wi
   that declare none (trusted kinds: enqueued by product code, schedules or `jobs:manage` holders);
 - for jobs a user or API key enqueued through `POST /jobs`, further intersected with what that
   enqueuer holds in the job's scope *when the handler runs* (a removed member's queued job can do
-  nothing). `ctx.transaction()` is raw database access in the job's scope (RLS applies) and is not
+  nothing). Jobs fired by a schedule (`created_by = schedule:<id>`) follow the same rule with the
+  schedule's creator: once the creator lost access (or the schedule was deleted) the handler holds
+  no permissions; schedules created in process (`Principal.system`) keep the kind's permissions.
+  `ctx.transaction()` is raw database access in the job's scope (RLS applies) and is not
   limited by these permissions, so handlers must still treat the payload as untrusted input.
 
 **Who may enqueue a kind through the API.** `jobs:manage` holders may enqueue any kind not starting
@@ -128,6 +131,15 @@ Every worker reaps expired leases. The worker that holds the scheduler leader lo
 schedules (every `scheduler_interval_seconds`) and runs the hourly retention purge. The purge
 removes finished jobs, delivered or dead deliveries, events with no pending deliveries, and
 schedule firings older than `job_retention_days`.
+
+**Archived products and suspended tenants.** The worker does not run a claimed job of an archived
+product or a suspended tenant (the same status rule the authorizer applies to every request). The
+job ends as `failed` with `last_error` `skipped: the product or tenant is not active`, is kept and can
+be retried (`POST /jobs/{id}/retry`) once the product or tenant is active again. A skipped webhook
+delivery ends as `dead` with the same reason and can be redelivered. The scheduler does not fire
+schedules of an archived product or a suspended tenant: the slot is recorded as a firing without a
+job, the schedule moves on to its next slot and is kept, and the first skipped slot of an inactive
+period records the audit event `events.schedule.skip` (`details.reason = product_or_tenant_inactive`).
 
 ### Schedules
 
@@ -295,7 +307,7 @@ Shapes (see `openapi/axentra-v1.json`):
 - Webhook secrets are encrypted at rest and shown once. Signatures carry a timestamp so receivers
   can reject replays.
 - Changes are audited in the same transaction: `events.job.enqueue|retry|cancel`,
-  `events.schedule.*`, `events.webhook.create|update|delete|rotate_secret|test|redeliver`.
+  `events.schedule.*` (`events.schedule.skip` by the scheduler), `events.webhook.create|update|delete|rotate_secret|test|redeliver`.
 
 ## Configuration (`[events]`)
 

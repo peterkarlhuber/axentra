@@ -37,6 +37,7 @@ from axentra.data.database import DbScope, Tx
 from axentra.events.jobs import (
     DEFAULT_HANDLER_PERMISSIONS,
     NOTIFY_CHANNEL,
+    SKIPPED_PREFIX,
     JobCancelled,
     PermanentJobError,
     RetryJob,
@@ -181,10 +182,24 @@ class JobWorker:
 
     # -- executing one job ---------------------------------------------------------------------
 
+    def _skip(self, job: Job, reason: str) -> None:
+        logger.info("job %s (%s) skipped: %s", job.id, job.kind, reason)
+        callback = self.ax.jobs.skip_callbacks.get(job.kind)
+        if callback is not None:
+            try:
+                callback(job, reason)
+            except Exception:
+                logger.exception("skip callback of job %s (%s) failed", job.id, job.kind)
+        self.queue.fail(job.id, self.name, f"{SKIPPED_PREFIX}{reason}", permanent=True)
+
     def _execute(self, ctx: JobContext) -> None:
         job = ctx.job
         handler = self.ax.jobs.handlers[job.kind]
         try:
+            reason = self.ax.jobs.skip_reason(job)
+            if reason is not None:
+                self._skip(job, reason)
+                return
             result = handler(ctx)
         except JobCancelled as exc:
             self.queue.fail(job.id, self.name, f"cancelled: {exc}", cancelled=True)
