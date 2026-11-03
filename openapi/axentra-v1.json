@@ -4263,18 +4263,43 @@
         "type": "object"
       },
       "ProductOverview": {
+        "description": "Counts for the product dashboard.\n\n``scope`` tells what the counts cover. ``product``: callers that hold ``tenants:read`` on the\nproduct (product operators, platform roles, product-wide API keys with that permission) get\nproduct-wide counts. ``tenant``: every other caller (plain tenant members, product-wide keys\nwithout ``tenants:read``) gets counts of its own tenants only: ``tenants`` counts the tenants in\nwhich it holds ``tenant:read``, ``users`` the distinct members of those in which it holds\n``members:read``, ``records`` the records of those in which it holds ``records:read``; the\nproduct-level counters ``api_keys``, ``audit_events_24h`` and ``denied_events_24h`` are\n``null``.",
         "properties": {
           "api_keys": {
-            "title": "Api Keys",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when scope is tenant",
+            "title": "Api Keys"
           },
           "audit_events_24h": {
-            "title": "Audit Events 24H",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when scope is tenant",
+            "title": "Audit Events 24H"
           },
           "denied_events_24h": {
-            "title": "Denied Events 24H",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null when scope is tenant",
+            "title": "Denied Events 24H"
           },
           "product": {
             "$ref": "#/components/schemas/Product"
@@ -4282,6 +4307,15 @@
           "records": {
             "title": "Records",
             "type": "integer"
+          },
+          "scope": {
+            "description": "product: product-wide counts; tenant: counts of the caller's own tenants only",
+            "enum": [
+              "product",
+              "tenant"
+            ],
+            "title": "Scope",
+            "type": "string"
           },
           "tenants": {
             "title": "Tenants",
@@ -4294,6 +4328,7 @@
         },
         "required": [
           "product",
+          "scope",
           "tenants",
           "users",
           "api_keys",
@@ -6914,6 +6949,7 @@
                 "type": "null"
               }
             ],
+            "description": "default: server time. At most 5 minutes in the future and 400 days in the past; before the tenant's current billing period only with usage:manage on the product (otherwise 403 backdating_not_permitted)",
             "title": "Occurred At"
           },
           "properties": {

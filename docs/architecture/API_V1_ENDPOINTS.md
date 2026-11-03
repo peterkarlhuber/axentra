@@ -28,7 +28,11 @@ summary. Permission names in brackets.
 - `GET /v1/products` (visible to caller), `POST /v1/products` [platform admin, multi mode only]
 - `GET /v1/products/{pid}`, `PATCH /v1/products/{pid}` `{name?, description?, settings?}` [product:manage]
 - `POST /v1/products/{pid}/archive`, `POST /v1/products/{pid}/restore` [platform admin, multi]
-- `GET /v1/products/{pid}/overview` -> counts (tenants, users, keys, audit last 24h) [product:read]
+- `GET /v1/products/{pid}/overview` -> counts (tenants, users, keys, records, audit last 24h) [product:read].
+  `scope: "product"` (product-wide counts) for callers with `tenants:read` on the product;
+  otherwise `scope: "tenant"`: `tenants`, `users`, `records` count only the caller's own tenants (per
+  tenant the caller needs `tenant:read`, `members:read`, `records:read`), and `api_keys`,
+  `audit_events_24h`, `denied_events_24h` are `null`
 - `GET/POST /v1/products/{pid}/members`, `PATCH/DELETE /v1/products/{pid}/members/{user_id}` [product_members:*]
   (role ceiling: `403` for roles above the caller's permissions or the owner rank; `404` for users
   not visible to the caller, see SECURITY_MODEL.md rules 8-9)

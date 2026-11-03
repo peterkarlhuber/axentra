@@ -19,13 +19,27 @@ class Product(BaseModel):
 
 
 class ProductOverview(BaseModel):
+    """Counts for the product dashboard.
+
+    ``scope`` tells what the counts cover. ``product``: callers that hold ``tenants:read`` on the
+    product (product operators, platform roles, product-wide API keys with that permission) get
+    product-wide counts. ``tenant``: every other caller (plain tenant members, product-wide keys
+    without ``tenants:read``) gets counts of its own tenants only: ``tenants`` counts the tenants in
+    which it holds ``tenant:read``, ``users`` the distinct members of those in which it holds
+    ``members:read``, ``records`` the records of those in which it holds ``records:read``; the
+    product-level counters ``api_keys``, ``audit_events_24h`` and ``denied_events_24h`` are
+    ``null``."""
+
     product: Product
+    scope: Literal["product", "tenant"] = Field(
+        description="product: product-wide counts; tenant: counts of the caller's own tenants only"
+    )
     tenants: int
     users: int
-    api_keys: int
+    api_keys: int | None = Field(description="null when scope is tenant")
     records: int
-    audit_events_24h: int
-    denied_events_24h: int
+    audit_events_24h: int | None = Field(description="null when scope is tenant")
+    denied_events_24h: int | None = Field(description="null when scope is tenant")
 
 
 class Tenant(BaseModel):

@@ -341,3 +341,63 @@ def test_archived_product_keeps_its_tenants_closed_to_operators(world):
     assert owner.patch(f"/v1/products/{pid}/tenants/{tid}", json={"status": "active"}).status_code == 403
     assert world.admin.post(f"/v1/products/{pid}/restore").status_code == 200
     assert owner.get(f"/v1/products/{pid}/tenants/{tid}").status_code == 200
+
+
+def test_overview_counts_only_own_tenants_for_tenant_callers(world):
+    """AX2-05: product-wide counts need tenants:read on the product; a tenant admin of T1 sees only
+    T1's numbers, never T2's, and no product-level counters."""
+    pid = _product(world)
+    t1, t2 = _tenant(world, pid, "acme"), _tenant(world, pid, "globex")
+
+    def add(tid, email, role):
+        world.user(email)
+        r = world.admin.post(f"/v1/products/{pid}/tenants/{tid}/members", json={"email": email, "role": role})
+        assert r.status_code == 201, r.text
+
+    add(t1, "t1admin@example.com", "tenant_admin")
+    add(t1, "t1member@example.com", "member")
+    for i in range(3):
+        add(t2, f"t2user{i}@example.com", "member")
+    for tid, n in ((t1, 1), (t2, 4)):
+        for i in range(n):
+            r = world.admin.post(f"/v1/products/{pid}/tenants/{tid}/records/notes", json={"i": i})
+            assert r.status_code == 201, r.text
+    world.user("viewer@example.com")
+    r = world.admin.post(
+        f"/v1/products/{pid}/members", json={"email": "viewer@example.com", "role": "product_viewer"}
+    )
+    assert r.status_code == 201, r.text
+
+    # Product scope (platform admin, product operator): product-wide counts, as before.
+    for client in (world.admin, world.login_as("viewer@example.com")):
+        ov = client.get(f"/v1/products/{pid}/overview").json()
+        assert ov["scope"] == "product"
+        # 5 tenant members, the viewer and the product owner (the creating admin).
+        assert ov["tenants"] == 2 and ov["users"] == 7 and ov["records"] == 5
+        assert isinstance(ov["api_keys"], int) and ov["audit_events_24h"] > 0
+        assert isinstance(ov["denied_events_24h"], int)
+
+    # Tenant admin of T1: only T1.
+    ov = world.login_as("t1admin@example.com").get(f"/v1/products/{pid}/overview").json()
+    assert ov["product"]["id"] == pid
+    assert ov["scope"] == "tenant"
+    assert (ov["tenants"], ov["users"], ov["records"]) == (1, 2, 1)
+    assert ov["api_keys"] is None and ov["audit_events_24h"] is None and ov["denied_events_24h"] is None
+
+    # A product-wide key with product:read only holds no tenant read permission: all zero.
+    r = world.admin.post(f"/v1/products/{pid}/api-keys", json={"name": "ro", "permissions": ["product:read"]})
+    assert r.status_code == 201, r.text
+    from fastapi.testclient import TestClient
+
+    key = TestClient(world.app, headers={"Authorization": f"Bearer {r.json()['secret']}"})
+    ov = key.get(f"/v1/products/{pid}/overview").json()
+    assert ov["scope"] == "tenant" and (ov["tenants"], ov["users"], ov["records"]) == (0, 0, 0)
+
+    # A user of another product's tenant is not related to this product at all.
+    pid2 = _product(world, "erp")
+    t3 = _tenant(world, pid2, "initech")
+    world.user("other@example.com")
+    world.admin.post(
+        f"/v1/products/{pid2}/tenants/{t3}/members", json={"email": "other@example.com", "role": "member"}
+    )
+    assert world.login_as("other@example.com").get(f"/v1/products/{pid}/overview").status_code == 404

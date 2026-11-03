@@ -284,8 +284,16 @@ class TenancyService:
         return Product.model_validate(row)
 
     def overview(self, principal: Principal, product_id: str) -> ProductOverview:
-        product = self.get_product(principal, product_id)
+        """Counts for the product dashboard (``product:read``). Product-wide counts need
+        ``tenants:read`` on the product; other callers get the counts of their own tenants (see
+        :class:`ProductOverview`), computed without counting the whole product."""
+        grant = self.authz.require(principal, "product:read", product_id)
+        if "tenants:read" not in grant.permissions:
+            return self._tenant_overview(principal, product_id)
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            product = tx.one_or_404(
+                "SELECT * FROM axentra_products WHERE id = %s", (product_id,), what="product"
+            )
             row = tx.one_or_404(
                 "SELECT (SELECT count(*) FROM axentra_tenants WHERE product_id = %(p)s) AS tenants,"
                 " (SELECT count(DISTINCT user_id) FROM (SELECT user_id FROM axentra_memberships WHERE product_id = %(p)s"
@@ -298,7 +306,51 @@ class TenancyService:
                 "   AND occurred_at > now() - interval '24 hours') AS denied_events_24h",
                 {"p": product_id},
             )
-        return ProductOverview(product=product, **row)
+        return ProductOverview(product=Product.model_validate(product), scope="product", **row)
+
+    def _tenant_overview(self, principal: Principal, product_id: str) -> ProductOverview:
+        """The overview of a caller without ``tenants:read``: only its own tenants count."""
+        grants = self.authz.tenant_grants(principal, product_id)
+
+        def having(permission: str) -> list[str]:
+            return sorted(t for t, g in grants.items() if permission in g.permissions)
+
+        readable, with_members, with_records = (
+            having("tenant:read"),
+            having("members:read"),
+            having("records:read"),
+        )
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            product = tx.one_or_404(
+                "SELECT * FROM axentra_products WHERE id = %s", (product_id,), what="product"
+            )
+            users = (
+                tx.scalar(
+                    "SELECT count(DISTINCT user_id) FROM axentra_memberships"
+                    " WHERE product_id = %s AND tenant_id = ANY(%s)",
+                    (product_id, with_members),
+                )
+                if with_members
+                else 0
+            )
+            records = (
+                tx.scalar(
+                    "SELECT count(*) FROM axentra_records WHERE product_id = %s AND tenant_id = ANY(%s)",
+                    (product_id, with_records),
+                )
+                if with_records
+                else 0
+            )
+        return ProductOverview(
+            product=Product.model_validate(product),
+            scope="tenant",
+            tenants=len(readable),
+            users=int(users or 0),
+            api_keys=None,
+            records=int(records or 0),
+            audit_events_24h=None,
+            denied_events_24h=None,
+        )
 
     # -- product operators -------------------------------------------------------------------------
 

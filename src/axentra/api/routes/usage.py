@@ -52,7 +52,12 @@ class MeterUpdate(BaseModel):
 class UsageRecord(BaseModel):
     meter: str = Field(max_length=63)
     quantity: Number
-    occurred_at: datetime | None = None
+    occurred_at: datetime | None = Field(
+        default=None,
+        description="default: server time. At most 5 minutes in the future and 400 days in the past;"
+        " before the tenant's current billing period only with usage:manage on the product"
+        " (otherwise 403 backdating_not_permitted)",
+    )
     properties: dict[str, Any] = Field(default_factory=dict)
     enforce: bool = Field(
         default=True,

@@ -38,6 +38,23 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   resolution instead of two: one snapshot, four round trips fewer on every request of an embedding host).
 
 ### Security
+- Product overview without cross-tenant numbers (audit round 2, AX2-05). `GET /v1/products/{id}/overview`
+  returns product-wide counts only to callers that hold `tenants:read` on the product (product operators,
+  platform roles, product-wide API keys with that permission). Every other caller with `product:read` (plain
+  tenant members, product-wide keys without `tenants:read`) now gets the counts of its own tenants:
+  `tenants`, `users` and `records` cover only the tenants in which it holds `tenant:read`, `members:read`
+  and `records:read`, and `api_keys`, `audit_events_24h` and `denied_events_24h` are `null`; the whole
+  product is no longer counted for them. New required response field `scope` (`"product"` or `"tenant"`).
+  **Contract change**: the three product-level counters are now nullable (Axentra Studio already ignores
+  non-numeric counters).
+- Usage backdating is limited (audit round 2, AX2-08). The built-in `member` role keeps `usage:record`, but
+  an `occurred_at` before the start of the tenant's current billing period (the subscription cycle, or the
+  calendar month without one) now needs `usage:manage` held at product level; other callers (members, tenant
+  admins, tenant-bound API keys) get `403` with the new problem code `backdating_not_permitted`
+  (`urn:axentra:problem:backdating_not_permitted`) and `period_start`, the earliest allowed `occurred_at`.
+  The 400-day bound still applies to everyone. Replays of an accepted idempotency key are unaffected.
+  **Behavior change** for integrations that backfill older usage with a `usage:record`-only key: give that
+  key `usage:manage` (product-wide).
 - Background work follows current access (audit round 2, AX2-01). Jobs fired by a schedule are reduced to
   what the schedule's creator holds *when the job runs*, like jobs enqueued through `POST /jobs` (before,
   they kept all handler permissions after the creator was removed or disabled; a job whose schedule was

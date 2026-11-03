@@ -9,7 +9,7 @@ It knows nothing about AI tokens or any specific product. The meter key is the p
 | Concept | Description |
 |---|---|
 | **Meter** | Per product: `key` (`^[a-z][a-z0-9_.]{0,62}$`, e.g. `api_calls`, `storage_bytes`, `reports`), `unit`, `aggregation` (`sum` \| `max` \| `last`), `reset_period` (`none` \| `day` \| `month` \| `billing_period`), `description`, optional `default_limit` + `default_enforcement`. Key, aggregation and reset period cannot change after creation. Meters with usage cannot be deleted, only deactivated (`active=false`). |
-| **Usage event** | Append-only: tenant, meter, `quantity` (decimal, 0..1e15, at most 6 decimal places), `occurred_at` (at most 5 min in the future, at most 400 days in the past), `properties` (JSON object, at most 4 KB), `idempotency_key` (unique per tenant). |
+| **Usage event** | Append-only: tenant, meter, `quantity` (decimal, 0..1e15, at most 6 decimal places), `occurred_at` (at most 5 min in the future, at most 400 days in the past; before the tenant's current billing period only with `usage:manage`, see "Backdating"), `properties` (JSON object, at most 4 KB), `idempotency_key` (unique per tenant). |
 | **Counter** | Aggregates per tenant, meter and period (`sum` adds, `max` keeps the maximum, `last` keeps the value of the latest `occurred_at`), plus daily buckets for time series. They are updated in the same transaction as the event (`INSERT ... ON CONFLICT DO UPDATE`). |
 | **Period** | `none`: never resets. `day`: UTC days. `month`: UTC calendar months. `billing_period`: the tenant's subscription cycle, anchored at the subscription's period anchor (a day like the 31st is clamped in short months), when the billing module is enabled and the tenant has an entitled subscription. Otherwise it is the calendar month. Events count in the period that contains their `occurred_at`. |
 | **Limit** | The effective limit of a tenant for a meter. The first match wins: a per-tenant **quota override** (`source: quota`), then the plan entitlement `limit.<meter key>` (`source: plan`, via billing), then the meter's `default_limit` (`source: meter`). Without any of these the meter is unlimited (`source: none`). `limit: null` means unlimited. |
@@ -46,6 +46,16 @@ Repeating an idempotency key with the same body (meter, quantity, explicit `occu
 returns the original event with `replayed: true`. A different body returns `409 conflict`. If
 `occurred_at` is omitted, the server time is used and does not count as part of the body.
 
+**Backdating** (AX2-08). Usage with an explicit `occurred_at` before the start of the tenant's
+current billing period (the subscription cycle, or the calendar month without one) changes a
+closed period, so it needs `usage:manage` held at product level (product owners and admins,
+platform admins, product-wide API keys with that permission). Everyone else, including tenant
+admins, members (the built-in `member` role keeps `usage:record`) and tenant-bound keys, gets
+`403` with code `backdating_not_permitted` and `period_start` (the earliest allowed
+`occurred_at`) in the problem body. The check runs after the idempotency lookup, so retrying an
+accepted request still replays after the period has closed. `record_in` and the library calls
+apply the same rule; `Principal.system` holds every permission.
+
 Plan limits and billing periods come from the billing module through the small `UsagePolicy`
 protocol (`plan_limits(tx, pid, tid)`, `billing_period(tx, pid, tid, at)`), which is registered at
 wiring time (`ax.usage.set_policy(ax.billing.usage_policy())`). Usage never imports billing
@@ -65,7 +75,7 @@ without a tenant, so only product roles, platform roles and product-wide API key
 | DELETE | `/usage/meters/{meter_id}` | `usage:manage` | `204`, or `409` when usage exists |
 | GET | `/usage/summary?since&until&meter&limit&cursor` | `usage:read` (product level) | `Page[{tenant_id, meter, value, event_count}]` |
 | GET | `/usage/timeseries?meter&since&until` | `usage:read` (product level) | `TimeSeries` (all tenants summed) |
-| POST | `/tenants/{tid}/usage/events` (header `Idempotency-Key` required) | `usage:record`. `enforce=false` also needs product-level `usage:manage` | `201` new / `200` replayed: `{event, replayed, quota}`. `429` on a hard limit |
+| POST | `/tenants/{tid}/usage/events` (header `Idempotency-Key` required) | `usage:record`. `enforce=false`, and an `occurred_at` before the current billing period, also need product-level `usage:manage` | `201` new / `200` replayed: `{event, replayed, quota}`. `429` on a hard limit, `403 backdating_not_permitted` |
 | GET | `/tenants/{tid}/usage/events?meter&since&until&limit&cursor` | `usage:read` | `Page[UsageEvent]` (newest first) |
 | GET | `/tenants/{tid}/usage/summary?at` | `usage:read` | `MeterUsage[]` |
 | GET | `/tenants/{tid}/usage/timeseries?meter&since&until` | `usage:read` | `TimeSeries` |
