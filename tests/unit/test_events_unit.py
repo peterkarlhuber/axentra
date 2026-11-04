@@ -137,6 +137,32 @@ def test_parse_target_rules():
     ):
         with pytest.raises(TargetRefused):
             parse_target(bad, s, production=False)
+
+
+def test_parse_target_refuses_legacy_ipv4_notations_and_invalid_hosts():
+    """Numeric hosts that resolvers read as IPv4 addresses (AX2-07) are refused at creation, not only
+    after resolving at delivery; ordinary host names and canonical public addresses still pass."""
+    s = EventsSettings()
+    for bad in (
+        "https://2130706433/x",
+        "https://0x7f.1/x",
+        "https://0x7f000001/",
+        "https://0177.0.0.1/x",
+        "https://127.1/",
+        "https://0/x",
+        "https://134744072/",
+        "https://%31%32%37.0.0.1/",
+        "https://exa mple.com/",
+    ):
+        with pytest.raises(TargetRefused):
+            parse_target(bad, s, production=True)
+    for good in (
+        "https://8.8.8.8/h",
+        "https://1e100.net/",
+        "https://123.example.com/",
+        "https://hooks.example.com:8443/",
+    ):
+        assert parse_target(good, s, production=True).host
     allowed = EventsSettings(webhook_allow_http=True, webhook_allow_private_targets=True)
     assert parse_target("http://127.0.0.1:9/", allowed, production=False).port == 9
     with pytest.raises(TargetRefused):

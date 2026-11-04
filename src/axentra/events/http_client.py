@@ -19,6 +19,7 @@ import contextlib
 from dataclasses import dataclass
 import http.client
 import ipaddress
+import re
 import socket
 import ssl
 import threading
@@ -30,6 +31,10 @@ from axentra.core.errors import ValidationFailed
 
 MAX_URL_LENGTH = 2000
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+#: A host made only of numeric labels (decimal, octal or 0x hex) that is not a canonical IPv4 address.
+_NUMERIC_HOST = re.compile(r"(?:(?:0x[0-9a-f]*|[0-9]+)\.?){1,4}")
+#: Characters no host name contains (whitespace, control characters, percent-encoding, brackets).
+_INVALID_HOST_CHARS = re.compile(r"[\s\x00-\x1f\x7f%\[\]\\/@]")
 
 
 class TargetRefused(ValidationFailed):
@@ -101,6 +106,12 @@ def parse_target(url: str, settings: EventsSettings, *, production: bool) -> Tar
             literal = None
         if literal is not None and _blocked(literal):
             raise TargetRefused("webhook urls must not point to private, loopback or link-local addresses")
+        if literal is None and _NUMERIC_HOST.fullmatch(host):
+            # Legacy IPv4 notations (2130706433, 0x7f.1, 0177.0.0.1, 127.1, 0): the resolver turns
+            # them into addresses that the delivery-time check refuses anyway; refuse them up front.
+            raise TargetRefused("webhook urls must use a host name or a dotted-decimal IPv4 address")
+        if _INVALID_HOST_CHARS.search(host):
+            raise TargetRefused("url is not valid")
     path = parts.path or "/"
     if parts.query:
         path += "?" + parts.query

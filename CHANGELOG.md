@@ -10,6 +10,9 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   rollback differ from the plan (sections 4.6 and 8).
 
 ### Fixed
+- Webhook URLs with legacy IPv4 notations (`2130706433`, `0x7f.1`, `0177.0.0.1`, `127.1`, `0`) or with
+  whitespace or percent signs in the host are refused when the endpoint is created or changed (audit round 2,
+  AX2-07). Before, they were accepted and only the delivery-time address check refused them.
 - `GET /v1/me` listed only tenants among the product's first 200 (by id), so members of later tenants got
   an empty `tenants` list and lost their tenant permissions in Axentra Studio (audit round 2, AX2-03). It now
   lists every readable tenant, with the same entries, order and response shape as before; the per-tenant
