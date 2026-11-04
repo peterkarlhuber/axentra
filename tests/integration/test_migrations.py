@@ -253,6 +253,7 @@ def test_cli_setup_token_closes_the_pool(pg_urls, tmp_path, capsys, monkeypatch)
         encoding="utf-8",
     )
     capsys.readouterr()
-    assert main(["--config", str(cfg), "admin", "setup-token"]) == 0
+    # --force: other tests of this session may already have created a platform admin.
+    assert main(["--config", str(cfg), "admin", "setup-token", "--force"]) == 0
     assert capsys.readouterr().out.strip().startswith("axsetup_")
     assert closed == [1]
