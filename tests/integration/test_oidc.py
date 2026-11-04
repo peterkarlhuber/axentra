@@ -654,3 +654,43 @@ def test_link_by_verified_email_disabled_without_signup(make_world) -> None:  # 
     _, r = w.login("bob-sub", email="bob@example.com")
     assert _error(r) == "signup_disabled"
     assert _identities(w) == []
+
+
+# -- request context of the audit events (audit round 3) -------------------------------------------
+
+
+def _audit(w: OidcWorld, action: str, outcome: str = "success") -> list[dict[str, Any]]:
+    with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        return tx.all(
+            "SELECT * FROM axentra_audit_events WHERE action = %s AND outcome = %s ORDER BY occurred_at, id",
+            (action, outcome),
+        )
+
+
+def test_login_audit_events_carry_request_context(w: OidcWorld) -> None:
+    b = w.browser()
+    callback = w.idp.authorize(w.start(b).headers["location"], "ctx-sub", email="ctx@example.com", name="Ctx")
+    r = b.get(callback, follow_redirects=False, headers={"X-Request-ID": "req-oidc-ok"})
+    assert _error(r) is None and b.client.cookies.get(SESSION_COOKIE)
+    for action in ("identity.external.link", "identity.login"):
+        (event,) = [e for e in _audit(w, action) if e["request_id"] == "req-oidc-ok"]
+        assert event["actor_kind"] == "user" and event["actor_display"] == "ctx@example.com"
+        assert event["ip"] == "testclient"
+        text = str(event)
+        assert b.client.cookies.get(SESSION_COOKIE) not in text and "code=" not in text
+
+
+def test_refused_login_audit_event_carries_request_context(w: OidcWorld) -> None:
+    b = w.browser()
+    state = parse_qs(urlsplit(w.start(b).headers["location"]).query)["state"][0]
+    r = b.get(
+        "/v1/auth/oidc/test/callback",
+        params={"state": state, "error": "access_denied"},
+        follow_redirects=False,
+        headers={"X-Request-ID": "req-oidc-denied"},
+    )
+    assert _error(r) == "access_denied"
+    (event,) = _audit(w, "identity.login", "denied")
+    assert event["details"] == {"method": "oidc", "provider": "test", "reason": "access_denied"}
+    assert event["request_id"] == "req-oidc-denied" and event["ip"] == "testclient"
+    assert state not in str(event)

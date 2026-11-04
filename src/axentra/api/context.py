@@ -68,6 +68,13 @@ def client_ip(request: Request) -> str | None:
     return peer
 
 
+def request_id(request: Request) -> str | None:
+    """The request id the middleware assigned (``X-Request-ID``), for audit events of flows
+    without a principal (login, first-run setup)."""
+    rid = getattr(request.state, "request_id", None)
+    return rid if isinstance(rid, str) else None
+
+
 def _bearer(request: Request) -> str | None:
     auth = request.headers.get("authorization", "")
     if auth[:7].lower() == "bearer ":
@@ -81,7 +88,7 @@ def resolve_principal(request: Request) -> Principal:
     if cached is not None:
         return cached
     ax = get_ax(request)
-    rid = getattr(request.state, "request_id", None)
+    rid = request_id(request)
     ip = client_ip(request)
     token = _bearer(request)
     if token:

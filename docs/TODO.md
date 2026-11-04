@@ -6,7 +6,8 @@ Studio has its own list in its repository; items here mention Studio only where 
 involved. Remove an item in the change that completes it.
 
 Last reviewed: 2026-11-04 (`0.1.0.dev0`, internal backend audit round 3 against `e7c06d0`: no regressions; AX3-01
-key bounding, AX3-02, AX2-07 and the Dependabot config fixed in the PR that updates this line; new items marked AX3-NN).
+key bounding, AX3-02, AX2-07 and the Dependabot config fixed in the PR that updates this line; new items marked AX3-NN;
+login and setup audit events record ip, request id and actor since the round-3 follow-up, UX round 3 handover).
 Before that: 2026-11-03 (internal backend audit round 2: CI on `master` is green again and
 the security review rounds are closed, so both items were removed; new items from the audit and the DX review
 are marked AX2-NN / DX-NN; AX2-05 and AX2-08 were decided and fixed, so their items were removed; Studio-facing backend items from the UX
@@ -32,6 +33,7 @@ round 2 are marked AXS-BN).
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
+| P3 | identity | A refused password (policy) answers `422` with only `detail`; add `errors[{loc: ["body", "password"], msg}]` like other validation errors, and expose the minimum length in `/v1/meta` so clients can check before sending (AXS-B6, UX round 3) |
 | P3 | identity | Drop the deprecated `invitation` query parameter from the `GET /v1/auth/oidc/{provider}/start` contract (OpenAPI) at the next `/v1` cleanup; it is refused since security review round 4 (R4-1, `login_error=invitation_requires_post`) and only stays declared to document that |
 | P3 | identity | A failed OIDC login redirects to `<login page>?login_error=...` without the original `return_to`, so a deep link (for example an invitation accept page) is lost; Studio keeps an opened invitation per tab as a workaround. Pass a validated `return_to` along |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |

@@ -13,6 +13,7 @@ from axentra.api.context import (
     check_origin,
     client_ip,
     login_cookie_name,
+    request_id,
     session_cookie_name,
 )
 from axentra.core.errors import NotFound, Unauthenticated
@@ -61,6 +62,7 @@ def setup(body: SetupRequest, request: Request, response: Response, ax: Ax) -> S
         password=body.password,
         ip=client_ip(request),
         user_agent=request.headers.get("user-agent", ""),
+        request_id=request_id(request),
     )
     set_session_cookie(ax, response, new)
     return new.info
@@ -71,7 +73,11 @@ def login_password(body: PasswordLogin, request: Request, response: Response, ax
     # Login CSRF: a cross-site page must not log the browser into an attacker's account.
     check_origin(request)
     new = ax.identity.login_password(
-        body.email, body.password, ip=client_ip(request), user_agent=request.headers.get("user-agent", "")
+        body.email,
+        body.password,
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent", ""),
+        request_id=request_id(request),
     )
     set_session_cookie(ax, response, new)
     return new.info
@@ -268,6 +274,7 @@ def oidc_callback(
             browser_state=request.cookies.get(login_cookie_name(ax)),
             ip=client_ip(request),
             user_agent=request.headers.get("user-agent", ""),
+            request_id=request_id(request),
         )
     except OidcLoginError as exc:
         logger.warning("OIDC login with %s refused (%s): %s", provider, exc.code, exc)

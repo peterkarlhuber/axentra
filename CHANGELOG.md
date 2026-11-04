@@ -21,6 +21,13 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   `Grant` has new fields `withheld` and `key_creator`.
 
 ### Fixed
+- The audit events of logins and first-run setup (`identity.login` with outcome `success` or `denied`, for
+  passwords and OpenID Connect, `identity.setup.complete` and `identity.external.link`) record the client
+  `ip` and the `request_id` like every other event; before, both were empty. A successful login records the
+  user's email (else name) as `actor_display` instead of an empty string (audit round 3). `AuditLog.record`
+  takes explicit `ip` and `request_id` keyword arguments for flows without a principal;
+  `IdentityService.login_password`, `complete_setup`, `start_session`, `link_external_identity` and
+  `OidcService.finish` take an optional `request_id`.
 - `axentra admin setup-token` closes its database pool: it printed the token and then waited about 20 seconds
   for the pool threads ("couldn't stop thread ... within 5.0 seconds") before exiting (audit round 3).
 - Webhook URLs with legacy IPv4 notations (`2130706433`, `0x7f.1`, `0177.0.0.1`, `127.1`, `0`) or with

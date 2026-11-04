@@ -598,6 +598,7 @@ class OidcService:
         ip: str | None,
         user_agent: str,
         start_session: bool = True,
+        request_id: str | None = None,
     ) -> LoginResult:
         """Complete a login; raises :class:`OidcLoginError` (``return_to`` set once known).
 
@@ -615,11 +616,11 @@ class OidcService:
         return_to: str = row["return_to"]
         try:
             return self._finish(
-                provider, row, state, code, error, browser_state, ip, user_agent, start_session
+                provider, row, state, code, error, browser_state, ip, user_agent, start_session, request_id
             )
         except OidcLoginError as exc:
             exc.return_to = return_to
-            self._audit_denied(provider_id, exc.code)
+            self._audit_denied(provider_id, exc.code, ip=ip, request_id=request_id)
             raise
 
     def _finish(
@@ -633,6 +634,7 @@ class OidcService:
         ip: str | None,
         user_agent: str,
         start_session: bool = True,
+        request_id: str | None = None,
     ) -> LoginResult:
         if not browser_state or not hmac.compare_digest(browser_state.encode(), state.encode()):
             # A callback URL started in another browser (login CSRF) or a lost login cookie.
@@ -695,6 +697,8 @@ class OidcService:
                 allowed_domains=allowed_domains,
                 link_by_verified_email=provider.link_by_verified_email,
                 allow_signup_without_email=provider.allow_signup_without_email,
+                ip=ip,
+                request_id=request_id,
             )
         except Forbidden as exc:
             reason = str(exc.extra.get("reason", "login_failed"))
@@ -706,7 +710,9 @@ class OidcService:
             provider=provider.issuer, subject=str(claims["sub"]), email=email, name=str(name)[:200]
         )
         session = (
-            self.identity.start_session(user_id, f"oidc:{provider.id}", ip=ip, user_agent=user_agent)
+            self.identity.start_session(
+                user_id, f"oidc:{provider.id}", ip=ip, user_agent=user_agent, request_id=request_id
+            )
             if start_session
             else None
         )
@@ -722,6 +728,7 @@ class OidcService:
                     else self.identity.get_user(user_id).display,
                 ),
                 session_id=session.info.session_id if session is not None else None,
+                request_id=request_id,
                 ip=ip,
             )
             try:
@@ -750,7 +757,9 @@ class OidcService:
             )
         return isinstance(inv_email, str) and inv_email.lower() == email.lower()
 
-    def _audit_denied(self, provider_id: str, code: str) -> None:
+    def _audit_denied(
+        self, provider_id: str, code: str, *, ip: str | None = None, request_id: str | None = None
+    ) -> None:
         try:
             self.identity.audit.record_standalone(
                 None,
@@ -758,6 +767,8 @@ class OidcService:
                 outcome="denied",
                 details={"method": "oidc", "provider": provider_id, "reason": code},
                 actor_override=("anonymous", "", ""),
+                ip=ip,
+                request_id=request_id,
             )
         except Exception:  # auditing a refusal must not hide the refusal
             logger.exception("could not audit a refused OIDC login")

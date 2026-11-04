@@ -329,7 +329,15 @@ class IdentityService:
         return token
 
     def complete_setup(
-        self, token: str, *, email: str, name: str, password: str, ip: str | None, user_agent: str
+        self,
+        token: str,
+        *,
+        email: str,
+        name: str,
+        password: str,
+        ip: str | None,
+        user_agent: str,
+        request_id: str | None = None,
     ) -> NewSession:
         self.hit(f"setup:{ip}", self.settings.security.login_rate_per_minute)
         with self.db.transaction(DbScope.platform()) as tx:
@@ -356,8 +364,10 @@ class IdentityService:
                 target_type="user",
                 target_id=user_id,
                 actor_override=("user", user_id, email),
+                ip=ip,
+                request_id=request_id,
             )
-        return self.start_session(user_id, "password", ip=ip, user_agent=user_agent)
+        return self.start_session(user_id, "password", ip=ip, user_agent=user_agent, request_id=request_id)
 
     # -- throttling ------------------------------------------------------------------------------
 
@@ -410,7 +420,9 @@ class IdentityService:
 
     # -- password login -------------------------------------------------------------------------
 
-    def login_password(self, email: str, password: str, *, ip: str | None, user_agent: str) -> NewSession:
+    def login_password(
+        self, email: str, password: str, *, ip: str | None, user_agent: str, request_id: str | None = None
+    ) -> NewSession:
         if not self.settings.security.password_login:
             raise Forbidden("password login is disabled")
         limit = self.settings.security.login_rate_per_minute
@@ -442,6 +454,8 @@ class IdentityService:
                     target_id=row["id"] if row else "",
                     details={"method": "password", "reason": "disabled" if ok else "bad_credentials"},
                     actor_override=("anonymous", "", email[:200]),
+                    ip=ip,
+                    request_id=request_id,
                 )
                 denied = True
             else:
@@ -456,11 +470,15 @@ class IdentityService:
         assert row is not None
         self.refund(ip_bucket)
         self.refund(account_bucket)
-        return self.start_session(row["id"], "password", ip=ip, user_agent=user_agent)
+        return self.start_session(row["id"], "password", ip=ip, user_agent=user_agent, request_id=request_id)
 
     # -- sessions -------------------------------------------------------------------------------
 
-    def start_session(self, user_id: str, method: str, *, ip: str | None, user_agent: str) -> NewSession:
+    def start_session(
+        self, user_id: str, method: str, *, ip: str | None, user_agent: str, request_id: str | None = None
+    ) -> NewSession:
+        """Create a session and record ``identity.login`` with the user's email (else name, else
+        id) as ``actor_display`` and the request's ``ip`` and ``request_id``."""
         token = new_token()
         session_id = new_id("ses")
         csrf = new_token(24)
@@ -481,7 +499,11 @@ class IdentityService:
                     self.settings.security.session_ttl_hours,
                 ),
             )
-            tx.execute("UPDATE axentra_users SET last_login_at = now() WHERE id = %s", (user_id,))
+            user_row = tx.one(
+                "UPDATE axentra_users SET last_login_at = now() WHERE id = %s RETURNING email, name",
+                (user_id,),
+            )
+            display = (user_row["email"] or user_row["name"] or user_id) if user_row else user_id
             self.audit.record(
                 tx,
                 None,
@@ -489,7 +511,9 @@ class IdentityService:
                 target_type="session",
                 target_id=session_id,
                 details={"method": method},
-                actor_override=("user", user_id, ""),
+                actor_override=("user", user_id, display),
+                ip=ip,
+                request_id=request_id,
             )
         user = self.get_user(user_id)
         return NewSession(
@@ -624,6 +648,8 @@ class IdentityService:
         allowed_domains: list[str],
         link_by_verified_email: bool = True,
         allow_signup_without_email: bool = False,
+        ip: str | None = None,
+        request_id: str | None = None,
     ) -> str:
         """Find the user for an external identity ``(provider, subject)``; for an unknown one,
         link an existing user or create one:
@@ -699,6 +725,8 @@ class IdentityService:
                     target_id=user_id,
                     details={"provider": provider, "how": how},
                     actor_override=("user", user_id, user_email or name[:200]),
+                    ip=ip,
+                    request_id=request_id,
                 )
             status = tx.scalar("SELECT status FROM axentra_users WHERE id = %s", (user_id,))
             if status != "active":
