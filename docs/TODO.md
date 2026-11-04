@@ -75,6 +75,7 @@ round 2 are marked AXS-BN).
 | P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin) |
 | P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
 | P3 | cli | A command that fails after creating its `Axentra` instance (for example a database error in `axentra worker --once`) exits without closing the connection pool, so the pool threads delay the exit by about 20 seconds (`admin setup-token` also waited on success; fixed in audit round 3, AX3-02) |
+| P3 | config | When `database.url` is unset, the `database_unreachable` message does not say how to set it; name `AXENTRA__DATABASE__URL` (or `[database] url` in the config file) (UX round 3 DX handover B19) |
 | P3 | branding | The product name collides with an unrelated company that owns `axentra.dev` (problem type URIs no longer use that domain, DX-41); decide on naming/branding before a public release |
 | P3 | sdk | `npm audit` reports moderate advisories for the TypeScript SDK's development dependency `minimatch` (none in the production tree); update when a fixed release is in range (AX2-09) |
 
