@@ -206,3 +206,65 @@ def test_setup_with_a_taken_email_is_a_distinct_conflict(ax):
         json={"setup_token": token, "email": "admin2@example.com", "password": "another long password"},
     )
     assert r.status_code == 200, r.text
+
+
+# -- request context of login and setup audit events (audit round 3) ---------------------------------
+
+
+def _audit_rows(ax, action: str, outcome: str = "success") -> list[dict]:  # type: ignore[no-untyped-def]
+    with ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        return tx.all(
+            "SELECT * FROM axentra_audit_events WHERE action = %s AND outcome = %s ORDER BY occurred_at, id",
+            (action, outcome),
+        )
+
+
+def test_setup_audit_events_carry_request_context(ax):
+    app = create_app(axentra=ax, start=False)
+    token = ax.identity.create_setup_token()
+    r = Browser(app).post(
+        "/v1/auth/setup",
+        json={"setup_token": token, "email": ADMIN_EMAIL, "name": "Admin", "password": ADMIN_PASSWORD},
+        headers={"X-Request-ID": "req-setup-1"},
+    )
+    assert r.status_code == 200, r.text
+    for action in ("identity.setup.complete", "identity.login"):
+        (event,) = _audit_rows(ax, action)
+        assert event["actor_kind"] == "user" and event["actor_id"] == r.json()["user"]["id"]
+        assert event["actor_display"] == ADMIN_EMAIL
+        assert event["request_id"] == "req-setup-1"
+        assert event["ip"] == "testclient"  # TestClient's peer address
+        assert ADMIN_PASSWORD not in str(event) and token not in str(event)
+
+
+def test_password_login_audit_events_carry_request_context(world):
+    b = world.browser()
+    r = b.post(
+        "/v1/auth/login/password",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+        headers={"X-Request-ID": "req-login-ok"},
+    )
+    assert r.status_code == 200, r.text
+    (event,) = [e for e in _audit_rows(world.ax, "identity.login") if e["request_id"] == "req-login-ok"]
+    assert event["actor_kind"] == "user" and event["actor_id"] == r.json()["user"]["id"]
+    assert event["actor_display"] == ADMIN_EMAIL
+    assert event["ip"] == "testclient"
+    assert event["target_type"] == "session" and event["details"] == {"method": "password"}
+    assert ADMIN_PASSWORD not in str(event)
+    cookie = b.client.cookies.get("axentra-session")
+    assert cookie and cookie not in str(event)
+
+
+def test_denied_password_login_audit_event_carries_request_context(world):
+    typed = "Admin@Example.com"
+    r = world.browser().post(
+        "/v1/auth/login/password",
+        json={"email": typed, "password": "wrong password!!"},
+        headers={"X-Request-ID": "req-login-denied"},
+    )
+    assert r.status_code == 401
+    (event,) = _audit_rows(world.ax, "identity.login", "denied")
+    assert event["actor_kind"] == "anonymous" and event["actor_display"] == typed
+    assert event["request_id"] == "req-login-denied"
+    assert event["ip"] == "testclient"
+    assert "wrong password" not in str(event)

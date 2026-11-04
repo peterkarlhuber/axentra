@@ -56,7 +56,14 @@ class AuditLog:
         outcome: Outcome = "success",
         details: dict[str, Any] | None = None,
         actor_override: tuple[str, str, str] | None = None,
+        ip: str | None = None,
+        request_id: str | None = None,
     ) -> str:
+        """Append one event in ``tx``.
+
+        ``ip`` and ``request_id`` default to the principal's; pass them explicitly for flows
+        without an authenticated principal (login, first-run setup), so those events can be
+        correlated with the HTTP request like every other event."""
         if actor_override:
             kind, actor_id, display = actor_override
         elif principal is not None:
@@ -79,8 +86,8 @@ class AuditLog:
                 target_type,
                 target_id,
                 outcome,
-                principal.request_id if principal else None,
-                principal.ip if principal else None,
+                request_id if request_id is not None else (principal.request_id if principal else None),
+                ip if ip is not None else (principal.ip if principal else None),
                 Jsonb(redact(details or {})),
             ),
         )
