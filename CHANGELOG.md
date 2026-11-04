@@ -10,6 +10,8 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   rollback differ from the plan (sections 4.6 and 8).
 
 ### Fixed
+- `axentra admin setup-token` closes its database pool: it printed the token and then waited about 20 seconds
+  for the pool threads ("couldn't stop thread ... within 5.0 seconds") before exiting (audit round 3).
 - Webhook URLs with legacy IPv4 notations (`2130706433`, `0x7f.1`, `0177.0.0.1`, `127.1`, `0`) or with
   whitespace or percent signs in the host are refused when the endpoint is created or changed (audit round 2,
   AX2-07). Before, they were accepted and only the delivery-time address check refused them.
