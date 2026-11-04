@@ -79,6 +79,17 @@ class ReauthenticationRequired(Forbidden):
     code = "reauthentication_required"
 
 
+class ApiKeyCreatorLostAccess(Forbidden):
+    """An API key used a permission that the key's creator no longer holds in that scope.
+
+    A key never does more than its creator (``created_by``: a user, or the key that made it) could do
+    now; the key is not revoked, so restoring the creator's access restores the key. ``extra``
+    carries ``permission``."""
+
+    code = "api_key_creator_lost_access"
+    title = "API key creator lost access"
+
+
 class BackdatingNotPermitted(Forbidden):
     """Usage dated before the tenant's current billing period needs product-level ``usage:manage``.
 

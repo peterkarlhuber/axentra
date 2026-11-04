@@ -227,3 +227,33 @@ def test_cli_migrate_check(pg_urls, tmp_path, capsys):
     assert out["current"] is True and out["namespaces"][0]["namespace"] == "axentra"
     assert main(["--config", str(cfg), "migrate", "--check", "--namespace", "never_applied"]) == 0
     capsys.readouterr()
+
+
+def test_cli_setup_token_closes_the_pool(pg_urls, tmp_path, capsys, monkeypatch):
+    """`axentra admin setup-token` closes its Axentra instance (and pool) on success and on refusal;
+    before, the pool threads delayed the exit by about 20 seconds (audit round 3)."""
+    import json
+
+    from axentra.cli import main
+    from axentra.platform import Axentra
+
+    closed: list[int] = []
+    real_close = Axentra.close
+
+    def close(self: Axentra) -> None:
+        closed.append(1)
+        real_close(self)
+
+    monkeypatch.setattr(Axentra, "close", close)
+    cfg = tmp_path / "ax.toml"
+    cfg.write_text(
+        'environment = "test"\nmode = "multi"\n[database]\n'
+        f"url = {json.dumps(pg_urls['app'])}\nmigration_entry_points = false\n"
+        f'[security]\nmaster_keys = "t1:{"A" * 43}="\n',
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    # --force: other tests of this session may already have created a platform admin.
+    assert main(["--config", str(cfg), "admin", "setup-token", "--force"]) == 0
+    assert capsys.readouterr().out.strip().startswith("axsetup_")
+    assert closed == [1]

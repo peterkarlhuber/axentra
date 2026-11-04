@@ -1,7 +1,9 @@
 # Weekly, grouped update pull requests with a small limit, like the Nodestro repositories. Every action in the
 # workflows is pinned by commit SHA (the version is the trailing comment); Dependabot keeps those pins current, and
 # the digests of the Python base image in the Dockerfiles.
-# pip covers pyproject.toml, the image pins in deploy/constraints.txt and the Python SDK.
+# pip covers pyproject.toml, the image pins in deploy/constraints.txt and the Python SDK. The root entry
+# also finds deploy/constraints.txt (PR #35 updated it "in /"), so /deploy is not listed separately: with
+# both, every pin change came twice (audit round 3, AX3-06: #35 and #36 were the same change).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -14,13 +16,18 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: pip
-    directories: [/, /deploy, /sdk/python]
+    directories: [/, /sdk/python]
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
     groups:
       pip-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # botocore (s3 extra) requires python-dateutil < 3; a 3.x pin makes the full image unresolvable (AX3-05).
+      # Remove once botocore allows it.
+      - dependency-name: python-dateutil
+        versions: [">=3"]
 
   - package-ecosystem: docker
     directories: [/, /examples/taskboard]
@@ -36,3 +43,10 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # TypeScript majors wait for openapi-typescript (peer typescript ^5.x); @types/node follows the
+      # oldest supported Node (engines >=20, CI 22), not the newest (AX3: #33, #34).
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]

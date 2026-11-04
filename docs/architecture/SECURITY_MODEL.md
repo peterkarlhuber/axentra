@@ -420,8 +420,22 @@ Keys created by a key (a key holding `api_keys:manage`) hold at most its permiss
 outlive it: without `expires_at` they inherit the creating key's expiry, a later `expires_at` is
 refused with `422`. Revoking a key revokes all keys created by it, recursively, in the same
 transaction (the audit event lists them under `cascaded`). Rotation does not cascade (the
-replacement takes over). Keys created by users belong to the product and are not tied to the
-user's membership: revoke them when people leave.
+replacement takes over).
+
+**A key never does more than its creator could do now** (audit round 3, AX3-01). On every request
+the key's permissions are intersected with what its creator (`created_by`) currently holds in the
+same product and tenant: a user's platform role, product role and tenant membership, or for a key
+created by a key, that key's own (bounded) permissions, recursively. A creator who is removed from
+the product or tenant, gets a smaller role, loses the platform role or is disabled takes the
+corresponding rights of their keys with them. A request that fails only because of this bound
+answers `403` with code `api_key_creator_lost_access` (member `permission`) and is audited as
+`access.api_key.use` with outcome `denied` and details `reason: creator_lost_access`,
+`permission`, `creator` (at most once per key and scope per minute and process). Nothing is
+revoked or deleted: restoring the creator's access restores the key, and an active administrator
+can still revoke the key, or rotate it (the replacement's creator is the rotating administrator).
+Keys created in process by system callers (`created_by` is not a user or key id) are not bounded.
+The bound costs one query plus one authorization of the creator per authorized call (measured
++0.6 to +1.9 ms p50 per request on a local instance).
 
 ## Secrets and the keyring
 

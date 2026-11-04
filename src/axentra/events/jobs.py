@@ -588,9 +588,16 @@ class JobService:
             return
         spec = self.kinds.get(kind)
         if spec is None or spec.enqueue_permission is None:
-            raise Forbidden(f"missing permission jobs:manage (job kind {kind} is not open to tenant callers)")
+            self.authz.refuse(
+                principal,
+                grant,
+                "jobs:manage",
+                product_id,
+                tenant_id,
+                f"missing permission jobs:manage (job kind {kind} is not open to tenant callers)",
+            )
         if spec.enqueue_permission not in grant.permissions:
-            raise Forbidden(f"missing permission {spec.enqueue_permission}")
+            self.authz.refuse(principal, grant, spec.enqueue_permission, product_id, tenant_id)
 
     # -- API operations ------------------------------------------------------------------------
 

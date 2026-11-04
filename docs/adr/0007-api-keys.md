@@ -14,6 +14,12 @@ can be limited to what they need, and can be rotated without downtime.
 - A key belongs to one product, optionally one tenant, and carries an explicit permission list.
   Keys never hold platform permissions.
 - The creator must hold every permission given to the key (no escalation).
+- Amendment (audit round 3, AX3-01): the creator must also hold it *while the key is used*. Each
+  request intersects the key's permissions with the creator's current access in that scope
+  (recursively for keys created by keys); a permission the creator lost answers
+  `403 api_key_creator_lost_access`. The key is not revoked, so restoring the creator restores it.
+  Rejected alternative: revoking a user's keys when the user loses access (irreversible, and it
+  misses role downgrades).
 - Rotation creates a replacement and revokes the old key immediately or after a grace period of
   up to 7 days. Revocation and expiry are checked on every request.
 

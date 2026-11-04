@@ -128,10 +128,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
 def cmd_setup_token(args: argparse.Namespace) -> int:
     ax = _ax(args)
     ax.db.open()
-    if not ax.identity.setup_required() and not args.force:
-        print("setup is already complete (a platform admin exists)", file=sys.stderr)
-        return 1
-    print(ax.identity.create_setup_token())
+    try:
+        if not ax.identity.setup_required() and not args.force:
+            print("setup is already complete (a platform admin exists)", file=sys.stderr)
+            return 1
+        token = ax.identity.create_setup_token()
+    finally:
+        # Without this the pool's worker threads delay the exit by about 20 seconds.
+        ax.close()
+    print(token)
     return 0
 
 
