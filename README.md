@@ -158,8 +158,12 @@ Axentra runs without Studio; Studio is just another client. Tested combinations 
 - Guides: [building a product](docs/guides/BUILDING_A_PRODUCT.md), [product tables](docs/guides/PRODUCT_TABLES.md);
   tested examples: [examples/](examples/README.md) (Taskboard demo SaaS, single- and multi-product deployments)
 - Client SDKs: [TypeScript](docs/sdk/TYPESCRIPT.md) (`sdk/typescript`), [Python](docs/sdk/PYTHON.md) (`sdk/python`)
+- Modules: [identity](docs/modules/IDENTITY.md), [events and jobs](docs/modules/EVENTS_AND_JOBS.md),
+  [storage](docs/modules/STORAGE.md), [usage](docs/modules/USAGE.md), [billing](docs/modules/BILLING.md),
+  [notify](docs/modules/NOTIFY.md), [search](docs/modules/SEARCH.md)
 - Operations: [deployment](docs/operations/DEPLOYMENT.md), [configuration](docs/operations/CONFIGURATION.md),
-  [backup and restore](docs/operations/BACKUP_RESTORE.md)
+  [backup and restore](docs/operations/BACKUP_RESTORE.md), [observability](docs/operations/OBSERVABILITY.md)
+  (metrics, tracing, health, logs)
 - Project: [implementation report](docs/AXENTRA_IMPLEMENTATION_REPORT.md), [roadmap](docs/ROADMAP.md),
   [open work](docs/TODO.md), [compatibility matrix](docs/COMPATIBILITY.md), [changelog](CHANGELOG.md),
   [Nodestro reuse analysis](docs/architecture/NODESTRO_REUSE.md),
