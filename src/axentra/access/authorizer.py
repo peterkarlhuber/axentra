@@ -13,18 +13,28 @@ Rules:
 - Archived products and suspended tenants are reachable only by platform admins (the tenant
   record itself is readable with product-wide ``tenants:read``, see ``TenancyService.get_tenant``).
 - API keys are confined to their product (and tenant, if bound) and never hold platform permissions.
+- An API key never does more than its creator could do *now*: its permissions are intersected, on
+  every request, with what the creator (``created_by``) currently holds in the same scope. A user
+  who was removed, lost a role or was disabled takes the rights of their keys with them; a key made
+  by a key follows its parent the same way. Nothing is revoked or deleted: re-adding the creator
+  restores the key. Keys created in process by system callers are not bounded. A request refused
+  only because of this bound answers ``403 api_key_creator_lost_access`` (:meth:`Authorizer.require`).
 - Product-defined permissions (:mod:`axentra.access.product_permissions`) count only while they are
   active in the product: retired or unknown names stored in roles or keys grant nothing.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+import threading
+import time
+from typing import NoReturn
 
 from axentra.access.permissions import BUILTIN_ROLES, PLATFORM, PLATFORM_ROLE_PERMISSIONS
 from axentra.access.product_permissions import ProductCatalog, load_catalog
 from axentra.core.context import Actor, ActorKind, PlatformRole, Principal
-from axentra.core.errors import Forbidden, NotFound
+from axentra.core.errors import ApiKeyCreatorLostAccess, Forbidden, NotFound
 from axentra.data.database import Database, DbScope, Tx
 
 
@@ -36,11 +46,29 @@ class Grant:
     related: bool
     product_role: str | None = None
     tenant_role: str | None = None
+    #: API keys only: permissions of the key that its creator no longer holds in this scope (they
+    #: are not in ``permissions``), and the creator's actor id.
+    withheld: frozenset[str] = frozenset()
+    key_creator: str | None = None
+
+
+#: How deep a chain of keys created by keys is followed before the bound fails closed.
+MAX_KEY_CREATOR_DEPTH = 8
+#: At most one ``access.api_key.use`` denied audit event per key and scope in this many seconds
+#: (per process), so a stale key in a retry loop does not flood the audit log.
+CREATOR_DENIAL_AUDIT_INTERVAL_SECONDS = 60.0
+
+#: ``(principal, permission, product_id, tenant_id, creator)`` of a request refused because the
+#: key's creator lost access; the platform wires it to the audit log.
+DenialHook = Callable[[Principal, str, str | None, str | None, str], None]
 
 
 class Authorizer:
     def __init__(self, db: Database) -> None:
         self.db = db
+        self.on_creator_denied: DenialHook | None = None
+        self._denials: dict[tuple[str, str | None, str | None], float] = {}
+        self._denials_lock = threading.Lock()
 
     @staticmethod
     def role_permissions(tx: Tx, product_id: str, role_key: str, scope: str) -> frozenset[str]:
@@ -60,6 +88,61 @@ class Authorizer:
     def grant(
         self, principal: Principal, product_id: str | None = None, tenant_id: str | None = None
     ) -> Grant:
+        return self._grant(principal, product_id, tenant_id, 0)
+
+    def _grant(
+        self, principal: Principal, product_id: str | None, tenant_id: str | None, depth: int
+    ) -> Grant:
+        g = self._base_grant(principal, product_id, tenant_id)
+        if principal.actor.kind is ActorKind.API_KEY and product_id is not None and g.permissions:
+            return self._bound_by_creator(principal, g, product_id, tenant_id, depth)
+        return g
+
+    def _key_creator(self, key_id: str) -> tuple[str | None, Principal | None]:
+        """The key's ``created_by`` and that actor as it stands now (:meth:`actor_principal`), with a
+        user creator resolved in the same query."""
+        with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+            row = tx.one(
+                "SELECT k.created_by, u.status, pr.role FROM axentra_api_keys k"
+                " LEFT JOIN axentra_users u ON u.id = k.created_by"
+                " LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id WHERE k.id = %s",
+                (key_id,),
+            )
+        created_by = str(row["created_by"]) if row and row["created_by"] else None
+        if created_by is None or not created_by.startswith("usr_"):
+            return created_by, self.actor_principal(created_by)
+        if row is None or row["status"] != "active":
+            return created_by, Principal(actor=Actor(ActorKind.USER, created_by))  # no relation: nothing
+        role = PlatformRole(row["role"]) if row["role"] else None
+        return created_by, Principal(actor=Actor(ActorKind.USER, created_by), platform_role=role)
+
+    def _creator_permissions(
+        self, creator: Principal, product_id: str, tenant_id: str | None, depth: int
+    ) -> frozenset[str]:
+        """What the creator of a key holds now in the scope (nothing once it lost every relation)."""
+        if depth >= MAX_KEY_CREATOR_DEPTH:
+            return frozenset()  # fail closed on an unexpectedly long chain
+        try:
+            return self._grant(creator, product_id, tenant_id, depth + 1).permissions
+        except (Forbidden, NotFound):
+            return frozenset()
+
+    def _bound_by_creator(
+        self, principal: Principal, g: Grant, product_id: str, tenant_id: str | None, depth: int
+    ) -> Grant:
+        """Intersect a key's grant with what its creator holds now (see the module docstring)."""
+        created_by, creator = self._key_creator(principal.actor.id)
+        if creator is None:
+            return g  # created in process by a system caller: trusted, not bounded
+        allowed = g.permissions & self._creator_permissions(creator, product_id, tenant_id, depth)
+        return Grant(
+            permissions=allowed,
+            related=True,
+            withheld=g.permissions - allowed,
+            key_creator=created_by,
+        )
+
+    def _base_grant(self, principal: Principal, product_id: str | None, tenant_id: str | None) -> Grant:
         platform_perms = (
             PLATFORM_ROLE_PERMISSIONS.get(principal.platform_role.value, frozenset())
             if principal.platform_role is not None
@@ -189,6 +272,35 @@ class Authorizer:
         of one authorization per tenant). Raises ``NotFound`` for an unknown product.
 
         It applies the same rules as :meth:`grant` (kept next to it; a test compares both)."""
+        return self._tenant_grants(principal, product_id, 0)
+
+    def _tenant_grants(self, principal: Principal, product_id: str, depth: int) -> dict[str, Grant]:
+        base = self._base_tenant_grants(principal, product_id)
+        if principal.actor.kind is not ActorKind.API_KEY or not base:
+            return base
+        created_by, creator = self._key_creator(principal.actor.id)
+        if creator is None:
+            return base
+        if depth >= MAX_KEY_CREATOR_DEPTH:
+            creator_grants: dict[str, Grant] = {}
+        else:
+            try:
+                creator_grants = self._tenant_grants(creator, product_id, depth + 1)
+            except NotFound:
+                creator_grants = {}
+        out: dict[str, Grant] = {}
+        for tid, g in base.items():
+            if not g.permissions:
+                out[tid] = g
+                continue
+            cg = creator_grants.get(tid)
+            allowed = g.permissions & (cg.permissions if cg is not None else frozenset())
+            out[tid] = Grant(
+                permissions=allowed, related=True, withheld=g.permissions - allowed, key_creator=created_by
+            )
+        return out
+
+    def _base_tenant_grants(self, principal: Principal, product_id: str) -> dict[str, Grant]:
         with self.db.transaction(DbScope.platform(), read_only=True) as tx:
             product = tx.one("SELECT status FROM axentra_products WHERE id = %s", (product_id,))
             if product is None:
@@ -271,8 +383,51 @@ class Authorizer:
     ) -> Grant:
         g = self.grant(principal, product_id, tenant_id)
         if permission not in g.permissions:
-            raise Forbidden(f"missing permission {permission}")
+            self.refuse(principal, g, permission, product_id, tenant_id)
         return g
+
+    def refuse(
+        self,
+        principal: Principal,
+        g: Grant,
+        permission: str,
+        product_id: str | None,
+        tenant_id: str | None,
+        detail: str | None = None,
+    ) -> NoReturn:
+        """Raise the refusal for a missing ``permission`` in ``g``: ``ApiKeyCreatorLostAccess`` (audited)
+        when only the key creator's lost access withholds it, ``Forbidden`` otherwise. For services that
+        inspect a :class:`Grant` themselves instead of calling :meth:`require`."""
+        if permission in g.withheld and g.key_creator is not None:
+            self._creator_denied(principal, permission, product_id, tenant_id, g.key_creator)
+            raise ApiKeyCreatorLostAccess(
+                f"this API key's creator no longer holds {permission} here; restore the creator's"
+                " access, or have an active administrator rotate or replace the key",
+                extra={"permission": permission},
+            )
+        raise Forbidden(detail or f"missing permission {permission}")
+
+    def _creator_denied(
+        self,
+        principal: Principal,
+        permission: str,
+        product_id: str | None,
+        tenant_id: str | None,
+        creator: str,
+    ) -> None:
+        hook = self.on_creator_denied
+        if hook is None:
+            return
+        key = (principal.actor.id, product_id, tenant_id)
+        now = time.monotonic()
+        with self._denials_lock:
+            last = self._denials.get(key)
+            if last is not None and now - last < CREATOR_DENIAL_AUDIT_INTERVAL_SECONDS:
+                return
+            if len(self._denials) > 10_000:
+                self._denials.clear()
+            self._denials[key] = now
+        hook(principal, permission, product_id, tenant_id, creator)
 
     def has(
         self,

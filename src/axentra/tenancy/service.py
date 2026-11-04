@@ -581,7 +581,7 @@ class TenancyService:
         params: list[Any] = [product_id]
         if "tenants:read" not in grant.permissions:
             if principal.user_id is None:
-                raise Forbidden("missing permission tenants:read")
+                self.authz.refuse(principal, grant, "tenants:read", product_id, None)
             # Tenant members see the tenants they belong to.
             where.append(
                 "t.id IN (SELECT tenant_id FROM axentra_memberships WHERE product_id = %s AND user_id = %s)"

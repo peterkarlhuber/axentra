@@ -72,6 +72,10 @@ summary. Permission names in brackets.
 - `GET/POST /v1/products/{pid}/api-keys`, `GET .../{kid}`, `POST .../{kid}/rotate`, `POST .../{kid}/revoke` [api_keys:manage]
 - Custom roles and API keys accept built-in names and the product's active permissions; anything
   else (unknown, retired, another product's) is `422`
+- Every request made with an API key is bounded by what the key's creator holds now in that scope;
+  a permission the creator lost answers `403 api_key_creator_lost_access` (problem member
+  `permission`) instead of `forbidden`. The key keeps `status: active` and works again once the
+  creator's access is restored (SECURITY_MODEL.md, "API keys")
 
 ## Storage
 Files, download URLs, usage and quotas: see docs/modules/STORAGE.md.

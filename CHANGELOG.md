@@ -9,6 +9,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Security
+- API keys no longer outlive their creator's authority (audit round 3, AX3-01). Every request made with a key is
+  bounded by what the key's creator (`created_by`) holds now in the same product and tenant; for a key created by a
+  key, by that key's bounded permissions. A removed, demoted or disabled creator takes those rights from the key,
+  which answers `403` with the new problem code `api_key_creator_lost_access` (member `permission`) and records an
+  `access.api_key.use` audit event with outcome `denied` (throttled to one per key and scope per minute and
+  process). Keys are not revoked or deleted: restoring the creator restores the key; administrators can still
+  revoke or rotate it. Keys created in process by system callers are unchanged. **Behaviour change** for keys
+  whose creator already lost access. New `Authorizer.refuse()` for services that inspect a `Grant` themselves;
+  `Grant` has new fields `withheld` and `key_creator`.
+
 ### Fixed
 - `axentra admin setup-token` closes its database pool: it printed the token and then waited about 20 seconds
   for the pool threads ("couldn't stop thread ... within 5.0 seconds") before exiting (audit round 3).

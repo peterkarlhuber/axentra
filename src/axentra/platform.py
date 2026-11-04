@@ -30,6 +30,7 @@ from axentra.audit.log import AuditLog
 from axentra.billing.service import BillingService
 from axentra.config.secrets import Keyring, SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
+from axentra.core.context import Principal
 from axentra.core.errors import ConfigurationError
 from axentra.data.database import Database
 from axentra.data.migrations import Migration, MigrationRunner, SchemaCheck, discover_migrations
@@ -114,6 +115,7 @@ class Axentra:
         self.secrets = SecretBox(self.keyring)
         self.audit = AuditLog(self.db)
         self.authz = Authorizer(self.db)
+        self.authz.on_creator_denied = self._audit_creator_denied
         self.identity = IdentityService(self.db, settings, self.audit)
         self.tenancy = TenancyService(self.db, settings, self.authz, self.audit)
         self.roles = RoleService(self.db, self.authz, self.audit)
@@ -284,6 +286,29 @@ class Axentra:
 
     def single_product(self) -> Product | None:
         return self.tenancy.single_product()
+
+    def _audit_creator_denied(
+        self,
+        principal: Principal,
+        permission: str,
+        product_id: str | None,
+        tenant_id: str | None,
+        creator: str,
+    ) -> None:
+        """Audit a request refused because the API key's creator lost access (throttled by the authorizer)."""
+        try:
+            self.audit.record_standalone(
+                principal,
+                "access.api_key.use",
+                outcome="denied",
+                target_type="api_key",
+                target_id=principal.actor.id,
+                product_id=product_id,
+                tenant_id=tenant_id,
+                details={"reason": "creator_lost_access", "permission": permission, "creator": creator},
+            )
+        except Exception:  # an audit failure must not turn the 403 into a 500
+            logger.exception("could not audit the refused request of API key %s", principal.actor.id)
 
     def close(self) -> None:
         if self.oidc is not None:

@@ -13,8 +13,11 @@ Keys created by keys (a principal holding ``api_keys:manage`` through an API key
   ``expires_at`` is refused (``422``);
 - are revoked together with it: revoking a key also revokes, at once, every active key that was
   created by it (recursively). Rotation does not cascade (the replacement takes over the role of
-  the old key); keys made by users are not tied to the user's membership (they belong to the
-  product; revoke them when people leave).
+  the old key).
+
+Every key is bounded at request time by what its creator holds *now* in the same scope
+(:class:`~axentra.access.authorizer.Authorizer`): a removed, demoted or disabled creator takes the
+key's rights along without revoking it (``403 api_key_creator_lost_access``).
 
 Adapted in concept from nodestro-api ``api_keys.py``/``serving.py`` (MIT, see
 docs/architecture/NODESTRO_REUSE.md): hash-only storage, constant-time comparison, ``last_used_at``
