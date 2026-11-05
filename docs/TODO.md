@@ -5,13 +5,25 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last reviewed: 2026-11-04 (`0.1.0.dev0`, internal backend audit round 3 against `e7c06d0`: no regressions; AX3-01
+Last full review: 2026-11-05 against `master` at `b7ddac0` (quality round 3 close-out; TODO consolidated).
+Release blockers: none. No item is P0, and none blocks the next planned preview (the Nodestro desktop candidate,
+nodestro-desktop DSK-001); the P1 items are needed for a production-ready 1.0, not for a scheduled release.
+Before that: 2026-11-04 (`0.1.0.dev0`, internal backend audit round 3 against `e7c06d0`: no regressions; AX3-01
 key bounding, AX3-02, AX2-07 and the Dependabot config fixed in the PR that updates this line; new items marked AX3-NN;
 login and setup audit events record ip, request id and actor since the round-3 follow-up, UX round 3 handover).
-Before that: 2026-11-03 (internal backend audit round 2: CI on `master` is green again and
+Earlier: 2026-11-03 (internal backend audit round 2: CI on `master` is green again and
 the security review rounds are closed, so both items were removed; new items from the audit and the DX review
 are marked AX2-NN / DX-NN; AX2-05 and AX2-08 were decided and fixed, so their items were removed; Studio-facing backend items from the UX
 round 2 are marked AXS-BN).
+
+## Security and external review
+
+Items that need an independent or external review. The audit rounds so far were internal (no independent security
+review, no penetration test).
+
+| Pri | Area | Item |
+|---|---|---|
+| P1 | tests | **Needs external review.** Provider adapters never exercised against live services: Stripe (only `httpx.MockTransport`), S3 (only moto; no MinIO/AWS), SMTP (only an in-process `aiosmtpd`), OIDC (only an in-process stub IdP). Needs a sandbox run without paid calls, reviewed together with the first production-like deployment (see "Release and verification") |
 
 ## Release and verification
 
@@ -19,7 +31,6 @@ round 2 are marked AXS-BN).
 |---|---|---|
 | P1 | operations | No production deployment has been carried out; no production-like environment exists |
 | P1 | tests | No load or performance tests; no capacity figures for the API, workers, SSE or the job queue |
-| P1 | tests | Provider adapters never exercised against live services: Stripe (only `httpx.MockTransport`), S3 (only moto; no MinIO/AWS), SMTP (only an in-process `aiosmtpd`), OIDC (only an in-process stub IdP). Needs a sandbox run without paid calls |
 | P2 | build | Docker images and compose files are built/validated only in CI (no local Docker in the development environment); the compose stacks are never started (see the deployment-test item below) |
 | P2 | build | The CI image job builds only `EXTRAS=server`; also build the documented full image (`server,oidc,s3,otel`) so a constraint bump that breaks an extra fails in CI (Dependabot python-dateutil 3.0.0 conflicted with botocore, AX3-05) |
 | P2 | platform | Only Linux is tested (CI `ubuntu-latest`); macOS and Windows are untested for the library, CLI and SDKs |
@@ -33,7 +44,7 @@ round 2 are marked AXS-BN).
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | Password reset and email verification flows (the notify module is available now) |
 | P2 | identity | MFA (TOTP/WebAuthn) |
-| P3 | identity | A refused password (policy) answers `422` with only `detail`; add `errors[{loc: ["body", "password"], msg}]` like other validation errors, and expose the minimum length in `/v1/meta` so clients can check before sending (AXS-B6, UX round 3) |
+| P3 | identity | A refused password (policy) answers `422` with only `detail`; add `errors[{loc: ["body", "password"], msg}]` like other validation errors, and expose the minimum length in `/v1/meta` so clients can check before sending (AXS-B6, UX round 3 handover axs B-2) |
 | P3 | identity | Drop the deprecated `invitation` query parameter from the `GET /v1/auth/oidc/{provider}/start` contract (OpenAPI) at the next `/v1` cleanup; it is refused since security review round 4 (R4-1, `login_error=invitation_requires_post`) and only stays declared to document that |
 | P3 | identity | A failed OIDC login redirects to `<login page>?login_error=...` without the original `return_to`, so a deep link (for example an invitation accept page) is lost; Studio keeps an opened invitation per tab as a workaround. Pass a validated `return_to` along |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
@@ -51,17 +62,17 @@ round 2 are marked AXS-BN).
 | P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md). Linking can now be turned off per provider (`link_by_verified_email = false`) |
 | P2 | identity | Users without an email address: no HTTP API or Studio view to create them or to link/unlink external identities (library only: `create_external_user`, `link_identity`); OIDC login states and login throttling windows still use the host clock |
 | P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up) |
-| P3 | access | API keys are bounded by their creator's current access since audit round 3 (AX3-01, `api_key_creator_lost_access`), but the key list still shows such a key as `active`; expose an effective state for Studio, and consider disabling the creator's schedules when the creator loses access (AX2-01 follow-up) |
+| P3 | access | API keys are bounded by their creator's current access since audit round 3 (AX3-01, `api_key_creator_lost_access`), but the key list still shows such a key as `active`; expose an effective state (for example `creator_has_access`) for Studio's key list, and consider disabling the creator's schedules when the creator loses access (AX2-01 follow-up; UX round 3 handover axs B-3, related to AXS-B4) |
 | P2 | security | Shared rate limiting across API processes (the general limit is an in-memory token bucket per process; only login throttling is shared through PostgreSQL) |
 | P2 | search | Expensive requests reachable with read permissions: search ranks every match before the limit (common terms take seconds on large tenants) and records sorted by time have no composite index per product/tenant/collection. Bounded candidate set or rank cutoff, a shorter statement timeout for search, time-sort indexes, a default per-credential limit for heavy endpoints (AX2-06) |
 | P2 | events | Webhook deliveries share the job queue and worker slots with all other kinds; attempts are now time-bounded, but a separate concurrency pool or a per-product cap for deliveries is still missing (AX2-02 follow-up) |
 | P3 | events | Webhook URLs accept any port; decide whether to restrict them (for example 443 and >= 1024). Legacy IPv4 notations are refused at creation since audit round 3 (AX2-07) |
 | P3 | events | Schedules whose creator lost access keep firing (their jobs now run without permissions); optionally disable a user's schedules when the user loses product access, together with the API key revocation item above (AX2-01 follow-up) |
-| P2 | tenancy | Refused invitation accepts all answer `403 forbidden`, so Studio has to match the English `detail`. Give the three reasons (e-mail mismatch, inactive scope, inviter lost access) their own problem codes or a `reason` member (AXS-B1, UX round 2) |
-| P3 | search | List a tenant's indexed search kinds (for example `GET .../search/kinds` with counts), so clients can offer a picker instead of a free-text kind filter (AXS-B2, UX round 2) |
-| P3 | tenancy | `sort=name` on `GET .../tenants`, so pickers can list the first N tenants by name instead of the oldest N (AXS-B3, UX round 2) |
-| P3 | access | After a key rotation the old key stays `active` with a future `revoked_at`; expose the grace period explicitly (for example `grace_until`) or document it in the OpenAPI (AXS-B4, UX round 2) |
-| P3 | access | Built-in role descriptions are English-only; add a stable description key to the role catalog so clients can translate them (AXS-B5, UX round 2) |
+| P2 | tenancy | Refused invitation accepts all answer `403 forbidden`, so Studio has to match the English `detail`. Give the three reasons (e-mail mismatch, inactive scope, inviter lost access) their own problem codes or a `reason` member (AXS-B1, UX round 2; Studio entry "Invitation refusals") |
+| P3 | search | List a tenant's indexed search kinds (for example `GET .../search/kinds` with counts), so clients can offer a picker instead of a free-text kind filter (AXS-B2, UX round 2; Studio entry "Search kinds are typed by hand") |
+| P3 | tenancy | `sort=name` on `GET .../tenants`, so pickers can list the first N tenants by name instead of the oldest N (AXS-B3, UX round 2; Studio sorts the first 200 client-side and its help says which 200 it lists, so no Studio entry remains) |
+| P3 | access | After a key rotation the old key stays `active` with a future `revoked_at`; expose the grace period explicitly (for example `grace_until`) or document it in the OpenAPI (AXS-B4, UX round 2; Studio already shows the grace period as "Replaced, stops working" from `revoked_at`, so no Studio entry remains) |
+| P3 | access | Built-in role descriptions are English-only; add a stable description key to the role catalog so clients can translate them (AXS-B5, UX round 2; Studio translates the built-in roles by key meanwhile, so no Studio entry remains) |
 | P2 | identity | `GET /v1/me` lists every readable tenant (no cap since AX2-03), so for product operators and platform roles the response grows with the number of tenants (measured in audit round 3, AX3-03: about 1 KB per tenant, 10,000 tenants = 10 MB, p50 0.4 s). Consider an opt-in parameter (for example memberships only, or paging) at the next `/v1` cleanup, coordinated with Studio, which needs only memberships and product-level permissions |
 
 ## Developer experience (Phase 4)
@@ -89,7 +100,7 @@ round 2 are marked AXS-BN).
 | P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
 | P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
 | P2 | tests | Concurrency tests for `If-Match` races and migration runners started in parallel |
-| P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs run only for the commit pinned in Studio's `api/BACKEND_REF`, only on Studio pull requests and only in multi-product mode; nothing on the Axentra side triggers them for a new Axentra commit (a single-product e2e matrix is being added on the Studio side) |
+| P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs (multi- and single-product mode) run only for the commit pinned in Studio's `api/BACKEND_REF` and only on Studio pull requests; nothing on the Axentra side triggers them for a new Axentra commit (Studio pins `cfa80dc` since axentra-studio #30) |
 
 ## Nodestro (Phase 6)
 
