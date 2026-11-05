@@ -100,7 +100,7 @@ review, no penetration test).
 | P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
 | P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
 | P2 | tests | Concurrency tests for `If-Match` races and migration runners started in parallel |
-| P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs (multi- and single-product mode) run only for the commit pinned in Studio's `api/BACKEND_REF` and only on Studio pull requests; nothing on the Axentra side triggers them for a new Axentra commit (Studio pins `0a1d1cc`; the move to `cfa80dc`, #42, is a separate change) |
+| P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs (multi- and single-product mode) run only for the commit pinned in Studio's `api/BACKEND_REF` and only on Studio pull requests; nothing on the Axentra side triggers them for a new Axentra commit (Studio pins `cfa80dc` since axentra-studio #30) |
 
 ## Nodestro (Phase 6)
 
