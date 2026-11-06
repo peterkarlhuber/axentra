@@ -165,6 +165,9 @@ class OidcProviderSettings(_Section):
     allow_signup_without_email: bool = False
     """Together with ``allow_signup``: create a user without an email address for an unknown
     identity whose provider sends no verified email (otherwise ``email_not_verified``)."""
+    id_token_max_age_seconds: int = Field(600, ge=60, le=86_400)
+    """Oldest accepted ID token: its ``iat`` may lie at most this many seconds in the past (plus two minutes
+    of clock skew). Providers issue the token at the code exchange, so a fresh login is seconds old."""
     token_endpoint_auth_method: Literal["client_secret_basic", "client_secret_post", "none"] = (
         "client_secret_basic"  # noqa: S105 (a method name, not a secret)
     )

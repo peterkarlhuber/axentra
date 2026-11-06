@@ -324,8 +324,9 @@ Shapes (see `openapi/axentra-v1.json`):
 (15), `scheduler_interval_seconds` (5), `default_max_attempts` (5), `backoff_base_seconds` (2),
 `backoff_max_seconds` (3600), `webhook_max_attempts` (8), `webhook_backoff_base_seconds` (120;
 greater than 0, at most 86400), `webhook_backoff_max_seconds` (21600; at least the base, at most
-604800), `webhook_timeout_seconds` (10; the **total** time of one delivery attempt: connect, TLS
-handshake, request, response headers and body; a receiver that trickles bytes is cut off at the
+604800), `webhook_timeout_seconds` (10; the **total** time of one delivery attempt: DNS lookup, connect,
+TLS handshake, request, response headers and body; a resolver that does not answer in time ends the
+attempt with a timeout (MUP-ONA VB-5); a receiver that trickles bytes is cut off at the
 deadline and the attempt counts as a timeout. The delivery job kind declares
 `max_runtime_seconds` = timeout + 30 s, after which the worker stops renewing its lease),
 `webhook_response_max_bytes` (4096), `webhook_allow_private_targets` (false; in production only
