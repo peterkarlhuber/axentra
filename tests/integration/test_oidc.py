@@ -460,7 +460,10 @@ def test_jwks_refresh_is_rate_limited(make_world) -> None:  # type: ignore[no-un
 def test_discovery_with_other_issuer_is_refused(make_world) -> None:  # type: ignore[no-untyped-def]
     w = make_world(FakeIdP(issuer_in_discovery="https://idp.test/other"))
     r = w.browser().get("/v1/auth/oidc/test/start", params={"return_to": "/x"}, follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"] == "/login?login_error=provider_unavailable"
+    assert (
+        r.status_code == 302
+        and r.headers["location"] == "/login?login_error=provider_unavailable&return_to=%2Fx"
+    )
     assert "set-cookie" not in r.headers
 
 
@@ -596,7 +599,10 @@ def test_return_to_cannot_redirect_elsewhere(w: OidcWorld, return_to: str, expec
 def test_error_redirect_goes_to_login_page_of_return_to_origin(w: OidcWorld) -> None:
     w.idp.tamper = {"aud": "other"}
     _, r = w.login(params={"return_to": "http://studio.test/app"}, email="e@example.com")
-    assert r.headers["location"] == "http://studio.test/login?login_error=login_failed"
+    assert r.headers["location"] == "http://studio.test/login?login_error=login_failed&return_to=%2Fapp"
+    w.idp.tamper = {"aud": "other"}
+    _, r = w.login(params={"return_to": "/p/1/tenants?q=a"}, email="e@example.com")
+    assert r.headers["location"] == "/login?login_error=login_failed&return_to=%2Fp%2F1%2Ftenants%3Fq%3Da"
     w.idp.tamper = {"aud": "other"}
     _, r = w.login(params={"return_to": "https://evil.example/app"}, email="e@example.com")
     assert r.headers["location"] == "/login?login_error=login_failed"

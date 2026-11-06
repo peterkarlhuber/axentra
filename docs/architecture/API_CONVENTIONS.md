@@ -87,6 +87,12 @@ More specific codes may be added within a status (for example `setup_already_com
 Validation errors add `errors: [{loc, msg}]`. Details never contain secrets, tokens, SQL or stack
 traces.
 
+The OpenAPI document declares this body as the `Problem` schema: it is the `default` response of
+every operation and the body of every documented 4xx response (the `422` of request validation
+included; FastAPI's own `HTTPValidationError` is not used). Its `securitySchemes` name the three
+credentials (`sessionCookie`, `bearerAuth`, `apiKeyHeader`); every operation needs one of them
+except the public ones, which declare `security: []`.
+
 ## Correlation
 
 Every response carries `X-Request-ID` (incoming value is accepted if it matches

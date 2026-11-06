@@ -4,13 +4,13 @@ The OpenAPI document `openapi/axentra-v1.json` is authoritative; this catalog is
 summary. Permission names in brackets.
 
 ## Meta and health (public)
-- `GET /v1/meta` -> `{name, version, api_version, mode: "single"|"multi", modules[], product|null, auth: {password: bool, oidc: [{id, name}]}, setup_required: bool}`
+- `GET /v1/meta` -> `{name, version, api_version, mode: "single"|"multi", modules[], product|null, auth: {password: bool, oidc: [{id, name}], password_policy: {min_length, max_length}}, setup_required: bool}`
 - `GET /v1/health/live`, `GET /v1/health/ready`
 
 ## Auth
 - `POST /v1/auth/setup` `{setup_token, email, name, password}` -> first platform admin (token printed by `axentra admin setup-token`)
 - `POST /v1/auth/login/password` `{email, password}` -> `Session`
-- `GET /v1/auth/oidc/{provider}/start?return_to=/path|<allowed origin URL>` -> 302 to the IdP (an `invitation=<token>` query is refused: 302 to the login page with `?login_error=invitation_requires_post`, no login started); `POST /v1/auth/oidc/{provider}/start` `{return_to?, invitation?}` (Origin checked) -> `{redirect_url}` + login cookie, the only start that takes an invitation (no token in any URL); `GET /v1/auth/oidc/{provider}/callback?code&state` -> 302 to return_to (session cookie; with `invitation_accepted=<tenant id>` added when the start's invitation was accepted) or to the login page with `?login_error=<code>` (see docs/modules/IDENTITY.md)
+- `GET /v1/auth/oidc/{provider}/start?return_to=/path|<allowed origin URL>` -> 302 to the IdP (an `invitation=<token>` query, no longer declared in the OpenAPI, is refused: 302 to the login page with `?login_error=invitation_requires_post`, no login started); `POST /v1/auth/oidc/{provider}/start` `{return_to?, invitation?}` (Origin checked) -> `{redirect_url}` + login cookie, the only start that takes an invitation (no token in any URL); `GET /v1/auth/oidc/{provider}/callback?code&state` -> 302 to return_to (session cookie; with `invitation_accepted=<tenant id>` added when the start's invitation was accepted) or to the login page with `?login_error=<code>&return_to=<path>` (see docs/modules/IDENTITY.md)
 - `GET /v1/auth/session` -> `{user, csrf_token, expires_at, platform_role|null}`
 - `POST /v1/auth/logout`
 - `GET /v1/auth/sessions` (own), `DELETE /v1/auth/sessions/{session_id}` (own)
@@ -38,7 +38,7 @@ summary. Permission names in brackets.
   not visible to the caller, see SECURITY_MODEL.md rules 8-9)
 
 ## Tenants
-- `GET/POST /v1/products/{pid}/tenants` [tenants:read / tenants:create]
+- `GET/POST /v1/products/{pid}/tenants` [tenants:read / tenants:create]; `GET` takes `q`, `status`, `sort=id|name` (`id`: oldest first, the default; `name`: case-insensitive, then id; a cursor only works with its sort)
 - `GET/PATCH/DELETE /v1/products/{pid}/tenants/{tid}` [tenants:read / tenants:update / tenants:delete]
 - `GET/POST /v1/products/{pid}/tenants/{tid}/members`, `PATCH/DELETE .../members/{user_id}` [members:read / members:manage]
   - Role ceiling: `403` when the role to assign, or the member's current role, has permissions the
@@ -52,7 +52,8 @@ summary. Permission names in brackets.
   another address, when the tenant or product is not active, or when the inviter can no longer
   invite with that role (`members:manage` and the role ceiling are checked again with the inviter's
   current access); refusals are audited as `tenancy.invitation.accept` with outcome `denied` and
-  `details.reason` (`email_mismatch`, `scope_inactive`, `inviter_lost_access`).
+  `details.reason` (`email_mismatch`, `scope_inactive`, `inviter_lost_access`), and the `403` body
+  carries the same value as `reason` (the `code` stays `forbidden`).
 
 ## Users
 - `GET /v1/users?q=&status=` platform admin: all users; product admin: users of the product (`?product_id=`) [users:read]

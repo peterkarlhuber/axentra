@@ -163,6 +163,42 @@ def test_password_policy(world):
     c = world.login_as("carol@example.com")
     r = c.post("/v1/me/password", json={"current_password": "user password 12345", "new_password": "short"})
     assert r.status_code == 422
+    body = r.json()
+    assert body["code"] == "validation_failed" and body["reason"] == "too_short"
+    assert body["min_length"] == 12
+    assert body["errors"] == [
+        {"loc": ["body", "new_password"], "msg": "the password must have at least 12 characters"}
+    ]
+    for new_password, reason in (
+        ("carol@example.com", "equals_email"),
+        ("aaaabbbbaaaabbbb", "too_simple"),
+    ):
+        r = c.post(
+            "/v1/me/password", json={"current_password": "user password 12345", "new_password": new_password}
+        )
+        assert r.status_code == 422 and r.json()["reason"] == reason, r.text
+        assert r.json()["errors"][0]["loc"] == ["body", "new_password"]
+
+
+def test_setup_password_refusal_marks_the_password_field(ax):
+    app = create_app(axentra=ax, start=False)
+    token = ax.identity.create_setup_token()
+    r = Browser(app).post(
+        "/v1/auth/setup", json={"setup_token": token, "email": ADMIN_EMAIL, "password": "too short"}
+    )
+    assert r.status_code == 422
+    assert r.json()["reason"] == "too_short"
+    assert r.json()["errors"] == [
+        {"loc": ["body", "password"], "msg": "the password must have at least 12 characters"}
+    ]
+    # The refused setup did not use up the token.
+    assert ax.identity.setup_required()
+
+
+def test_meta_reports_the_password_policy(ax_factory):
+    ax = ax_factory(security={"password_min_length": 16})
+    body = Browser(create_app(axentra=ax, start=False)).get("/v1/meta").json()
+    assert body["auth"]["password_policy"] == {"min_length": 16, "max_length": 1024}
 
 
 def test_profile_update(world):

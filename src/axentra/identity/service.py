@@ -224,7 +224,12 @@ class IdentityService:
                     outcome="denied",
                 )
                 raise Forbidden("the current password is wrong")
-            check_policy(new, min_length=self.settings.security.password_min_length, email=row["email"])
+            check_policy(
+                new,
+                min_length=self.settings.security.password_min_length,
+                email=row["email"],
+                field="new_password",
+            )
             tx.execute(
                 "UPDATE axentra_users SET password_hash = %s, updated_at = now() WHERE id = %s",
                 (hash_password(new), user_id),

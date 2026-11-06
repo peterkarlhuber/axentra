@@ -137,16 +137,28 @@ def safe_return_to(value: str | None, allowed_origins: Iterable[str]) -> str:
 
 
 def login_error_url(login_page: str, return_to: str | None, code: str) -> str:
-    """The login page for ``code``: on the origin of ``return_to`` when that is an absolute URL."""
+    """The login page for ``code``: on the origin of ``return_to`` when that is an absolute URL.
+
+    ``return_to`` (already checked by :func:`safe_return_to` and stripped of secrets) is passed on as
+    ``?return_to=<path>``, relative to the login page's origin, so a deep link survives a failed login.
+    It is left out when it is ``/`` or when it is not on the login page's origin (a path on the API
+    origin with an absolute ``login_page`` elsewhere)."""
     page = login_page or "/login"
     page_parts = urlsplit(page)
+    params = {"login_error": code}
     if return_to and not return_to.startswith("/"):
         origin = _origin(return_to)
         if origin:
             path = page_parts.path or "/login"
             page = origin + path + (f"?{page_parts.query}" if page_parts.query else "")
+            target = urlsplit(return_to)
+            params["return_to"] = urlunsplit(("", "", target.path or "/", target.query, target.fragment))
+    elif return_to and not page_parts.scheme:
+        params["return_to"] = return_to
+    if params.get("return_to") == "/":
+        del params["return_to"]
     sep = "&" if "?" in page else "?"
-    return f"{page}{sep}{urlencode({'login_error': code})}"
+    return f"{page}{sep}{urlencode(params)}"
 
 
 def with_query_param(url: str, key: str, value: str) -> str:

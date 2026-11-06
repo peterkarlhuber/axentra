@@ -22,6 +22,7 @@ from axentra.core.pagination import Page
 from axentra.events.jobs import job_scope
 from axentra.events.models import (
     Delivery,
+    EnqueueableKinds,
     Event,
     Job,
     JobStats,
@@ -264,6 +265,21 @@ def job_stats(
     product_id: str, principal: CurrentPrincipal, ax: Ax, tenant_id: str | None = Query(None, max_length=64)
 ) -> JobStats:
     return ax.jobs.stats(principal, product_id, tenant_id=tenant_id)
+
+
+@router.get(
+    "/jobs/kinds",
+    response_model=EnqueueableKinds,
+    summary="Job kinds the caller may enqueue (in the product or one tenant)",
+)
+def enqueueable_kinds(
+    product_id: str, principal: CurrentPrincipal, ax: Ax, tenant_id: str | None = Query(None, max_length=64)
+) -> EnqueueableKinds:
+    """Lists the kinds declared (or registered) in the answering API process that the caller may
+    enqueue with `POST .../jobs`: with `jobs:manage` every known kind (`any_kind: true`; other
+    kinds are accepted too), otherwise the kinds declared with an `enqueue_permission` the caller
+    holds in `tenant_id`. Needs access to the scope, no particular permission."""
+    return ax.jobs.enqueueable_kinds(principal, product_id, tenant_id=tenant_id)
 
 
 @router.post("/jobs", response_model=Job, status_code=201, summary="Enqueue a job")

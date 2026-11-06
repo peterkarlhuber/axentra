@@ -26,7 +26,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import timedelta
 import re
-from typing import Any
+from typing import Any, Literal
 
 from psycopg import errors as pg_errors
 from psycopg.types.json import Jsonb
@@ -574,7 +574,13 @@ class TenancyService:
         status: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        sort: Literal["id", "name"] = "id",
     ) -> Page[Tenant]:
+        """``sort="id"`` (default): oldest first by id. ``sort="name"``: by name, case-insensitive
+        (then id), so pickers can list the first N tenants by name; a cursor works only with the
+        sort it was issued for (``400 invalid_cursor`` otherwise)."""
+        if sort not in ("id", "name"):
+            raise ValidationFailed("sort must be id or name")
         grant = self.authz.grant(principal, product_id)
         limit = clamp_limit(limit)
         where = ["t.product_id = %s"]
@@ -593,21 +599,32 @@ class TenancyService:
         if status:
             where.append("t.status = %s")
             params.append(status)
-        after = decode_cursor(cursor, ("str",))
-        if after:
-            where.append("t.id > %s")
-            params.append(after[0])
+        if sort == "name":
+            after = decode_cursor(cursor, ("str", "str"))
+            if after:
+                where.append("(lower(t.name), t.id) > (%s, %s)")
+                params += [after[0], after[1]]
+            order = "lower(t.name), t.id"
+        else:
+            after = decode_cursor(cursor, ("str",))
+            if after:
+                where.append("t.id > %s")
+                params.append(after[0])
+            order = "t.id"
         params.append(limit + 1)
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
             rows = tx.all(
-                "SELECT t.*, (SELECT count(*) FROM axentra_memberships m WHERE m.tenant_id = t.id) AS member_count"
-                f" FROM axentra_tenants t WHERE {' AND '.join(where)} ORDER BY t.id LIMIT %s",
+                "SELECT t.*, lower(t.name) AS sort_name,"
+                " (SELECT count(*) FROM axentra_memberships m WHERE m.tenant_id = t.id) AS member_count"
+                f" FROM axentra_tenants t WHERE {' AND '.join(where)} ORDER BY {order} LIMIT %s",
                 params,
             )
         items = [Tenant.model_validate(r) for r in rows[:limit]]
-        return Page[Tenant](
-            items=items, next_cursor=encode_cursor([items[-1].id]) if len(rows) > limit else None
-        )
+        next_cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            next_cursor = encode_cursor([last["sort_name"], last["id"]] if sort == "name" else [last["id"]])
+        return Page[Tenant](items=items, next_cursor=next_cursor)
 
     def tenants_by_id(self, product_id: str, tenant_ids: Iterable[str]) -> list[Tenant]:
         """The tenants of ``product_id`` with these ids, ordered by id, in one query. No
@@ -1007,7 +1024,7 @@ class TenancyService:
                 tenant_id=denied.invitation["tenant_id"],
                 details={"reason": denied.reason},
             )
-            raise Forbidden(denied.message) from None
+            raise Forbidden(denied.message, extra={"reason": denied.reason}) from None
 
     def _accept_invitation(self, principal: Principal, token: str) -> Membership:
         with self.db.transaction(DbScope.platform()) as tx:

@@ -27,12 +27,31 @@ def needs_rehash(password_hash: str) -> bool:
     return _HASHER.check_needs_rehash(password_hash)
 
 
-def check_policy(password: str, *, min_length: int, email: str = "") -> None:
+#: Upper bound for any password (the request models refuse longer input before hashing).
+MAX_PASSWORD_LENGTH = 1024
+
+
+def check_policy(password: str, *, min_length: int, email: str = "", field: str = "password") -> None:
+    """Refuse a password that breaks the policy with a ``422 validation_failed``.
+
+    The problem carries ``reason`` (``too_short``, ``too_long``, ``equals_email`` or ``too_simple``),
+    ``min_length`` and ``errors=[{"loc": ["body", field], "msg": ...}]`` like a request validation
+    error, so a client can mark the password field (``field`` is the request body member)."""
     if len(password) < min_length:
-        raise ValidationFailed(f"the password must have at least {min_length} characters")
-    if len(password) > 1024:
-        raise ValidationFailed("the password is too long")
-    if email and password.lower() == email.lower():
-        raise ValidationFailed("the password must not equal the email address")
-    if len(set(password)) < 4:
-        raise ValidationFailed("the password is too simple")
+        reason, msg = "too_short", f"the password must have at least {min_length} characters"
+    elif len(password) > MAX_PASSWORD_LENGTH:
+        reason, msg = "too_long", "the password is too long"
+    elif email and password.lower() == email.lower():
+        reason, msg = "equals_email", "the password must not equal the email address"
+    elif len(set(password)) < 4:
+        reason, msg = "too_simple", "the password is too simple"
+    else:
+        return
+    raise ValidationFailed(
+        msg,
+        extra={
+            "reason": reason,
+            "min_length": min_length,
+            "errors": [{"loc": ["body", field], "msg": msg}],
+        },
+    )

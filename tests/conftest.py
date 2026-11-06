@@ -15,6 +15,7 @@ Without it, ``pg_urls["owner"]`` is the application role.
 from __future__ import annotations
 
 from collections.abc import Iterator
+import logging
 import os
 import uuid
 
@@ -27,6 +28,19 @@ APP_ROLE = "axentra_test_app"
 APP_PASSWORD = "axentra-test-pw"
 OWNER_ROLE = "axentra_test_owner"
 SPLIT_ROLES = os.environ.get("AXENTRA_TEST_SPLIT_ROLES") == "1"
+
+
+@pytest.fixture(autouse=True)
+def _restore_root_logging() -> Iterator[None]:
+    """Undo ``configure_logging`` (called by CLI commands under test): it replaces the root logger's
+    handlers with a stream handler on the ``sys.stderr`` of that moment, which is pytest's capture
+    file. Background threads that log after pytest closed that file (for example aiosmtpd's server
+    thread in the SMTP tests) then printed "--- Logging error ---" tracebacks (AX2-10)."""
+    root = logging.getLogger()
+    handlers, level = root.handlers[:], root.level
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
 
 
 def _with_db(url: str, dbname: str, user: str | None = None, password: str | None = None) -> str:

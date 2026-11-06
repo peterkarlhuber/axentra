@@ -401,3 +401,26 @@ def test_overview_counts_only_own_tenants_for_tenant_callers(world):
         f"/v1/products/{pid2}/tenants/{t3}/members", json={"email": "other@example.com", "role": "member"}
     )
     assert world.login_as("other@example.com").get(f"/v1/products/{pid}/overview").status_code == 404
+
+
+def test_tenants_sorted_by_name_with_cursor_paging(world):
+    """AXS-B3: pickers list the first N tenants by name (case-insensitive, then id)."""
+    pid = _product(world)
+    for slug, name in [("t-zeta", "zeta"), ("t-alpha", "Alpha"), ("t-mid", "Mid"), ("t-beta", "beta")]:
+        r = world.admin.post(f"/v1/products/{pid}/tenants", json={"slug": slug, "name": name})
+        assert r.status_code == 201, r.text
+    url = f"/v1/products/{pid}/tenants"
+    by_id = [t["slug"] for t in world.admin.get(url).json()["items"]]
+    assert by_id == ["t-zeta", "t-alpha", "t-mid", "t-beta"]  # default: oldest first, unchanged
+    first = world.admin.get(url, params={"sort": "name", "limit": 2}).json()
+    assert [t["name"] for t in first["items"]] == ["Alpha", "beta"]
+    rest = world.admin.get(url, params={"sort": "name", "limit": 2, "cursor": first["next_cursor"]}).json()
+    assert [t["name"] for t in rest["items"]] == ["Mid", "zeta"] and rest["next_cursor"] is None
+    # A cursor belongs to its sort; a filter combines with it.
+    r = world.admin.get(url, params={"cursor": first["next_cursor"]})
+    assert r.status_code == 400 and r.json()["code"] == "invalid_cursor"
+    assert [t["name"] for t in world.admin.get(url, params={"sort": "name", "q": "ta"}).json()["items"]] == [
+        "beta",
+        "zeta",
+    ]
+    assert world.admin.get(url, params={"sort": "slug"}).status_code == 422
