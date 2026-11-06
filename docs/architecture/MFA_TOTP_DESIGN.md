@@ -111,11 +111,11 @@ API clients (SDKs, CLI) get the same two-step flow; the Python and TypeScript SD
 
 - Turning MFA off, regenerating recovery codes and changing the password require a valid code in
   the request (above), whatever the session age.
-- Platform admins: an installation setting `identity.mfa_required_for_platform_admins` (default
+- Platform admins: an installation setting `security.mfa_required_for_platform_admins` (default
   `false`; enabling it is a stricter, opt-in setting) refuses platform-admin permissions for
   sessions without `mfa_at`, with `403 mfa_required`, so a platform admin is forced to enroll.
 - `POST /v1/auth/step-up` `{code}` sets `mfa_at = now()` on the current session; endpoints can
-  require `mfa_at` within `identity.step_up_minutes` (default 10). Initially used for: creating
+  require `mfa_at` within `security.step_up_minutes` (default 10). Initially used for: creating
   platform-level API keys, granting the platform admin role, and the admin MFA reset below.
 
 ## Admin reset (lost phone and lost recovery codes)

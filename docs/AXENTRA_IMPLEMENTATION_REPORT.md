@@ -78,7 +78,7 @@ lists are missing (named). **not implemented** = no code exists.
 
 | Area (order section 4) | Status | What exists | Missing (see section 12 / [TODO.md](TODO.md)) | Main tests |
 |---|---|---|---|---|
-| A Identity | implemented + tested (partial) | Users, Argon2id passwords, server-side sessions (hashed tokens, idle/absolute expiry, list + revoke own and other users' sessions), first-run setup token, DB-backed login throttling, OIDC login (code + PKCE S256, state bound to a login cookie, nonce, exact issuer, asymmetric algorithms only, verified-email linking), memberships, invitations | MFA, password reset, email verification, OIDC providers are managed by configuration only (no API), RP-initiated logout, users without email, data export/erasure | `test_auth.py` (14), `test_oidc.py` (51), `test_oidc_helpers.py` (34) |
+| A Identity | implemented + tested (partial) | Users, Argon2id passwords, server-side sessions (hashed tokens, idle/absolute expiry, list + revoke own and other users' sessions), first-run setup token, DB-backed login throttling, password reset and email verification by single-use email links, OIDC login (code + PKCE S256, state bound to a login cookie, nonce, exact issuer, asymmetric algorithms only, verified-email linking), memberships, invitations | MFA (design only), OIDC providers are managed by configuration only (no API), RP-initiated logout, users without email, data export/erasure | `test_auth.py` (14), `test_oidc.py` (51), `test_oidc_helpers.py` (34) |
 | B Access | implemented + tested (partial) | Permission catalog, built-in and custom roles, authorizer, product/tenant API keys (`axk_`, hash-only, rotation with grace, revocation, expiry inheritance, cascade revocation of derived keys), role ceiling | Product-defined permissions (closed catalog, G-1) | `test_access.py` (8), `test_security_review.py` (15), `test_permissions.py`, `test_route_protection.py` |
 | C Tenancy | implemented + tested | Products (single/multi mode), product operators, tenants, memberships, invitations, last-owner guards under concurrency | Claim of ownerless tenants (G-5), operator invitations at product level | `test_tenancy.py` (7), `test_deployment_models.py` (8), `test_security_review.py` |
 | D Data | implemented + tested | Pool, scoped transactions, forced RLS, migrations (namespaces, checksums), tenant JSON records (filter, sort, cursor pages, `If-Match`), product tables guide, backup/restore of the database | Records: top-level JSON containment filters only; migration runner features G-2; no down-migrations | `test_rls.py` (5), `test_migrations.py` (2), `test_backup_restore.py` (1), `test_product_tables_guide.py` (1) |
@@ -330,9 +330,9 @@ The full prioritized list is [TODO.md](TODO.md). The most important points:
 **Not implemented or partial (functional scope)**
 - Search module: PostgreSQL full-text search over a tenant-scoped index is implemented (see
   [modules/SEARCH.md](modules/SEARCH.md)); still missing are vector/semantic search, external
-  search adapters, prefix/fuzzy matching and accent folding, and product-wide search across
+  search adapters, fuzzy matching and accent folding (prefix matching exists), and product-wide search across
   tenants. No WebSockets.
-- No MFA (TOTP/WebAuthn), no password reset or email verification flows, no data subject export or
+- No MFA (TOTP/WebAuthn; the TOTP design is in architecture/MFA_TOTP_DESIGN.md), no data subject export or
   erasure, no users without an email address.
 - Product-defined permissions: the permission catalog is closed, so product resources reuse
   `records:*` and custom roles/API keys cannot carry product permissions.

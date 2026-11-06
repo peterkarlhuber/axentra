@@ -9,6 +9,34 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Added (TODO abatement round 2, 2026-11-06; all `/v1` changes are additive)
+- Password reset and email verification by single-use email links: `POST /v1/auth/password-reset` (always `202`,
+  the work runs after the response, so neither the answer nor its timing reveals whether the address exists),
+  `POST /v1/auth/password-reset/confirm`, `POST /v1/me/email-verification`, `POST /v1/auth/email-verification/confirm`.
+  Tokens are random, stored as SHA-256 only, expire (`security.password_reset_minutes`,
+  `security.email_verification_hours`), are bound to the address they were sent to, and are spent on use; every
+  refusal is one `400 invalid_token`. Requests and confirmations are throttled per IP, and an account gets at most
+  one email per cooldown; a reset revokes all sessions, a password change spends open reset links. Audit events
+  `identity.password.reset_request`, `identity.password.reset`, `identity.email.verification_request` and
+  `identity.email.verify`. The `password_reset` and `email_verification` templates are system-only (products cannot
+  override them, and their mail is hidden from product mailbox readers). New `notify.account_url`, user field
+  `email_verified` (IdP-verified and invited users count as verified). Migration `0013`.
+- Search: `match=prefix` matches word beginnings (search as you type; at most 8 terms, one-letter terms match
+  whole words).
+- Optional shared rate limits: `security.rate_limit_store = "database"` keeps the per-credential and per-IP
+  request windows in PostgreSQL so all API processes share them (fails open with a warning when the database is
+  unavailable; the default `memory` is unchanged).
+- Usage: `POST .../usage/events/batch` and `UsageService.record_batch` record up to 100 entries in one
+  transaction under one authorization (`UsageEntry`); Python SDK `usage.record_batch`.
+- Storage: `storage.deleted_object_retention_hours` keeps the objects of deleted or expired files for consistent
+  database plus file backups; `axentra storage verify [--checksums] [--limit N]` (`StorageService.verify`) checks
+  every active file against the backend after a restore. BACKUP_RESTORE.md documents the procedure, and the restore
+  test restores database and file storage together.
+- Python SDK: `auth.request_password_reset`, `auth.confirm_password_reset`, `auth.confirm_email_verification`,
+  `me.request_email_verification`, the `match` search parameter; TypeScript SDK types regenerated.
+- Tests: `If-Match` races (exactly one winner) and parallel migration runners on a fresh database.
+- Docs: `architecture/MFA_TOTP_DESIGN.md`, the design for TOTP second factors (not implemented).
+
 ### Added (TODO abatement round, 2026-11-06; all `/v1` changes are additive)
 - Product team invitations: `GET/POST /v1/products/{pid}/invitations`, `DELETE .../invitations/{id}`
   (`product_members:read`/`product_members:manage`, role ceiling) and `POST /v1/product-invitations/accept`

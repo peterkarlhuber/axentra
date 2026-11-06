@@ -42,22 +42,20 @@ review, no penetration test).
 |---|---|---|
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
-| P2 | identity | Password reset and email verification flows (the notify module is available now) |
-| P2 | identity | MFA (TOTP/WebAuthn) |
+| P2 | identity | MFA for password logins: TOTP (design ready in `architecture/MFA_TOTP_DESIGN.md`: enrollment, recovery codes, two-step login, step-up, admin reset, Studio screens, tests; not implemented) and WebAuthn/passkeys later |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
 | P2 | search | Optional vector/semantic search through an adapter (e.g. pgvector with an embedding step; order section 4 L) |
 | P2 | search | External search adapters (OpenSearch, Meilisearch, ...) implementing `SearchAdapter`; only `PostgresSearchAdapter` exists, and an external engine's audit event cannot be atomic with its write |
-| P2 | search | Prefix (search-as-you-type) and fuzzy matching, accent folding (`unaccent`), per-tenant or per-document language |
+| P2 | search | Fuzzy matching (`pg_trgm`), accent folding (`unaccent`), per-tenant or per-document language. Both extensions must be created by a superuser, so they need an installation decision (optional extension with a fallback, or a documented prerequisite). Prefix matching (`match=prefix`) exists since the TODO abatement round |
 | P3 | search | Bulk index/delete API (e.g. delete all documents of a kind), a reindex job, product-wide search across tenants, filters on `metadata` |
 | P2 | identity | Identity providers are managed only through configuration (`[[oidc]]`); no API (and therefore no Studio view) to list, add or disable providers |
 | P3 | migrations | Runner follow-ups (plan G-2; the backup hook, newer-schema refusal, serving gate and `-- axentra:no-transaction` steps exist): a declared forward-compatible range per namespace (today any unknown applied version fails the gate), Python (data backfill) migrations, a per-migration lock/statement timeout, dry-run SQL output |
 | P3 | notify | SMS and push adapters (email is the only channel) |
-| P2 | usage | `UsageService.record_in` costs about 15 statements per meter (authorization, meter, idempotency, counters, quota; about 4 ms per meter measured by an embedding host that records 4 meters per entry). A batch variant (several meters or events under one authorization) |
+| P3 | usage | `UsageService.record_batch` (`POST .../usage/events/batch`, up to 100 entries under one authorization, meters in one query) lowers 4 meters from 68 to 55 statements; the rest is per entry (idempotency key, counter upserts, quota check, audit). A set-based write of counters and events would cut it further |
 | P2 | notify | Per-tenant send rate limits for `POST .../notify/send` (review 2026-11-01, F6 follow-up; the relay itself is closed by `notify:send_external` and system-only templates) |
 | P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md). Linking can now be turned off per provider (`link_by_verified_email = false`) |
 | P2 | identity | Users without an email address: no HTTP API or Studio view to create them or to link/unlink external identities (library only: `create_external_user`, `link_identity`); OIDC login states and login throttling windows still use the host clock |
-| P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up) |
-| P2 | security | Shared rate limiting across API processes (the general limit is an in-memory token bucket per process; only login throttling is shared through PostgreSQL) |
+| P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up). The emailed password-reset link exists now but is sent only to users who already have a password |
 | P2 | search | Expensive requests reachable with read permissions: search ranks every match before the limit (common terms take seconds on large tenants) and records sorted by time have no composite index per product/tenant/collection. Bounded candidate set or rank cutoff, a shorter statement timeout for search, time-sort indexes, a default per-credential limit for heavy endpoints (AX2-06) |
 | P2 | events | Webhook deliveries share the job queue and worker slots with all other kinds; attempts are now time-bounded, but a separate concurrency pool or a per-product cap for deliveries is still missing (AX2-02 follow-up) |
 | P3 | events | Webhook URLs accept any port; decide whether to restrict them (for example 443 and >= 1024). Legacy IPv4 notations are refused at creation since audit round 3 (AX2-07) |
@@ -79,12 +77,10 @@ review, no penetration test).
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | operations | Backup/restore of file storage together with the database (test exists for the database only) |
 | P1 | build | Reproducible container builds: build hatchling from pinned versions and compare digests of two builds (the `python:3.13-slim` base is digest-pinned with a CI check since audit round 2, OPS2-12) |
 | P3 | build | The compose stacks still use `postgres:16` (and other service images) by tag; pin by digest like the application image (OPS2-12 rest) |
 | P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
 | P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
-| P2 | tests | Concurrency tests for `If-Match` races and migration runners started in parallel |
 | P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs (multi- and single-product mode) run only for the commit pinned in Studio's `api/BACKEND_REF` and only on Studio pull requests; nothing on the Axentra side triggers them for a new Axentra commit (Studio's pin must be moved to a pushed commit that contains this round's changes) |
 
 ## Nodestro (Phase 6)
