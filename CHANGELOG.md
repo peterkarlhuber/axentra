@@ -9,6 +9,36 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Added (TODO abatement round, 2026-11-06; all `/v1` changes are additive)
+- Product team invitations: `GET/POST /v1/products/{pid}/invitations`, `DELETE .../invitations/{id}`
+  (`product_members:read`/`product_members:manage`, role ceiling) and `POST /v1/product-invitations/accept`
+  (returns the product member). Tokens start with `axpinv_`; refusals mirror tenant invitations; the notify module
+  sends the system-only `product_invitation` template; an `axpinv_` invitation on the OIDC `POST` start is accepted
+  after the login and the callback adds `product_invitation_accepted=<product id>`. Migration `0012` makes
+  `axentra_invitations.tenant_id` nullable for product rows (product-level rows under the existing RLS policies).
+- `GET /v1/users/{uid}/memberships`: the products and tenants a user belongs to, as far as the caller may read them.
+- `GET /v1/products/{pid}/jobs/kinds?tenant_id=`: the job kinds the caller may enqueue (`any_kind` for `jobs:manage`).
+- `GET .../tenants/{tid}/search/kinds`: the tenant's indexed kinds with counts (adapters may implement `kinds()`;
+  others answer `409`).
+- `GET .../tenants?sort=name` (case-insensitive, then id; cursors are bound to their sort).
+- API keys list `grace_until` while a rotated key still works, and `creator_has_access` and
+  `withheld_permissions` for active keys (`Authorizer.key_withheld()`).
+- Built-in roles carry `name_key` and `description_key` for translation.
+- `GET /v1/settings` reports the job and webhook retry schedule under `events`.
+- A refused password answers `422 validation_failed` with `reason` (`too_short`, `too_long`, `equals_email`,
+  `too_simple`), `min_length` and `errors[{loc: ["body", "password" | "new_password"], msg}]`; `GET /v1/meta`
+  publishes `auth.password_policy {min_length, max_length}`.
+- A refused invitation accept keeps `403 forbidden` and adds `reason` (`email_mismatch`, `scope_inactive`,
+  `inviter_lost_access`).
+- OpenAPI: every operation documents the RFC 9457 `Problem` body (`application/problem+json`) as its `default`
+  response and for each documented 4xx; FastAPI's `HTTPValidationError` (which never matched the real 422 body) is
+  gone; `securitySchemes` (`sessionCookie`, `bearerAuth`, `apiKeyHeader`) and `security: []` on public operations
+  (DX-43). The TypeScript SDK types are regenerated.
+- Python SDK: typed `events`, `jobs`, `schedules`, `webhooks` and `search` resources (sync and async), with unit and
+  contract tests.
+- CI: the container job also builds the documented full image (`EXTRAS=server,oidc,s3,otel`), imports every extra
+  and runs `pip check` (AX3-05).
+
 ### Security
 - API keys no longer outlive their creator's authority (audit round 3, AX3-01). Every request made with a key is
   bounded by what the key's creator (`created_by`) holds now in the same product and tenant; for a key created by a
@@ -21,6 +51,15 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   `Grant` has new fields `withheld` and `key_creator`.
 
 ### Fixed
+- A failed OIDC login keeps the deep link: the login page gets `&return_to=<path>` (the checked `return_to`
+  without secret parameters). The refused `invitation` query parameter of the `GET` start is no longer declared in
+  the OpenAPI (it is still read and refused with `login_error=invitation_requires_post`).
+- Updating a custom role keeps retired product permissions the role already stores (they still grant nothing);
+  adding a retired one is refused as before. Before, an editor that sent the stored list back was refused.
+- CLI commands close their pools however they end (a failure after start no longer delays the exit by about
+  20 seconds), and `database_unreachable` names `AXENTRA__DATABASE__URL` / `[database] url`.
+- Tests: an autouse fixture restores the root logger after tests that call `configure_logging`, which removed the
+  "Logging error" tracebacks of the full suite (AX2-10).
 - The audit events of logins and first-run setup (`identity.login` with outcome `success` or `denied`, for
   passwords and OpenID Connect, `identity.setup.complete` and `identity.external.link`) record the client
   `ip` and the `request_id` like every other event; before, both were empty. A successful login records the
