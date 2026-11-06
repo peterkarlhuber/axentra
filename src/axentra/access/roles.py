@@ -96,6 +96,15 @@ class RoleService:
             raise ValidationFailed(f"permissions not allowed for a {scope} role: {', '.join(bad)}")
         return sorted(perms)
 
+    @staticmethod
+    def _retired_names(tx: Tx, product_id: str) -> set[str]:
+        """The product's retired permission names."""
+        rows = tx.all(
+            "SELECT name FROM axentra_product_permissions WHERE product_id = %s AND retired_at IS NOT NULL",
+            (product_id,),
+        )
+        return {r["name"] for r in rows}
+
     def create_role(
         self,
         principal: Principal,
@@ -157,11 +166,16 @@ class RoleService:
             self._refuse_managed(tx, product_id, row["key"])
             if if_match is not None and row["version"] != if_match:
                 raise PreconditionFailed("the role was changed by someone else")
-            perms = (
-                self._check(tx, product_id, row["scope"], permissions)
-                if permissions is not None
-                else row["permissions"]
-            )
+            if permissions is None:
+                perms = row["permissions"]
+            else:
+                # A retired product permission the role already holds may stay (it grants
+                # nothing while retired, and comes back if the product declares it again);
+                # retired names cannot be added.
+                stored_retired = set(row["permissions"]) & self._retired_names(tx, product_id)
+                kept = {p for p in permissions if p in stored_retired}
+                checked = self._check(tx, product_id, row["scope"], [p for p in permissions if p not in kept])
+                perms = sorted(set(checked) | kept)
             tx.execute(
                 "UPDATE axentra_roles SET name = %s, description = %s, permissions = %s, version = version + 1,"
                 " updated_at = now() WHERE id = %s",

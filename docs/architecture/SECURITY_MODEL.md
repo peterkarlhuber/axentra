@@ -95,6 +95,8 @@ Nodestro's `nodestro.runs:start`). Code in `axentra.access.product_permissions` 
 - **Per product.** Definitions belong to one product (primary key `product_id, name`). Custom
   roles and API keys are validated against the built-in catalog plus *that* product's active
   permissions: unknown names, retired names and another product's names are refused with `422`.
+  One exception keeps editors honest: updating a custom role may keep a retired name the role
+  already stores (it still grants nothing); it cannot add one.
   The authorizer additionally intersects stored role and key permissions with the same set, so a
   name that reached a row in any other way grants nothing.
 - **Built-in roles.** `platform_admin`, `product_owner` and `product_admin` hold every active
