@@ -3683,6 +3683,53 @@
         "title": "PasswordPolicy",
         "type": "object"
       },
+      "PasswordResetConfirm": {
+        "properties": {
+          "new_password": {
+            "maxLength": 1024,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 200,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "PasswordResetConfirm",
+        "type": "object"
+      },
+      "PasswordResetRequest": {
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The product whose notification settings send the email, when the user belongs to it.",
+            "title": "Product Id"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "PasswordResetRequest",
+        "type": "object"
+      },
       "PermissionInfo": {
         "properties": {
           "declared_by": {
@@ -7219,6 +7266,20 @@
         "title": "TimeSeries",
         "type": "object"
       },
+      "TokenConfirm": {
+        "properties": {
+          "token": {
+            "maxLength": 200,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TokenConfirm",
+        "type": "object"
+      },
       "UsageEvent": {
         "properties": {
           "id": {
@@ -7360,6 +7421,11 @@
               }
             ],
             "title": "Email"
+          },
+          "email_verified": {
+            "default": false,
+            "title": "Email Verified",
+            "type": "boolean"
           },
           "has_password": {
             "default": false,
@@ -7586,6 +7652,25 @@
           }
         },
         "title": "UserUpdate",
+        "type": "object"
+      },
+      "VerificationRequest": {
+        "properties": {
+          "product_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The product whose notification settings send the email, when the user belongs to it.",
+            "title": "Product Id"
+          }
+        },
+        "title": "VerificationRequest",
         "type": "object"
       },
       "WebhookCreate": {
@@ -8226,6 +8311,51 @@
         ]
       }
     },
+    "/v1/auth/email-verification/confirm": {
+      "post": {
+        "operationId": "confirm_email_verification_v1_auth_email_verification_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "security": [],
+        "summary": "Confirm an email address with a verification link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/login/password": {
       "post": {
         "operationId": "login_password_v1_auth_login_password_post",
@@ -8527,6 +8657,102 @@
         },
         "security": [],
         "summary": "Start an OpenID Connect login with the invitation in the body (no secret in any URL)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password-reset": {
+      "post": {
+        "description": "Always answers `202` (unless rate limited or password login is off): whether an account exists for the address is never revealed. An active user with a password gets a single-use link that expires after `security.password_reset_minutes`.",
+        "operationId": "request_password_reset_v1_auth_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "security": [],
+        "summary": "Request a password reset link by email",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "confirm_password_reset_v1_auth_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "security": [],
+        "summary": "Set a new password with a reset link (ends all sessions)",
         "tags": [
           "auth"
         ]
@@ -9013,6 +9239,56 @@
           }
         },
         "summary": "Update my profile and preferences",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/me/email-verification": {
+      "post": {
+        "description": "`409` when the address is already verified, `429` within a minute of the last link.",
+        "operationId": "request_email_verification_v1_me_email_verification_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Send me a link that confirms my email address",
         "tags": [
           "users"
         ]

@@ -899,3 +899,34 @@ def test_generic_request_escape_hatch() -> None:
         "next_cursor": None,
     }
     assert dict(rec.last.url.params) == {"status": "queued"}
+
+
+def test_password_reset_and_email_verification_calls() -> None:
+    ax, rec = client(lambda r: httpx.Response(202 if "confirm" not in r.url.path else 204), session_token="s")
+    ax.auth.request_password_reset("a@example.com")
+    assert rec.last.url.path == "/v1/auth/password-reset"
+    assert json.loads(rec.last.content) == {"email": "a@example.com"}
+    ax.auth.request_password_reset("a@example.com", product_id="prd_1")
+    assert json.loads(rec.last.content) == {"email": "a@example.com", "product_id": "prd_1"}
+    ax.auth.confirm_password_reset("axpwr_t", "new passphrase 1234")
+    assert rec.last.url.path == "/v1/auth/password-reset/confirm"
+    assert json.loads(rec.last.content) == {"token": "axpwr_t", "new_password": "new passphrase 1234"}
+    ax.auth.confirm_email_verification("axemv_t")
+    assert json.loads(rec.last.content) == {"token": "axemv_t"}
+    ax.me.request_email_verification()
+    assert rec.last.url.path == "/v1/me/email-verification" and json.loads(rec.last.content) == {}
+
+
+def test_invalid_token_problem_is_raised() -> None:
+    problem = {
+        "type": "about:blank",
+        "title": "Invalid or expired link",
+        "status": 400,
+        "code": "invalid_token",
+    }
+    ax, _ = client(
+        lambda r: httpx.Response(400, json=problem, headers={"content-type": "application/problem+json"})
+    )
+    with pytest.raises(AxentraApiError) as err:
+        ax.auth.confirm_email_verification("axemv_x")
+    assert err.value.code == "invalid_token" and err.value.status == 400

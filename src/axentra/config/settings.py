@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 import tomllib
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -120,6 +120,10 @@ class SecuritySettings(_Section):
     master_keys: str | None = None
     """Inline keyring; allowed only outside production."""
     setup_token_ttl_minutes: int = Field(60, ge=5)
+    password_reset_minutes: int = Field(30, ge=5, le=24 * 60)
+    """How long a password reset link works (single use). Reset needs ``password_login``."""
+    email_verification_hours: int = Field(48, ge=1, le=24 * 14)
+    """How long an email verification link works (single use)."""
     max_body_bytes: int = Field(10 * 1024 * 1024, ge=1024)
     """Largest request body accepted (413 above it). File uploads use ``storage.max_file_bytes`` instead."""
     rate_limit_per_minute: int | None = Field(None, ge=1)
@@ -230,6 +234,30 @@ class NotifySettings(_Section):
     ``?token=``/``&token=`` is appended. ``None`` (default): ``<security.public_url>/accept-invitation``.
     Set it when the frontend that accepts invitations (e.g. Studio) is not served on the API origin.
     ``http``/``https`` only; ``https`` in production."""
+
+    account_url: str | None = None
+    """Base URL of the frontend that serves ``/reset-password`` and ``/verify-email`` (for example
+    Studio), used in password reset and email verification emails. ``None`` (default): the origin of
+    ``invitation_accept_url`` when set, else ``security.public_url``. ``http``/``https`` only;
+    ``https`` in production. A path is kept (``https://example.com/app`` gives
+    ``https://example.com/app/reset-password?token=...``)."""
+
+    @field_validator("account_url")
+    @classmethod
+    def _account_url(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = v.strip().rstrip("/")
+        parts = urlsplit(v)
+        if (
+            parts.scheme not in ("http", "https")
+            or not parts.hostname
+            or parts.query
+            or parts.fragment
+            or any(c.isspace() for c in v)
+        ):
+            raise ValueError("notify.account_url must be an absolute http(s) URL without query or fragment")
+        return v
 
     @field_validator("invitation_accept_url")
     @classmethod
@@ -381,6 +409,15 @@ class Settings(_Section):
             self.security.public_url.rstrip("/") + "/accept-invitation"
         )
 
+    def account_link(self, path: str, token: str) -> str:
+        """The link of a password reset (``/reset-password``) or verification (``/verify-email``) email."""
+        base = self.notify.account_url
+        if base is None and self.notify.invitation_accept_url:
+            parts = urlsplit(self.notify.invitation_accept_url)
+            base = f"{parts.scheme}://{parts.netloc}"
+        base = (base or self.security.public_url).rstrip("/")
+        return f"{base}{path}?token={quote(token, safe='')}"
+
     @property
     def secure_cookies(self) -> bool:
         return self.security.public_url.startswith("https://")
@@ -419,6 +456,9 @@ class Settings(_Section):
             accept_url = self.notify.invitation_accept_url
             if accept_url is not None and not accept_url.startswith("https://"):
                 problems.append("notify.invitation_accept_url must use https in production")
+            account_url = self.notify.account_url
+            if account_url is not None and not account_url.startswith("https://"):
+                problems.append("notify.account_url must use https in production")
             if self.billing.provider == "fake":
                 problems.append("billing.provider 'fake' is not allowed in production")
         if self.billing.live_payments and self.billing.provider != "stripe":

@@ -342,6 +342,24 @@ class Auth(_Resource):
         self._c.request("POST", "/v1/auth/logout")
         self._c.set_token(None)
 
+    def request_password_reset(self, email: str, *, product_id: str | None = None) -> None:
+        """Ask for a reset link by email. The server answers the same whether or not the address
+        has an account; ``product_id`` picks the product that sends it (when the user belongs to it)."""
+        self._c.request(
+            "POST", "/v1/auth/password-reset", json=_body(email=email, product_id=product_id)
+        )
+
+    def confirm_password_reset(self, token: str, new_password: str) -> None:
+        """Set a new password with the token from a reset link (ends all sessions of the user;
+        ``InvalidToken`` problem, code ``invalid_token``, for a bad link)."""
+        self._c.request(
+            "POST", "/v1/auth/password-reset/confirm", json={"token": token, "new_password": new_password}
+        )
+
+    def confirm_email_verification(self, token: str) -> None:
+        """Confirm an email address with the token from a verification link (no session needed)."""
+        self._c.request("POST", "/v1/auth/email-verification/confirm", json={"token": token})
+
 
 class MeResource(_Resource):
     def get(self) -> Me:
@@ -356,6 +374,11 @@ class MeResource(_Resource):
             "PATCH", "/v1/me", User, _body(name=name, locale=locale, preferences=preferences)
         )
         return result
+
+    def request_email_verification(self, *, product_id: str | None = None) -> None:
+        """Send the signed-in user a link that confirms their address (``409`` when already
+        verified, ``429`` within a minute of the last link)."""
+        self._c.request("POST", "/v1/me/email-verification", json=_body(product_id=product_id))
 
 
 class Products(_Resource):

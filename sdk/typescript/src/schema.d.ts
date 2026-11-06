@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/email-verification/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm an email address with a verification link */
+        post: operations["confirm_email_verification_v1_auth_email_verification_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/login/password": {
         parameters: {
             query?: never;
@@ -134,6 +151,43 @@ export interface paths {
          *     Sets the same login cookie (send it with credentials) and answers the URL to navigate to.
          */
         post: operations["oidc_start_post_v1_auth_oidc__provider__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a password reset link by email
+         * @description Always answers `202` (unless rate limited or password login is off): whether an account exists for the address is never revealed. An active user with a password gets a single-use link that expires after `security.password_reset_minutes`.
+         */
+        post: operations["request_password_reset_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set a new password with a reset link (ends all sessions) */
+        post: operations["confirm_password_reset_v1_auth_password_reset_confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -315,6 +369,26 @@ export interface paths {
         head?: never;
         /** Update my profile and preferences */
         patch: operations["update_me_v1_me_patch"];
+        trace?: never;
+    };
+    "/v1/me/email-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send me a link that confirms my email address
+         * @description `409` when the address is already verified, `429` within a minute of the last link.
+         */
+        post: operations["request_email_verification_v1_me_email_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/me/password": {
@@ -3464,6 +3538,23 @@ export interface components {
             /** Min Length */
             min_length: number;
         };
+        /** PasswordResetConfirm */
+        PasswordResetConfirm: {
+            /** New Password */
+            new_password: string;
+            /** Token */
+            token: string;
+        };
+        /** PasswordResetRequest */
+        PasswordResetRequest: {
+            /** Email */
+            email: string;
+            /**
+             * Product Id
+             * @description The product whose notification settings send the email, when the user belongs to it.
+             */
+            product_id?: string | null;
+        };
         /** PermissionInfo */
         PermissionInfo: {
             /** Declared By */
@@ -4811,6 +4902,11 @@ export interface components {
              */
             until: string;
         };
+        /** TokenConfirm */
+        TokenConfirm: {
+            /** Token */
+            token: string;
+        };
         /** UsageEvent */
         UsageEvent: {
             /** Id */
@@ -4878,6 +4974,11 @@ export interface components {
             created_at: string;
             /** Email */
             email: string | null;
+            /**
+             * Email Verified
+             * @default false
+             */
+            email_verified?: boolean;
             /**
              * Has Password
              * @default false
@@ -4974,6 +5075,14 @@ export interface components {
             platform_role?: ("platform_admin" | "platform_viewer" | "none") | null;
             /** Status */
             status?: ("active" | "disabled") | null;
+        };
+        /** VerificationRequest */
+        VerificationRequest: {
+            /**
+             * Product Id
+             * @description The product whose notification settings send the email, when the user belongs to it.
+             */
+            product_id?: string | null;
         };
         /** WebhookCreate */
         WebhookCreate: {
@@ -5191,6 +5300,46 @@ export interface operations {
             };
         };
     };
+    confirm_email_verification_v1_auth_email_verification_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     login_password_v1_auth_login_password_post: {
         parameters: {
             query?: never;
@@ -5365,6 +5514,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OidcStartAnswer"];
                 };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    request_password_reset_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    confirm_password_reset_v1_auth_password_reset_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
             422: {
@@ -5771,6 +6002,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    request_email_verification_v1_me_email_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

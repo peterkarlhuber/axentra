@@ -25,6 +25,7 @@ from axentra.core.errors import (
     Conflict,
     EmailTaken,
     Forbidden,
+    InvalidToken,
     NotFound,
     RateLimited,
     ReauthenticationRequired,
@@ -35,7 +36,7 @@ from axentra.core.errors import (
 from axentra.core.ids import new_id, new_token
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
-from axentra.identity.models import NewSession, Session, SessionInfo, User
+from axentra.identity.models import AccountEmail, NewSession, Session, SessionInfo, User
 from axentra.identity.passwords import check_policy, hash_password, needs_rehash, verify_password
 from axentra.identity.tokens import hash_token
 
@@ -43,8 +44,14 @@ logger = logging.getLogger(__name__)
 
 _USER_COLUMNS = (
     "u.id, u.email, u.name, u.status, u.locale, u.preferences, u.created_at, u.updated_at, u.last_login_at,"
-    " (u.password_hash IS NOT NULL) AS has_password, pr.role AS platform_role"
+    " (u.password_hash IS NOT NULL) AS has_password, (u.email_verified_at IS NOT NULL) AS email_verified,"
+    " pr.role AS platform_role"
 )
+#: Token prefixes (recognizable in logs and by secret scanners; the rest is 256 random bits).
+RESET_TOKEN_PREFIX = "axpwr_"  # noqa: S105 (a prefix, not a secret)
+VERIFY_TOKEN_PREFIX = "axemv_"  # noqa: S105
+#: A new reset or verification email for the same account is sent at most once per this period.
+ACCOUNT_EMAIL_COOLDOWN = timedelta(seconds=60)
 _USER_FROM = "axentra_users u LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id"
 _LAST_SEEN_RESOLUTION = timedelta(seconds=60)
 
@@ -80,9 +87,17 @@ class IdentityService:
         return tx.one(f"SELECT {_USER_COLUMNS} FROM {_USER_FROM} WHERE lower(u.email) = lower(%s)", (email,))
 
     def create_user(
-        self, tx: Tx, *, email: str | None, name: str = "", password: str | None = None, locale: str = "en"
+        self,
+        tx: Tx,
+        *,
+        email: str | None,
+        name: str = "",
+        password: str | None = None,
+        locale: str = "en",
+        email_verified: bool = False,
     ) -> str:
-        """Create a user; ``email=None`` creates a user without an email address (no password)."""
+        """Create a user; ``email=None`` creates a user without an email address (no password).
+        ``email_verified``: an identity provider confirmed the address."""
         if email is None:
             if password is not None:
                 raise ValidationFailed("a password needs an email address")
@@ -94,8 +109,16 @@ class IdentityService:
                 raise EmailTaken("a user with this email address exists")
         user_id = new_id("usr")
         tx.execute(
-            "INSERT INTO axentra_users (id, email, name, password_hash, locale) VALUES (%s, %s, %s, %s, %s)",
-            (user_id, email, name.strip()[:200], hash_password(password) if password else None, locale),
+            "INSERT INTO axentra_users (id, email, name, password_hash, locale, email_verified_at)"
+            " VALUES (%s, %s, %s, %s, %s, CASE WHEN %s THEN now() END)",
+            (
+                user_id,
+                email,
+                name.strip()[:200],
+                hash_password(password) if password else None,
+                locale,
+                bool(email and email_verified),
+            ),
         )
         return user_id
 
@@ -233,6 +256,11 @@ class IdentityService:
             tx.execute(
                 "UPDATE axentra_users SET password_hash = %s, updated_at = now() WHERE id = %s",
                 (hash_password(new), user_id),
+            )
+            tx.execute(  # a reset link sent before the change must not undo it
+                "UPDATE axentra_account_tokens SET used_at = now()"
+                " WHERE user_id = %s AND purpose = 'password_reset' AND used_at IS NULL",
+                (user_id,),
             )
             tx.execute(
                 "UPDATE axentra_sessions SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL AND id <> %s",
@@ -637,7 +665,313 @@ class IdentityService:
             n = tx.execute("DELETE FROM axentra_sessions WHERE expires_at < now() - interval '7 days'")
             tx.execute("DELETE FROM axentra_login_states WHERE expires_at < now()")
             tx.execute("DELETE FROM axentra_setup_tokens WHERE expires_at < now() - interval '1 day'")
+            tx.execute("DELETE FROM axentra_account_tokens WHERE expires_at < now() - interval '1 day'")
         return n
+
+    # -- password reset and email verification ------------------------------------------------------
+    #
+    # Both send a single-use link by email. Only the token's SHA-256 is stored; a token expires
+    # (``security.password_reset_minutes`` / ``email_verification_hours``), is bound to the address
+    # it was sent to, and answers every refusal with the same ``invalid_token`` problem. A reset
+    # request never tells whether an account exists: the API answers ``202`` before this runs
+    # (see :meth:`request_password_reset`).
+
+    def throttle_password_reset(self, email: str, ip: str | None) -> None:
+        """Count one reset request per IP (the same budget for known and unknown addresses)."""
+        if not self.settings.security.password_login:
+            raise Forbidden("password login is disabled")
+        self.hit(f"pwreset-ip:{ip}", self.settings.security.login_rate_per_minute * 3)
+
+    def _account_product(self, tx: Tx, user_id: str, hint: str | None) -> str | None:
+        """The product whose notification settings deliver an account email: ``hint`` when the
+        user belongs to it (as an operator, or as a member of an active tenant), else the configured product (single mode), else the oldest active
+        product the user belongs to. ``None``: no product can deliver it."""
+        member = (
+            " p.status = 'active' AND (EXISTS (SELECT 1 FROM axentra_product_members pm"
+            " WHERE pm.product_id = p.id AND pm.user_id = %(u)s) OR EXISTS (SELECT 1 FROM"
+            " axentra_memberships m JOIN axentra_tenants t ON t.product_id = m.product_id AND t.id = m.tenant_id"
+            " WHERE m.product_id = p.id AND m.user_id = %(u)s AND t.status = 'active'))"
+        )
+        if hint:
+            row = tx.one(
+                f"SELECT p.id FROM axentra_products p WHERE p.id = %(h)s AND {member}",
+                {"h": hint, "u": user_id},
+            )
+            if row:
+                return str(row["id"])
+        if self.settings.mode == "single":
+            row = tx.one(
+                "SELECT id FROM axentra_products WHERE slug = %s AND status = 'active'",
+                (self.settings.product.slug,),
+            )
+            if row:
+                return str(row["id"])
+        row = tx.one(
+            f"SELECT p.id FROM axentra_products p WHERE {member} ORDER BY p.created_at, p.id LIMIT 1",
+            {"u": user_id},
+        )
+        return str(row["id"]) if row else None
+
+    def _issue_account_token(
+        self, tx: Tx, user_id: str, email: str, purpose: str, prefix: str, ttl: timedelta
+    ) -> tuple[str, str, datetime]:
+        """Spend the user's open tokens of ``purpose`` and store a new one (hash only)."""
+        tx.execute(
+            "UPDATE axentra_account_tokens SET used_at = now()"
+            " WHERE user_id = %s AND purpose = %s AND used_at IS NULL",
+            (user_id, purpose),
+        )
+        token = prefix + new_token(32)
+        token_id = new_id("act")
+        expires_at = utcnow() + ttl
+        tx.execute(
+            "INSERT INTO axentra_account_tokens (id, user_id, purpose, token_hash, email, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s)",
+            (token_id, user_id, purpose, hash_token(token), email, expires_at),
+        )
+        return token_id, token, expires_at
+
+    @staticmethod
+    def _recently_sent(tx: Tx, user_id: str, purpose: str) -> bool:
+        return (
+            tx.one(
+                "SELECT 1 FROM axentra_account_tokens WHERE user_id = %s AND purpose = %s"
+                " AND created_at > now() - make_interval(secs => %s) LIMIT 1",
+                (user_id, purpose, ACCOUNT_EMAIL_COOLDOWN.total_seconds()),
+            )
+            is not None
+        )
+
+    def request_password_reset(
+        self,
+        email: str,
+        *,
+        ip: str | None,
+        request_id: str | None = None,
+        product_hint: str | None = None,
+    ) -> AccountEmail | None:
+        """Create a reset token for an active user with a password and this address.
+
+        Returns ``None`` (and sends nothing) for an unknown address, a disabled user, a user
+        without a password (OIDC-only: a reset must not create a password that bypasses the
+        identity provider), a request within the cooldown of the last one, or when no product can
+        deliver the email. The API runs this after answering ``202``, so neither the answer nor its
+        timing tells which case applied. Refusals are audited without the address."""
+        if not self.settings.security.password_login:
+            return None
+        with self.db.transaction(DbScope.platform()) as tx:
+            row = tx.one(
+                "SELECT id, email, status, password_hash, locale FROM axentra_users"
+                " WHERE lower(email) = lower(%s) FOR UPDATE",
+                (email.strip(),),
+            )
+            reason = None
+            if row is None:
+                reason = "unknown_email"
+            elif row["status"] != "active":
+                reason = "user_disabled"
+            elif not row["password_hash"]:
+                reason = "no_password"
+            elif self._recently_sent(tx, row["id"], "password_reset"):
+                reason = "cooldown"
+            product_id = None
+            if reason is None and row is not None:
+                product_id = self._account_product(tx, row["id"], product_hint)
+                if product_id is None:
+                    reason = "no_delivery_product"
+            if reason is not None:
+                self.audit.record(
+                    tx,
+                    None,
+                    "identity.password.reset_request",
+                    target_type="user",
+                    target_id=row["id"] if row else "",
+                    outcome="denied",
+                    details={"reason": reason},
+                    ip=ip,
+                    request_id=request_id,
+                )
+                return None
+            assert row is not None
+            assert product_id is not None
+            token_id, token, expires_at = self._issue_account_token(
+                tx,
+                row["id"],
+                row["email"],
+                "password_reset",
+                RESET_TOKEN_PREFIX,
+                timedelta(minutes=self.settings.security.password_reset_minutes),
+            )
+            self.audit.record(
+                tx,
+                None,
+                "identity.password.reset_request",
+                target_type="user",
+                target_id=row["id"],
+                actor_override=("user", row["id"], row["email"]),
+                details={"product_id": product_id},
+                ip=ip,
+                request_id=request_id,
+            )
+        return AccountEmail(
+            purpose="password_reset",
+            token_id=token_id,
+            token=token,
+            user_id=row["id"],
+            email=row["email"],
+            locale=row["locale"],
+            product_id=product_id,
+            expires_at=expires_at,
+        )
+
+    def _consume_account_token(self, tx: Tx, token: str, purpose: str) -> Row:
+        """Lock and check a token; any refusal is the same :class:`InvalidToken`."""
+        row = tx.one(
+            "SELECT t.id, t.user_id, t.email, t.expires_at, t.used_at, u.email AS current_email,"
+            " u.status, u.password_hash FROM axentra_account_tokens t"
+            " JOIN axentra_users u ON u.id = t.user_id"
+            " WHERE t.token_hash = %s AND t.purpose = %s FOR UPDATE OF t, u",
+            (hash_token(token), purpose),
+        )
+        if (
+            row is None
+            or row["used_at"] is not None
+            or row["expires_at"] <= utcnow()
+            or row["status"] != "active"
+            or not row["current_email"]
+            or row["current_email"].lower() != row["email"].lower()
+        ):
+            raise InvalidToken()
+        return row
+
+    def confirm_password_reset(
+        self, token: str, new_password: str, *, ip: str | None, request_id: str | None = None
+    ) -> None:
+        """Set a new password with a reset token. Spends the token (and every other open reset
+        token of the user), marks the address verified (the link arrived there) and ends all
+        sessions of the user. A password the policy refuses keeps the token usable."""
+        if not self.settings.security.password_login:
+            raise Forbidden("password login is disabled")
+        bucket = f"pwreset-confirm:{ip}"
+        self.hit(bucket, self.settings.security.login_rate_per_minute)
+        with self.db.transaction(DbScope.platform()) as tx:
+            row = self._consume_account_token(tx, token, "password_reset")
+            if not row["password_hash"]:
+                raise InvalidToken()
+            check_policy(
+                new_password,
+                min_length=self.settings.security.password_min_length,
+                email=row["current_email"],
+                field="new_password",
+            )
+            user_id = row["user_id"]
+            tx.execute(
+                "UPDATE axentra_users SET password_hash = %s,"
+                " email_verified_at = coalesce(email_verified_at, now()), updated_at = now() WHERE id = %s",
+                (hash_password(new_password), user_id),
+            )
+            tx.execute(
+                "UPDATE axentra_account_tokens SET used_at = now()"
+                " WHERE user_id = %s AND purpose = 'password_reset' AND used_at IS NULL",
+                (user_id,),
+            )
+            ended = tx.execute(
+                "UPDATE axentra_sessions SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL",
+                (user_id,),
+            )
+            self.audit.record(
+                tx,
+                None,
+                "identity.password.reset",
+                target_type="user",
+                target_id=user_id,
+                actor_override=("user", user_id, row["current_email"]),
+                details={"sessions_ended": ended},
+                ip=ip,
+                request_id=request_id,
+            )
+        self.refund(bucket)
+
+    def request_email_verification(
+        self, principal: Principal, *, product_hint: str | None = None, request_id: str | None = None
+    ) -> AccountEmail:
+        """Send the signed-in user a link that confirms their address (``409`` when it is already
+        confirmed, ``429`` within a minute of the last link)."""
+        user_id = self._require_user(principal)
+        with self.db.transaction(DbScope.platform()) as tx:
+            row = tx.one_or_404(
+                "SELECT email, email_verified_at, locale FROM axentra_users WHERE id = %s FOR UPDATE",
+                (user_id,),
+            )
+            if not row["email"]:
+                raise Forbidden("this account has no email address")
+            if row["email_verified_at"] is not None:
+                raise Conflict("the email address is already verified")
+            if self._recently_sent(tx, user_id, "email_verification"):
+                raise RateLimited(
+                    "a verification email was sent less than a minute ago",
+                    retry_after=int(ACCOUNT_EMAIL_COOLDOWN.total_seconds()),
+                )
+            product_id = self._account_product(tx, user_id, product_hint)
+            if product_id is None:
+                raise Conflict("no product of this account can send email")
+            token_id, token, expires_at = self._issue_account_token(
+                tx,
+                user_id,
+                row["email"],
+                "email_verification",
+                VERIFY_TOKEN_PREFIX,
+                timedelta(hours=self.settings.security.email_verification_hours),
+            )
+            self.audit.record(
+                tx,
+                principal,
+                "identity.email.verification_request",
+                target_type="user",
+                target_id=user_id,
+                details={"product_id": product_id},
+            )
+        return AccountEmail(
+            purpose="email_verification",
+            token_id=token_id,
+            token=token,
+            user_id=user_id,
+            email=row["email"],
+            locale=row["locale"],
+            product_id=product_id,
+            expires_at=expires_at,
+        )
+
+    def confirm_email_verification(
+        self, token: str, *, ip: str | None, request_id: str | None = None
+    ) -> None:
+        """Mark the address verified with a verification token (no session needed)."""
+        bucket = f"verify-confirm:{ip}"
+        self.hit(bucket, self.settings.security.login_rate_per_minute)
+        with self.db.transaction(DbScope.platform()) as tx:
+            row = self._consume_account_token(tx, token, "email_verification")
+            user_id = row["user_id"]
+            tx.execute(
+                "UPDATE axentra_users SET email_verified_at = coalesce(email_verified_at, now()),"
+                " updated_at = now() WHERE id = %s",
+                (user_id,),
+            )
+            tx.execute(
+                "UPDATE axentra_account_tokens SET used_at = now()"
+                " WHERE user_id = %s AND purpose = 'email_verification' AND used_at IS NULL",
+                (user_id,),
+            )
+            self.audit.record(
+                tx,
+                None,
+                "identity.email.verify",
+                target_type="user",
+                target_id=user_id,
+                actor_override=("user", user_id, row["current_email"]),
+                ip=ip,
+                request_id=request_id,
+            )
+        self.refund(bucket)
 
     # -- external identities (OIDC) ----------------------------------------------------------------
 
@@ -714,7 +1048,7 @@ class IdentityService:
                         (email,),
                     )
                 ):
-                    user_id = self.create_user(tx, email=user_email, name=name)
+                    user_id = self.create_user(tx, email=user_email, name=name, email_verified=verified)
                 else:
                     raise Forbidden("no account exists for this login", extra={"reason": "signup_disabled"})
                 tx.execute(
@@ -776,7 +1110,7 @@ class IdentityService:
                 (provider, subject),
             ):
                 raise Conflict("this external identity is already linked")
-            user_id = self.create_user(tx, email=user_email, name=name)
+            user_id = self.create_user(tx, email=user_email, name=name, email_verified=True)
             tx.execute(
                 "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
                 " VALUES (%s, %s, %s, %s, %s)",

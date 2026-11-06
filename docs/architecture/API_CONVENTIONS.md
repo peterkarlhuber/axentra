@@ -68,7 +68,7 @@ RFC 9457 problem details, `application/problem+json`:
 
 | Status | Codes |
 | ------ | ----- |
-| 400 | `bad_request` (unreadable request), `validation_failed`, `invalid_cursor` (malformed or tampered `cursor`), `invalid_signature` (billing provider webhook) |
+| 400 | `bad_request` (unreadable request), `validation_failed`, `invalid_cursor` (malformed or tampered `cursor`), `invalid_signature` (billing provider webhook), `invalid_token` (a password reset or email verification link that is unknown, expired, used or no longer matches the account; one detail for all reasons) |
 | 401 | `unauthenticated` |
 | 403 | `forbidden`, `reauthentication_required`, `backdating_not_permitted` (usage dated before the current billing period, with `period_start`), `api_key_creator_lost_access` (an API key used a permission its creator no longer holds in that scope, with `permission`; the key is not revoked) |
 | 404 | `not_found`, `module_disabled` |

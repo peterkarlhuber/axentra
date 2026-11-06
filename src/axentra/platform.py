@@ -157,6 +157,7 @@ class Axentra:
             )
             self.on_invitation = self.notify.on_invitation
             self.on_product_invitation = self.notify.on_product_invitation
+            self.on_account_email = self.notify.on_account_email
         # Usage and billing (billing feeds plan limits and billing periods into usage via a policy).
         self.usage = UsageService(self.db, self.authz, self.audit)
         self.billing = BillingService(

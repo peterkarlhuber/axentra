@@ -19,6 +19,8 @@ class User(BaseModel):
     updated_at: datetime
     last_login_at: datetime | None = None
     has_password: bool = False
+    email_verified: bool = False
+    """The user confirmed control of ``email`` (verification link or password reset link)."""
     platform_role: str | None = None
 
     @property
@@ -55,3 +57,16 @@ class NewSession(BaseModel):
 
     token: str
     info: SessionInfo
+
+
+class AccountEmail(BaseModel):
+    """A password reset or email verification token to send (never returned by the API)."""
+
+    purpose: Literal["password_reset", "email_verification"]
+    token_id: str
+    token: str
+    user_id: str
+    email: str
+    locale: str
+    product_id: str
+    expires_at: datetime

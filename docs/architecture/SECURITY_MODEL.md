@@ -377,6 +377,15 @@ otherwise `403` with code `reauthentication_required` (log in again, then retry)
 `security.first_password = "disabled"` it is never allowed. Residual risk: a session stolen within
 those minutes can still set a password; installations that rely on IdP-side MFA should disable it.
 
+**Password reset.** A reset link proves control of the mailbox, nothing more, so it is only as
+strong as the user's email account. Mitigations: links are single-use, hashed at rest, expire after
+`security.password_reset_minutes` (default 30), are bound to the address they were sent to, and are
+sent only to users who already have a password (never to OIDC-only users, so a reset cannot add a
+password that bypasses the identity provider). The request endpoint answers `202` before doing any
+work, so neither the status, the body nor the timing tells whether an account exists. A completed
+reset ends every session of the user. The emails use sensitive templates, so the link is not
+visible in the message log of the delivering product. Details: modules/IDENTITY.md.
+
 **OIDC account linking (design decision).** The first OIDC login with a verified email (`email_verified`
 is `true`) that matches an existing account links that account to the provider subject, also for
 platform admins. This is the usual behaviour and keeps invitations working, but it trusts every
@@ -496,8 +505,9 @@ storing. Redaction is a safety net; code must still avoid logging secrets.
 ## Rate limiting
 
 Only authentication is throttled in this version: failed password logins count per account
-(`security.login_rate_per_minute`, default 10) and per client IP (three times that), and
-setup-token attempts per IP, in fixed one-minute windows stored in PostgreSQL (shared by all API
+(`security.login_rate_per_minute`, default 10) and per client IP (three times that), setup-token
+attempts per IP, password reset requests per IP (three times the login rate; one email per account
+and minute at most) and reset/verification confirmations per IP (failed ones only), in fixed one-minute windows stored in PostgreSQL (shared by all API
 processes). Exceeding a budget returns `429` with `Retry-After: 60`. Fixed windows allow up to
 twice the budget across a window boundary.
 

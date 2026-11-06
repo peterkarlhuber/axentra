@@ -37,7 +37,15 @@ from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.identity.service import normalize_email
-from axentra.notify.builtin import BUILTIN_TEMPLATES, INVITATION, PRODUCT_INVITATION, SYSTEM_ONLY_TEMPLATES
+from axentra.notify.builtin import (
+    ACCOUNT_TEMPLATES,
+    BUILTIN_TEMPLATES,
+    EMAIL_VERIFICATION,
+    INVITATION,
+    PASSWORD_RESET,
+    PRODUCT_INVITATION,
+    SYSTEM_ONLY_TEMPLATES,
+)
 from axentra.notify.models import (
     LOCKED_CATEGORIES,
     DeliveryStats,
@@ -56,6 +64,7 @@ from axentra.notify.providers import NotificationProvider, provider_from_setting
 from axentra.notify.render import check_variables, placeholders, render_variant
 
 if TYPE_CHECKING:
+    from axentra.identity.models import AccountEmail
     from axentra.notify.dispatcher import NotifyDispatcher
     from axentra.observability.metrics import MetricsRegistry
     from axentra.tenancy.models import NewInvitation, NewProductInvitation
@@ -216,6 +225,8 @@ class NotifyService:
         )
 
     def _load_template(self, tx: Tx, product_id: str, key: str) -> Template | None:
+        if key in ACCOUNT_TEMPLATES:
+            return self._builtin(product_id, key)
         row = tx.one(
             "SELECT * FROM axentra_notify_templates WHERE product_id = %s AND key = %s", (product_id, key)
         )
@@ -265,6 +276,8 @@ class NotifyService:
         self.authz.require(principal, "notify:manage", product_id)
         if not _KEY.match(key):
             raise ValidationFailed("key must be 2-63 lowercase letters, digits, '.', '_' or '-'")
+        if key in ACCOUNT_TEMPLATES:
+            raise Forbidden(f"the built-in template {key!r} cannot be overridden")
         data = self._validate_template(
             {
                 "channel": channel,
@@ -908,6 +921,13 @@ class NotifyService:
         limit = clamp_limit(limit)
         where = ["product_id = %s"]
         params: list[Any] = [product_id]
+        if not self.authz.has(principal, "users:manage"):
+            # Password reset and verification links would let a product admin take over accounts.
+            where.append(
+                "NOT EXISTS (SELECT 1 FROM axentra_notify_messages m WHERE m.id = message_id"
+                " AND m.template_key = ANY(%s))"
+            )
+            params.append(sorted(ACCOUNT_TEMPLATES))
         if recipient:
             where.append("lower(recipient) = lower(%s)")
             params.append(recipient.strip())
@@ -1305,6 +1325,48 @@ class NotifyService:
         except Exception as exc:
             logger.warning(
                 "could not enqueue the invitation email for invitation %s (%s)", inv.id, type(exc).__name__
+            )
+
+    def on_account_email(self, mail: AccountEmail) -> None:
+        """Called by the API after a password reset or email verification token was created:
+        enqueue the email (templates ``password_reset`` / ``email_verification``, both sensitive,
+        so the link is redacted from the message log and purged after sending) through the
+        notification settings of ``mail.product_id``.
+
+        Never raises and never logs the token or the link: the reset request has already been
+        answered ``202`` and must look the same whether or not an email goes out."""
+        reset = mail.purpose == "password_reset"
+        try:
+            with self.db.transaction(DbScope.product(mail.product_id), read_only=True) as tx:
+                product = tx.one_or_404(
+                    "SELECT name, settings FROM axentra_products WHERE id = %s", (mail.product_id,)
+                )
+            settings = product["settings"] or {}
+            url = self.settings.account_link("/reset-password" if reset else "/verify-email", mail.token)
+            default_locale = settings.get("default_locale")
+            self.enqueue_system(
+                mail.product_id,
+                None,
+                template_key=PASSWORD_RESET if reset else EMAIL_VERIFICATION,
+                to_email=mail.email,
+                variables={
+                    "product_name": product["name"],
+                    "reset_url" if reset else "verify_url": url,
+                    "expires_at": mail.expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+                },
+                locale=mail.locale or None,
+                fallback_locale=default_locale
+                if isinstance(default_locale, str) and len(default_locale) <= 20
+                else None,
+                idempotency_key=f"account:{mail.token_id}",
+                reason=mail.purpose,
+            )
+        except Exception as exc:
+            logger.warning(
+                "could not enqueue the %s email for token %s (%s)",
+                mail.purpose,
+                mail.token_id,
+                type(exc).__name__,
             )
 
 

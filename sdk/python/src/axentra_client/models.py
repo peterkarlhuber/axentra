@@ -81,6 +81,7 @@ class User(AxentraModel):
     locale: str
     status: str
     has_password: bool | None = None
+    email_verified: bool = False
     platform_role: str | None = None
     preferences: dict[str, Any] = Field(default_factory=dict)
     last_login_at: datetime | None = None
