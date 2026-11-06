@@ -245,6 +245,8 @@ Refused callbacks (after a state was found) are audited as `identity.login` with
 **MFA** is delegated to the identity provider: enforce it there (Keycloak authentication flows,
 Entra ID Conditional Access, Google Workspace 2SV, Auth0 MFA). Axentra does not read `amr`/`acr`
 yet.
+Password logins have no second factor yet; the planned TOTP design (enrollment, recovery codes,
+step-up, admin reset) is in [architecture/MFA_TOTP_DESIGN.md](../architecture/MFA_TOTP_DESIGN.md).
 
 ### Configuration
 
@@ -405,5 +407,6 @@ Users endpoints (`/v1/me`, `/v1/users`) are described in the OpenAPI document.
 - No `private_key_jwt` client authentication, no `prompt`/`login_hint`/`acr_values` parameters.
 - No per-tenant providers: providers are configured per installation.
 - `amr`/`acr` (MFA evidence) are not evaluated.
+- No built-in second factor for password logins (design: architecture/MFA_TOTP_DESIGN.md).
 - No UI or HTTP API for linking several identities to one user or for unlinking (library only:
   `create_external_user`, `link_identity`).
