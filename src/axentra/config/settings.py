@@ -207,6 +207,12 @@ class StorageSettings(_Section):
     default_quota_files: int | None = Field(None, ge=0)
     pending_upload_timeout_seconds: int = Field(3600, ge=60)
     """Uploads still pending after this time are treated as abandoned by the purge."""
+    deleted_object_retention_hours: int = Field(0, ge=0, le=24 * 90)
+    """Keep the stored object of a deleted or expired file this long before the purge removes it
+    (0, default: delete it at once). Set it to at least the time between a database backup and
+    the file storage copy that follows it, so a restored database finds the objects of files
+    deleted in between (see docs/operations/BACKUP_RESTORE.md). Deleted files stay invisible
+    either way; retained objects count as personal data until they are removed."""
     store_blocked_as_inert: bool = False
     """Accept executable/HTML/SVG/script uploads and store them as inert ``application/octet-stream``
     attachments instead of refusing them (415). Downloads are always attachments with ``nosniff``."""

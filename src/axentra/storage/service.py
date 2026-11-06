@@ -48,7 +48,7 @@ from axentra.core.ids import new_id
 from axentra.core.pagination import CursorPart, Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.storage import safety
-from axentra.storage.backends import CHUNK_SIZE, StorageBackend, backend_from_settings
+from axentra.storage.backends import CHUNK_SIZE, ObjectNotFound, StorageBackend, backend_from_settings
 from axentra.storage.models import (
     DownloadUrl,
     FileInfo,
@@ -56,6 +56,7 @@ from axentra.storage.models import (
     PurgeReport,
     StoragePolicy,
     TenantStorageUsage,
+    VerifyReport,
 )
 from axentra.storage.policy import ContentPolicy, lenient_policy, parse_policy
 from axentra.storage.tokens import DownloadClaims, DownloadSigner
@@ -665,7 +666,8 @@ class StorageService:
                 tenant_id=tenant_id,
                 details={"name": row["name"], "size": row["size"]},
             )
-        self._delete_object(row)
+        if not self.cfg.deleted_object_retention_hours:
+            self._delete_object(row)
 
     def _mark_deleted(self, tx: Tx, row: Row) -> None:
         tx.execute(
@@ -894,9 +896,12 @@ class StorageService:
                 "SELECT * FROM axentra_files WHERE status = 'active' AND expires_at <= %s ORDER BY expires_at LIMIT %s",
                 (now, batch_size),
             )
+        retain = timedelta(hours=self.cfg.deleted_object_retention_hours)
         for row in expired:
             if self._expire(row, now):
                 report.expired += 1
+                if retain:
+                    continue  # the object goes with step 3 once the retention passed
                 if self._delete_object(row):
                     report.objects_deleted += 1
                 else:
@@ -915,8 +920,8 @@ class StorageService:
         with self.db.transaction(DbScope.platform(), read_only=True) as tx:
             undeleted = tx.all(
                 "SELECT * FROM axentra_files WHERE status = 'deleted' AND object_deleted_at IS NULL"
-                " ORDER BY deleted_at LIMIT %s",
-                (batch_size,),
+                " AND (%s OR deleted_at <= %s) ORDER BY deleted_at LIMIT %s",
+                (not retain, now - retain, batch_size),
             )
         for row in undeleted:
             if self._delete_object(row):
@@ -977,7 +982,7 @@ class StorageService:
                     r["storage_key"]
                     for r in tx.all(
                         "SELECT storage_key FROM axentra_files WHERE storage_key = ANY(%s)"
-                        " AND status IN ('pending', 'active')",
+                        " AND (status IN ('pending', 'active') OR object_deleted_at IS NULL)",
                         (batch,),
                     )
                 }
@@ -1001,6 +1006,70 @@ class StorageService:
         if batch:
             flush()
         return deleted, errors
+
+    def verify(self, *, checksums: bool = False, limit: int | None = None) -> VerifyReport:
+        """Compare the file rows with the backend, e.g. after restoring a backup: every active
+        file must have its object (``checksums``: with the stored SHA-256, which reads every
+        object). Also counts retained objects of deleted files and orphaned objects. Read-only;
+        no authorization (operator task). ``limit`` caps the number of files checked."""
+        report = VerifyReport()
+        after = ""
+        page = 500
+        while True:
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                rows = tx.all(
+                    "SELECT id, storage_key, sha256 FROM axentra_files WHERE status = 'active'"
+                    " AND id > %s ORDER BY id LIMIT %s",
+                    (after, page),
+                )
+            if not rows:
+                break
+            for row in rows:
+                if limit is not None and report.files_checked >= limit:
+                    report.truncated = True
+                    break
+                report.files_checked += 1
+                if not self.backend.exists(row["storage_key"]):
+                    report.missing.append(row["id"])
+                elif checksums and row["sha256"]:
+                    digest = hashlib.sha256()
+                    try:
+                        for chunk in self.backend.get(row["storage_key"]):
+                            digest.update(chunk)
+                    except ObjectNotFound:
+                        report.missing.append(row["id"])
+                        continue
+                    if digest.hexdigest() != row["sha256"]:
+                        report.corrupt.append(row["id"])
+            if report.truncated:
+                break
+            after = rows[-1]["id"]
+        batch: builtins.list[str] = []
+
+        def count(keys: builtins.list[str]) -> None:
+            with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+                rows = tx.all(
+                    "SELECT storage_key, status, object_deleted_at FROM axentra_files WHERE storage_key = ANY(%s)",
+                    (keys,),
+                )
+            known = {r["storage_key"]: r for r in rows}
+            for key in keys:
+                r = known.get(key)
+                if r is None or r["object_deleted_at"] is not None:
+                    report.orphans += 1
+                elif r["status"] == "deleted":
+                    report.retained_objects += 1
+
+        for key in self.backend.list_keys():
+            if not _OBJECT_KEY.match(key):
+                continue
+            batch.append(key)
+            if len(batch) >= 500:
+                count(batch)
+                batch = []
+        if batch:
+            count(batch)
+        return report
 
 
 SortField = Literal["created_at", "-created_at", "name", "-name", "size", "-size"]

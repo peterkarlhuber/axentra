@@ -54,6 +54,7 @@ Code: `src/axentra/storage/` (service, backends, safety, tokens, models), HTTP l
 | `signed_url_ttl_seconds` | 300 | maximum (and default) lifetime of download URLs |
 | `default_quota_bytes`, `default_quota_files` | none | installation-wide tenant default |
 | `pending_upload_timeout_seconds` | 3600 | after this, a still-pending upload counts as abandoned |
+| `deleted_object_retention_hours` | 0 | keep the object of a deleted or expired file this long before the purge removes it (0: delete at once); set it for consistent backups, see operations/BACKUP_RESTORE.md |
 
 The S3 backend needs the optional extra: `pip install 'axentra[s3]'` (boto3 is imported lazily).
 
@@ -238,7 +239,9 @@ file that starts with a `#!` shebang). One rule decides for all three reasons, p
 ### What "secure deletion" means here
 
 `DELETE` marks the file deleted (it is invisible at once), releases its quota and then deletes the
-object in the backend; if that fails, the purge retries until the backend confirms. Orphaned
+object in the backend; if that fails, the purge retries until the backend confirms. With
+`deleted_object_retention_hours` set, the object is kept that long (for backup consistency) and the
+purge deletes it afterwards; the file is invisible and its quota released in the meantime. Orphaned
 objects (no pending/active row, e.g. after a tenant was deleted) are removed by the purge's
 backend scan. This is **logical deletion at the storage API level**, nothing more:
 
@@ -262,6 +265,12 @@ objects and old temp files, and removes old deleted rows. `--no-orphans` skips t
 form `prd_.../ten_.../fil_...`, but the bucket/prefix or directory **must be dedicated** to one
 Axentra installation, because objects of another installation using the same layout would look
 orphaned.
+
+`axentra storage verify [--checksums] [--limit N]` compares the file rows with the backend
+(read-only): every active file must have its object, and with `--checksums` the same SHA-256. It
+also counts retained objects of deleted files and orphaned objects, and exits with status 1 when a
+file is missing or corrupt. Run it after restoring a backup (operations/BACKUP_RESTORE.md) or as a
+regular drill.
 
 ## Limitations and TODOs
 

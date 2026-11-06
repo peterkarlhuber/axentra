@@ -150,6 +150,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `allowed_content_types` | `[]` (all except always-blocked executable/HTML types) |
 | `store_blocked_as_inert` | `false` (`true`: store executable/HTML/SVG/script uploads as inert `application/octet-stream` attachments instead of refusing them with 415; the installation default, products override it in `settings.storage.blocked_types`, see modules/STORAGE.md) |
 | `signed_url_ttl_seconds` | `300` (10-86400) |
+| `deleted_object_retention_hours` | `0` (0-2160; keep objects of deleted or expired files this long before the purge removes them, for consistent database + file backups; see operations/BACKUP_RESTORE.md) |
 
 `[notify]`
 

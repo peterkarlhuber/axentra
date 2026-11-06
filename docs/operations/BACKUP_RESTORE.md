@@ -11,6 +11,36 @@ An Axentra installation has three things to back up. Losing any one of them lose
 Configuration files and `.env` (or your secret store) should be versioned or backed up too; they
 are needed to start the restored system.
 
+## File storage backup
+
+The database holds the file rows (name, size, SHA-256, storage key); the backend holds the bytes.
+Both must come from (about) the same point in time, and the database must not be newer:
+
+1. Set `storage.deleted_object_retention_hours` to more than the time between the start of the
+   database dump and the end of the file copy that follows it (for example `24` for a nightly
+   dump followed by a file backup). The purge then keeps the object of a deleted or expired file
+   that long, so a restored database still finds the objects of files deleted after the dump.
+   Deleted files stay invisible to the API either way. With the default `0` an object deleted
+   between the dump and the copy is lost for the restored row.
+2. Dump the database first, then copy the file storage (`rsync -a` of `storage.local_path`, a
+   volume snapshot, or an S3 bucket replica / versioned copy). Files uploaded after the dump end
+   up as orphaned objects in the copy; that is harmless (see below).
+3. Back up both together and keep the same number of generations.
+
+After a restore, run `axentra storage verify` (add `--checksums` to also compare every object with
+its stored SHA-256, which reads all objects):
+
+```text
+$ axentra storage verify
+{"files_checked":1520,"missing":[],"corrupt":[],"retained_objects":3,"orphans":12,"truncated":false}
+```
+
+It prints a JSON report and exits with status 1 when an active file has no object (`missing`) or a
+different content (`corrupt`), listing their ids. Orphans (objects without a row, e.g. uploads after the dump) and
+retained objects of deleted files are reported, not errors; the next `axentra storage purge`
+removes them (orphans at once, retained objects once the retention passed). `--limit N` checks only
+the first N files for a quick drill.
+
 **The keyring backup is mandatory.** Dumps contain ciphertexts and hashes, never keys. A restored
 database without the keyring that was active when values were written cannot decrypt them. Back
 up the keyring every time it changes (rotation adds a key), and keep old keys as long as any
@@ -76,7 +106,8 @@ Switch over:
 4. Run `axentra migrate --grant-runtime-role axentra_app` as the owner role (applies migrations
    newer than the backup, verifies checksums of the rest, re-applies the runtime role's grants),
    then start the API.
-5. Restore file storage to the same point in time as the database.
+5. Restore the file storage copy taken right after the database dump, then run
+   `axentra storage verify` (see "File storage backup").
 
 ## Verify a restore
 
@@ -91,14 +122,18 @@ Do this after every restore and regularly as a drill:
   audit_events and records; `SELECT count(*) FROM pg_policies;` matches the source.
 - Row counts of key tables match the source at backup time.
 - A platform admin can log in, a known record can be read, an API key still authenticates.
+- `axentra storage verify` reports no missing or corrupt files.
 - Values encrypted with `SecretBox` decrypt (once modules store them).
 
 The automated test `tests/integration/test_backup_restore.py` performs this procedure on every CI
 run: it seeds data through the API, dumps with `pg_dump --format=custom`, restores into a new
 database with `pg_restore --exit-on-error --single-transaction`, compares row counts, RLS flags,
 policies and table owners, checks that no migration is pending, and runs the application against
-the restored database (login, record read and write, API key still confined to its tenant). It
-does not cover file storage yet ([TODO](../TODO.md)).
+the restored database (login, record read and write, API key still confined to its tenant). The
+same file also restores database and local file storage together
+(`test_database_and_file_storage_restore_together`): it deletes and uploads files between the dump
+and the file copy, restores both, and checks that `storage verify` passes, every restored file
+downloads with its original content and the purge removes the orphan.
 
 ## RPO and RTO
 
