@@ -73,13 +73,27 @@ def test_wildcard_origin_never_allows_anything() -> None:
 
 def test_login_error_url() -> None:
     assert login_error_url("/login", None, "login_failed") == "/login?login_error=login_failed"
-    assert login_error_url("/login", "/app", "login_failed") == "/login?login_error=login_failed"
+    # The (already checked) return_to travels along, so a deep link survives a failed login.
+    assert (
+        login_error_url("/login", "/app?tab=2#x", "login_failed")
+        == "/login?login_error=login_failed&return_to=%2Fapp%3Ftab%3D2%23x"
+    )
+    assert login_error_url("/login", "/", "login_failed") == "/login?login_error=login_failed"
     assert (
         login_error_url("/auth/login?x=1", "https://studio.example/app?q=1", "login_expired")
-        == "https://studio.example/auth/login?x=1&login_error=login_expired"
+        == "https://studio.example/auth/login?x=1&login_error=login_expired&return_to=%2Fapp%3Fq%3D1"
+    )
+    assert (
+        login_error_url("/login", "https://studio.example", "login_expired")
+        == "https://studio.example/login?login_error=login_expired"
     )
     assert (
         login_error_url("https://studio.example/login", None, "access_denied")
+        == "https://studio.example/login?login_error=access_denied"
+    )
+    # A path on the API origin means nothing on another login page origin: left out.
+    assert (
+        login_error_url("https://studio.example/login", "/app", "access_denied")
         == "https://studio.example/login?login_error=access_denied"
     )
 

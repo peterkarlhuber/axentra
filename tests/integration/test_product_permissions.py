@@ -398,3 +398,41 @@ def test_product_permissions_rls(world, pg_urls):
             "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'axentra_product_permissions'"
         ).fetchone()
     assert forced == (True, True)
+
+
+def test_role_update_keeps_stored_retired_permissions_but_adds_none(world):
+    pid, _, t1, _ = _setup(world)
+    ax: Axentra = world.ax
+    role = world.admin.post(
+        f"/v1/products/{pid}/roles",
+        json={
+            "key": "approver",
+            "name": "Approver",
+            "scope": "tenant",
+            "permissions": ["crm.deals:approve", "records:read"],
+        },
+    ).json()
+    other = world.admin.post(
+        f"/v1/products/{pid}/roles",
+        json={"key": "reader", "name": "Reader", "scope": "tenant", "permissions": ["records:read"]},
+    ).json()
+    ax.permissions.register("crm", [DEALS_READ, EXPORT])  # approve is retired
+    # Saving the role with its stored retired name (as an editor that keeps it would) works.
+    r = world.admin.patch(
+        f"/v1/products/{pid}/roles/{role['id']}",
+        json={"permissions": ["crm.deals:approve", "records:read", "crm.deals:read"]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["permissions"] == ["crm.deals:approve", "crm.deals:read", "records:read"]
+    # A role that does not hold it cannot get the retired name.
+    r = world.admin.patch(
+        f"/v1/products/{pid}/roles/{other['id']}", json={"permissions": ["crm.deals:approve"]}
+    )
+    assert r.status_code == 422, r.text
+    # Dropping it on purpose still works, and then it cannot come back while retired.
+    r = world.admin.patch(f"/v1/products/{pid}/roles/{role['id']}", json={"permissions": ["records:read"]})
+    assert r.status_code == 200, r.text
+    r = world.admin.patch(
+        f"/v1/products/{pid}/roles/{role['id']}", json={"permissions": ["crm.deals:approve"]}
+    )
+    assert r.status_code == 422, r.text

@@ -75,6 +75,38 @@ class Membership(BaseModel):
     created_at: datetime
 
 
+class UserProductRole(BaseModel):
+    """A user's role on a product (product member), as listed for that user."""
+
+    product_id: str
+    product_slug: str
+    product_name: str
+    role: str
+    created_at: datetime
+
+
+class UserTenantRole(BaseModel):
+    """A user's membership in a tenant, as listed for that user."""
+
+    product_id: str
+    product_slug: str
+    product_name: str
+    tenant_id: str
+    tenant_slug: str
+    tenant_name: str
+    tenant_status: Literal["active", "suspended"]
+    role: str
+    created_at: datetime
+
+
+class UserMemberships(BaseModel):
+    """Where a user is a member, limited to what the caller may read (see
+    :meth:`~axentra.tenancy.service.TenancyService.user_memberships`)."""
+
+    products: list[UserProductRole]
+    tenants: list[UserTenantRole]
+
+
 class Invitation(BaseModel):
     id: str
     product_id: str
@@ -87,6 +119,29 @@ class Invitation(BaseModel):
     accepted_at: datetime | None
     revoked_at: datetime | None
     status: Literal["pending", "accepted", "revoked", "expired"]
+
+
+class ProductInvitation(BaseModel):
+    """An invitation to a product's team (operators, ``axentra_product_members``) with a product role."""
+
+    id: str
+    product_id: str
+    email: str
+    role: str
+    invited_by: str | None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None
+    revoked_at: datetime | None
+    status: Literal["pending", "accepted", "revoked", "expired"]
+
+
+class NewProductInvitation(BaseModel):
+    invitation: ProductInvitation
+    token: str
+    """Shown once (``axpinv_...``); deliver it to the invitee (Axentra sends it when notifications are
+    enabled). Accept it with ``POST /v1/product-invitations/accept``."""
+    accept_url: str | None = None
 
 
 class NewInvitation(BaseModel):

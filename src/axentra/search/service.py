@@ -9,15 +9,17 @@ from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
 from axentra.core.context import Principal
-from axentra.core.errors import InvalidCursor, ValidationFailed
+from axentra.core.errors import Conflict, InvalidCursor, ValidationFailed
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, Tx
 from axentra.search.adapters import PostgresSearchAdapter, SearchAdapter, WriteHook
 from axentra.search.models import (
     MAX_KINDS,
+    MAX_LISTED_KINDS,
     MAX_QUERY_CHARS,
     IndexDocument,
     IndexResult,
+    KindCount,
     SearchDocument,
     SearchHit,
     SearchQuery,
@@ -112,6 +114,16 @@ class SearchService:
         check_kind(kind)
         check_ref_id(ref_id)
         return self.adapter.get(product_id, tenant_id, kind, ref_id)
+
+    def kinds(self, principal: Principal, product_id: str, tenant_id: str) -> list[KindCount]:
+        """The kinds indexed in the tenant with their document counts (kind order, at most
+        :data:`MAX_LISTED_KINDS`), so clients can offer a kind picker. ``search:query``."""
+        self.authz.require(principal, "search:query", product_id, tenant_id)
+        list_kinds = getattr(self.adapter, "kinds", None)
+        if list_kinds is None:
+            raise Conflict(f"the search adapter {self.adapter.name!r} cannot list kinds")
+        result: list[KindCount] = list_kinds(product_id, tenant_id, MAX_LISTED_KINDS)
+        return result
 
     def query(
         self,

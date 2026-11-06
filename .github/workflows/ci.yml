@@ -256,6 +256,14 @@ jobs:
           docker compose -f deploy/compose/docker-compose.taskboard.yml config -q
       - name: Build the image
         run: docker build -t axentra:ci .
+      # The documented full image: a constraint bump that breaks an extra (for example python-dateutil
+      # 3.0.0 against botocore, AX3-05) fails here, not at the first deployment that needs it.
+      - name: Build the full image (server,oidc,s3,otel) and import every extra
+        run: |
+          docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:ci-full .
+          docker run --rm --entrypoint python axentra:ci-full -c "import axentra.identity.oidc, jwt, httpx, boto3, opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http; print('extras ok')"
+          docker run --rm --entrypoint pip axentra:ci-full check
+          test "$(docker run --rm --entrypoint id axentra:ci-full -u)" = "10001"
       - name: Build the Taskboard demo image
         run: docker build -f examples/taskboard/Dockerfile -t taskboard:ci .
       - name: Image runs as non-root and has no forbidden dependencies

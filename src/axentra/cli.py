@@ -4,17 +4,38 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 import sys
+from typing import Any
 
 from axentra import __version__
+
+#: Every Axentra instance a command created; :func:`main` closes them however the command ends.
+_CREATED: list[Any] = []
 
 
 def _ax(args: argparse.Namespace):  # type: ignore[no-untyped-def]
     from axentra.config.settings import load_settings
     from axentra.platform import Axentra
 
-    return Axentra.from_settings(load_settings(args.config))
+    ax = Axentra.from_settings(load_settings(args.config))
+    _CREATED.append(ax)
+    return ax
+
+
+def _close_created() -> None:
+    """Close the connection pools of the command's Axentra instances. A command that fails after
+    creating one (for example a database error in ``axentra worker --once``) would otherwise leave
+    the pool's threads running, which delays the exit by about 20 seconds."""
+    while _CREATED:
+        ax = _CREATED.pop()
+        if getattr(ax.db.pool, "closed", False):  # closed by the command (or never opened)
+            continue
+        try:
+            ax.close()
+        except Exception:  # pragma: no cover - closing must never hide the command's own error
+            logging.getLogger("axentra.cli").debug("closing Axentra failed", exc_info=True)
 
 
 def _load_modules(ax, names: list[str] | None) -> None:  # type: ignore[no-untyped-def]
@@ -387,6 +408,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 #: Exit status of operator errors (configuration, database reachability, missing modules).
 EXIT_OPERATOR_ERROR = 2
+#: Printed with ``database_unreachable``: where the database URL comes from (UX round 3 DX handover B19).
+DATABASE_URL_HINT = (
+    "check the database URL: set AXENTRA__DATABASE__URL (or `url` in the [database] section of the"
+    " configuration file, AXENTRA_CONFIG); without one Axentra tries postgresql://axentra@127.0.0.1:5432/axentra"
+)
 
 
 def _operator_error(exc: BaseException) -> tuple[str, str] | None:
@@ -401,7 +427,7 @@ def _operator_error(exc: BaseException) -> tuple[str, str] | None:
     if isinstance(exc, AxentraError):
         return exc.code, redact_text(str(exc))
     if isinstance(exc, (psycopg.OperationalError, PoolTimeout)):
-        return "database_unreachable", redact_text(str(exc).strip())
+        return "database_unreachable", redact_text(str(exc).strip()) + "\n" + DATABASE_URL_HINT
     if isinstance(exc, psycopg.Error):
         return "database_error", redact_text(str(exc).strip())
     if isinstance(exc, ModuleNotFoundError):
@@ -416,7 +442,10 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_parser().parse_args(argv)
     try:
-        return int(args.func(args))
+        try:
+            return int(args.func(args))
+        finally:
+            _close_created()
     except Exception as exc:
         if args.debug or os.environ.get("AXENTRA_DEBUG", "") not in ("", "0"):
             raise

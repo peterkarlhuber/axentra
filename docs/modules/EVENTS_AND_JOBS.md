@@ -262,6 +262,7 @@ with a relation to the product but without the permission get `403`.
 | `GET /jobs?status=&kind=&tenant_id=&limit=&cursor=` | `jobs:read` (in the tenant when `tenant_id` is given) | `Page[Job]` newest first |
 | `GET /jobs/stats?tenant_id=` | `jobs:read` | `JobStats` |
 | `GET /jobs/stream?tenant_id=` | `jobs:read` | SSE |
+| `GET /jobs/kinds?tenant_id=` | access to the scope | `{any_kind, items: [{kind, enqueue_permission}]}`: the kinds declared (or registered) in the answering process that the caller may enqueue there; with `jobs:manage` every known kind and `any_kind: true` (other kinds are accepted too), otherwise the kinds whose `enqueue_permission` the caller holds in the tenant (none at product level). Reserved `axentra.` kinds are never listed |
 | `POST /jobs` (+ `Idempotency-Key`) | `jobs:manage`; tenant jobs: `jobs:manage`, or the kind's declared `enqueue_permission` (e.g. `events:publish`) in the tenant | `201 Job`; `403` for kinds not opened to the caller; `409` when the key was used for a different request or by another caller without `jobs:read` |
 | `GET /jobs/{job_id}` | `jobs:read` (in the job's tenant) | `Job` |
 | `POST /jobs/{job_id}/retry` | `jobs:manage` | `Job` (`409` unless failed/dead) |

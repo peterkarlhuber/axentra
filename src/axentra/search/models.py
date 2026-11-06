@@ -47,6 +47,17 @@ class SearchDocument(BaseModel):
     updated_at: datetime
 
 
+#: Most kinds listed by ``GET .../search/kinds`` (in kind order).
+MAX_LISTED_KINDS = 500
+
+
+class KindCount(BaseModel):
+    """An indexed document kind of a tenant and how many documents it has."""
+
+    kind: str
+    count: int
+
+
 class SearchHit(BaseModel):
     """A query result. Highlights are HTML-escaped text in which matches are wrapped in ``<mark>``."""
 

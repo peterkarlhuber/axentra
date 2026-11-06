@@ -44,7 +44,16 @@ from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.core.redaction import redact, redact_text
 from axentra.data.database import Database, DbScope, Row, Tx
-from axentra.events.models import FINISHED_STATUSES, JOB_STATUSES, Job, JobStats, KindStats, StreamItem
+from axentra.events.models import (
+    FINISHED_STATUSES,
+    JOB_STATUSES,
+    EnqueueableKind,
+    EnqueueableKinds,
+    Job,
+    JobStats,
+    KindStats,
+    StreamItem,
+)
 from axentra.events.streams import assign_positions
 
 if TYPE_CHECKING:
@@ -598,6 +607,31 @@ class JobService:
             )
         if spec.enqueue_permission not in grant.permissions:
             self.authz.refuse(principal, grant, spec.enqueue_permission, product_id, tenant_id)
+
+    def enqueueable_kinds(
+        self, principal: Principal, product_id: str, *, tenant_id: str | None = None
+    ) -> EnqueueableKinds:
+        """The job kinds ``principal`` may enqueue through :meth:`enqueue` in the product (or one
+        tenant), as declared or registered in this process.
+
+        A ``jobs:manage`` holder may enqueue any kind (``any_kind``): every known kind is listed. Any
+        other caller with access to the scope gets the kinds declared with an ``enqueue_permission``
+        it holds in the tenant (none at product level, where only ``jobs:manage`` enqueues). Kinds
+        starting with the reserved prefix are never listed. Needs access to the scope, no permission."""
+        grant = self.authz.grant(principal, product_id, tenant_id)
+        if not grant.permissions:
+            raise Forbidden("no access to this product or tenant")
+        names = {k for k in (*self.kinds, *self.handlers) if not k.startswith(RESERVED_PREFIX)}
+        any_kind = "jobs:manage" in grant.permissions
+        items = []
+        for kind in sorted(names):
+            spec = self.kinds.get(kind)
+            permission = spec.enqueue_permission if spec else None
+            if any_kind or (
+                tenant_id is not None and permission is not None and permission in grant.permissions
+            ):
+                items.append(EnqueueableKind(kind=kind, enqueue_permission=permission))
+        return EnqueueableKinds(any_kind=any_kind, items=items)
 
     # -- API operations ------------------------------------------------------------------------
 

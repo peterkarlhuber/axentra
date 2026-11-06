@@ -26,7 +26,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import timedelta
 import re
-from typing import Any
+from typing import Any, Literal
 
 from psycopg import errors as pg_errors
 from psycopg.types.json import Jsonb
@@ -53,10 +53,15 @@ from axentra.tenancy.models import (
     Invitation,
     Membership,
     NewInvitation,
+    NewProductInvitation,
     Product,
+    ProductInvitation,
     ProductMember,
     ProductOverview,
     Tenant,
+    UserMemberships,
+    UserProductRole,
+    UserTenantRole,
 )
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -374,6 +379,45 @@ class TenancyService:
             )
         return [ProductMember.model_validate(r) for r in rows]
 
+    #: Most product and most tenant memberships :meth:`user_memberships` lists (each).
+    MAX_USER_MEMBERSHIPS = 500
+
+    def user_memberships(self, principal: Principal, user_id: str) -> UserMemberships:
+        """The products and tenants ``user_id`` is a member of, as far as the caller may read them:
+        everything with the platform permission ``users:read``; otherwise the product roles of
+        products where the caller holds ``product_members:read`` and the tenant memberships of
+        tenants where it holds ``members:read``. Products by slug, tenants by product and name; at
+        most :data:`MAX_USER_MEMBERSHIPS` of each. Callers check that they may see the user."""
+        everything = self.authz.has(principal, "users:read")
+        with self.db.transaction(DbScope.platform(), read_only=True) as tx:
+            products = tx.all(
+                "SELECT m.product_id, p.slug AS product_slug, p.name AS product_name, m.role, m.created_at"
+                " FROM axentra_product_members m JOIN axentra_products p ON p.id = m.product_id"
+                " WHERE m.user_id = %s ORDER BY p.slug LIMIT %s",
+                (user_id, self.MAX_USER_MEMBERSHIPS),
+            )
+            tenants = tx.all(
+                "SELECT m.product_id, p.slug AS product_slug, p.name AS product_name, m.tenant_id,"
+                " t.slug AS tenant_slug, t.name AS tenant_name, t.status AS tenant_status, m.role, m.created_at"
+                " FROM axentra_memberships m JOIN axentra_tenants t ON t.id = m.tenant_id"
+                " JOIN axentra_products p ON p.id = m.product_id"
+                " WHERE m.user_id = %s ORDER BY p.slug, lower(t.name), t.id LIMIT %s",
+                (user_id, self.MAX_USER_MEMBERSHIPS),
+            )
+        if not everything:
+            products = [
+                r for r in products if self.authz.has(principal, "product_members:read", r["product_id"])
+            ]
+            tenants = [
+                r
+                for r in tenants
+                if self.authz.has(principal, "members:read", r["product_id"], r["tenant_id"])
+            ]
+        return UserMemberships(
+            products=[UserProductRole.model_validate(r) for r in products],
+            tenants=[UserTenantRole.model_validate(r) for r in tenants],
+        )
+
     def set_product_member(
         self,
         principal: Principal,
@@ -574,7 +618,13 @@ class TenancyService:
         status: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        sort: Literal["id", "name"] = "id",
     ) -> Page[Tenant]:
+        """``sort="id"`` (default): oldest first by id. ``sort="name"``: by name, case-insensitive
+        (then id), so pickers can list the first N tenants by name; a cursor works only with the
+        sort it was issued for (``400 invalid_cursor`` otherwise)."""
+        if sort not in ("id", "name"):
+            raise ValidationFailed("sort must be id or name")
         grant = self.authz.grant(principal, product_id)
         limit = clamp_limit(limit)
         where = ["t.product_id = %s"]
@@ -593,21 +643,32 @@ class TenancyService:
         if status:
             where.append("t.status = %s")
             params.append(status)
-        after = decode_cursor(cursor, ("str",))
-        if after:
-            where.append("t.id > %s")
-            params.append(after[0])
+        if sort == "name":
+            after = decode_cursor(cursor, ("str", "str"))
+            if after:
+                where.append("(lower(t.name), t.id) > (%s, %s)")
+                params += [after[0], after[1]]
+            order = "lower(t.name), t.id"
+        else:
+            after = decode_cursor(cursor, ("str",))
+            if after:
+                where.append("t.id > %s")
+                params.append(after[0])
+            order = "t.id"
         params.append(limit + 1)
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
             rows = tx.all(
-                "SELECT t.*, (SELECT count(*) FROM axentra_memberships m WHERE m.tenant_id = t.id) AS member_count"
-                f" FROM axentra_tenants t WHERE {' AND '.join(where)} ORDER BY t.id LIMIT %s",
+                "SELECT t.*, lower(t.name) AS sort_name,"
+                " (SELECT count(*) FROM axentra_memberships m WHERE m.tenant_id = t.id) AS member_count"
+                f" FROM axentra_tenants t WHERE {' AND '.join(where)} ORDER BY {order} LIMIT %s",
                 params,
             )
         items = [Tenant.model_validate(r) for r in rows[:limit]]
-        return Page[Tenant](
-            items=items, next_cursor=encode_cursor([items[-1].id]) if len(rows) > limit else None
-        )
+        next_cursor = None
+        if len(rows) > limit:
+            last = rows[limit - 1]
+            next_cursor = encode_cursor([last["sort_name"], last["id"]] if sort == "name" else [last["id"]])
+        return Page[Tenant](items=items, next_cursor=next_cursor)
 
     def tenants_by_id(self, product_id: str, tenant_ids: Iterable[str]) -> list[Tenant]:
         """The tenants of ``product_id`` with these ids, ordered by id, in one query. No
@@ -872,16 +933,18 @@ class TenancyService:
     # -- invitations -------------------------------------------------------------------------------
 
     @staticmethod
-    def _invitation(row: dict[str, Any]) -> Invitation:
+    def _invitation_status(row: dict[str, Any]) -> str:
         if row["accepted_at"]:
-            status = "accepted"
-        elif row["revoked_at"]:
-            status = "revoked"
-        elif row["expired"]:  # compared on the database clock (selected as expires_at <= now())
-            status = "expired"
-        else:
-            status = "pending"
-        return Invitation.model_validate({**row, "status": status})
+            return "accepted"
+        if row["revoked_at"]:
+            return "revoked"
+        if row["expired"]:  # compared on the database clock (selected as expires_at <= now())
+            return "expired"
+        return "pending"
+
+    @staticmethod
+    def _invitation(row: dict[str, Any]) -> Invitation:
+        return Invitation.model_validate({**row, "status": TenancyService._invitation_status(row)})
 
     def list_invitations(self, principal: Principal, product_id: str, tenant_id: str) -> list[Invitation]:
         self.authz.require(principal, "members:read", product_id, tenant_id)
@@ -960,6 +1023,168 @@ class TenancyService:
                 tenant_id=tenant_id,
             )
 
+    # -- product-level invitations (operators) ------------------------------------------------------
+
+    @staticmethod
+    def _product_invitation(row: dict[str, Any]) -> ProductInvitation:
+        return ProductInvitation.model_validate({**row, "status": TenancyService._invitation_status(row)})
+
+    def list_product_invitations(self, principal: Principal, product_id: str) -> list[ProductInvitation]:
+        """Invitations to the product team, newest first (at most 500). ``product_members:read``."""
+        self.authz.require(principal, "product_members:read", product_id)
+        with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
+            rows = tx.all(
+                "SELECT *, expires_at <= now() AS expired FROM axentra_invitations"
+                " WHERE product_id = %s AND tenant_id IS NULL ORDER BY created_at DESC LIMIT 500",
+                (product_id,),
+            )
+        return [self._product_invitation(r) for r in rows]
+
+    def invite_to_product(
+        self, principal: Principal, product_id: str, *, email: str, role: str
+    ) -> NewProductInvitation:
+        """Invite an email address to the product team with a product ``role``.
+
+        For operators without an account, or with one the caller cannot see: the invitee signs in
+        (or up, where an identity provider allows invited sign-ups) and accepts with
+        :meth:`accept_product_invitation`. ``product_members:manage`` and the role ceiling, as for
+        :meth:`set_product_member`; the inviter's right is checked again on acceptance."""
+        grant = self.authz.require(principal, "product_members:manage", product_id)
+        email = normalize_email(email)
+        token = "axpinv_" + new_token()
+        iid = new_id("inv")
+        with self.db.transaction(DbScope.product(product_id)) as tx:
+            self._check_role(tx, product_id, role, "product")
+            self._check_ceiling(tx, principal, grant, product_id, "product", role, None)
+            if tx.one(
+                "SELECT 1 FROM axentra_invitations WHERE product_id = %s AND tenant_id IS NULL"
+                " AND lower(email) = lower(%s) AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()",
+                (product_id, email),
+            ):
+                raise Conflict("an open invitation for this email exists")
+            tx.execute(
+                "INSERT INTO axentra_invitations (id, product_id, tenant_id, email, role, token_hash, invited_by,"
+                " expires_at) VALUES (%s, %s, NULL, %s, %s, %s, %s, now() + %s)",
+                (iid, product_id, email, role, hash_token(token), principal.actor.id, INVITATION_TTL),
+            )
+            self.audit.record(
+                tx,
+                principal,
+                "tenancy.product_invitation.create",
+                target_type="invitation",
+                target_id=iid,
+                product_id=product_id,
+                details={"email": email, "role": role},
+            )
+            row = tx.one_or_404(
+                "SELECT *, expires_at <= now() AS expired FROM axentra_invitations WHERE id = %s", (iid,)
+            )
+        return NewProductInvitation(invitation=self._product_invitation(row), token=token)
+
+    def revoke_product_invitation(self, principal: Principal, product_id: str, invitation_id: str) -> None:
+        self.authz.require(principal, "product_members:manage", product_id)
+        with self.db.transaction(DbScope.product(product_id)) as tx:
+            n = tx.execute(
+                "UPDATE axentra_invitations SET revoked_at = now() WHERE id = %s AND product_id = %s"
+                " AND tenant_id IS NULL AND accepted_at IS NULL AND revoked_at IS NULL",
+                (invitation_id, product_id),
+            )
+            if n == 0:
+                raise NotFound("open invitation not found")
+            self.audit.record(
+                tx,
+                principal,
+                "tenancy.product_invitation.revoke",
+                target_type="invitation",
+                target_id=invitation_id,
+                product_id=product_id,
+            )
+
+    def accept_product_invitation(self, principal: Principal, token: str) -> ProductMember:
+        """The logged-in user joins the product team. Refused like a tenant invitation
+        (:meth:`accept_invitation`): ``403`` with ``reason`` ``email_mismatch``, ``scope_inactive``
+        (the product is archived; the invitation stays open) or ``inviter_lost_access``. An existing
+        product role of the user is kept (never lowered)."""
+        if principal.user_id is None:
+            raise Forbidden("only users can accept invitations")
+        try:
+            return self._accept_product_invitation(principal, token)
+        except _AcceptDenied as denied:
+            self.audit.record_standalone(
+                principal,
+                "tenancy.product_invitation.accept",
+                outcome="denied",
+                target_type="invitation",
+                target_id=denied.invitation["id"],
+                product_id=denied.invitation["product_id"],
+                details={"reason": denied.reason},
+            )
+            raise Forbidden(denied.message, extra={"reason": denied.reason}) from None
+
+    def _accept_product_invitation(self, principal: Principal, token: str) -> ProductMember:
+        with self.db.transaction(DbScope.platform()) as tx:
+            inv = tx.one(
+                "SELECT *, expires_at <= now() AS expired FROM axentra_invitations WHERE token_hash = %s FOR UPDATE",
+                (hash_token(token),),
+            )
+            if inv is None or inv["accepted_at"] or inv["revoked_at"] or inv["expired"]:
+                raise NotFound("the invitation is invalid or expired")
+            if inv["tenant_id"] is not None:
+                raise NotFound("the invitation is for a tenant; accept it with POST /v1/invitations/accept")
+            email = tx.scalar("SELECT email FROM axentra_users WHERE id = %s", (principal.user_id,))
+            if not email or str(email).lower() != inv["email"].lower():
+                raise _AcceptDenied(
+                    inv, "email_mismatch", "this invitation was sent to another email address"
+                )
+            status = tx.scalar("SELECT status FROM axentra_products WHERE id = %s", (inv["product_id"],))
+            if status != "active":
+                raise _AcceptDenied(
+                    inv, "scope_inactive", "the invitation cannot be accepted: the product is not active"
+                )
+            inviter = self.authz.actor_principal(inv["invited_by"])
+            if inviter is not None:
+                try:
+                    grant = self.authz.require(inviter, "product_members:manage", inv["product_id"])
+                    self._check_ceiling(tx, inviter, grant, inv["product_id"], "product", inv["role"], None)
+                except (Forbidden, NotFound):
+                    raise _AcceptDenied(
+                        inv,
+                        "inviter_lost_access",
+                        "the invitation is no longer valid: its sender can no longer grant this role",
+                    ) from None
+            tx.execute(
+                "INSERT INTO axentra_product_members (product_id, user_id, role) VALUES (%s, %s, %s)"
+                " ON CONFLICT (product_id, user_id) DO NOTHING",
+                (inv["product_id"], principal.user_id, inv["role"]),
+            )
+            tx.execute(
+                "UPDATE axentra_invitations SET accepted_at = now(), accepted_by = %s WHERE id = %s",
+                (principal.user_id, inv["id"]),
+            )
+            self.audit.record(
+                tx,
+                principal,
+                "tenancy.product_invitation.accept",
+                target_type="invitation",
+                target_id=inv["id"],
+                product_id=inv["product_id"],
+                details={"role": inv["role"]},
+            )
+            row = tx.one_or_404(
+                "SELECT m.product_id, m.user_id, u.email, u.name, m.role, m.created_at"
+                " FROM axentra_product_members m JOIN axentra_users u ON u.id = m.user_id"
+                " WHERE m.product_id = %s AND m.user_id = %s",
+                (inv["product_id"], principal.user_id),
+            )
+        return ProductMember.model_validate(row)
+
+    def accept_any_invitation(self, principal: Principal, token: str) -> Membership | ProductMember:
+        """Accept a tenant (``axinv_``) or product (``axpinv_``) invitation; used by the OpenID Connect
+        login to accept the invitation given on its start."""
+        if token.startswith("axpinv_"):
+            return self.accept_product_invitation(principal, token)
+        return self.accept_invitation(principal, token)
+
     def _invitation_refusal(self, tx: Tx, inv: dict[str, Any]) -> tuple[str, str] | None:
         """Why an otherwise valid invitation cannot be accepted *now*, or ``None``.
 
@@ -1007,7 +1232,7 @@ class TenancyService:
                 tenant_id=denied.invitation["tenant_id"],
                 details={"reason": denied.reason},
             )
-            raise Forbidden(denied.message) from None
+            raise Forbidden(denied.message, extra={"reason": denied.reason}) from None
 
     def _accept_invitation(self, principal: Principal, token: str) -> Membership:
         with self.db.transaction(DbScope.platform()) as tx:
@@ -1017,6 +1242,10 @@ class TenancyService:
             )
             if inv is None or inv["accepted_at"] or inv["revoked_at"] or inv["expired"]:
                 raise NotFound("the invitation is invalid or expired")
+            if inv["tenant_id"] is None:
+                raise NotFound(
+                    "the invitation is for the product team; accept it with POST /v1/product-invitations/accept"
+                )
             email = tx.scalar("SELECT email FROM axentra_users WHERE id = %s", (principal.user_id,))
             # Bound to the address: a user without an email address can never accept by match.
             if not email or str(email).lower() != inv["email"].lower():

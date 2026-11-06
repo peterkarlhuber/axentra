@@ -36,6 +36,7 @@ ROUTERS: list[ModuleRouter] = [
     ModuleRouter(auth.router, "identity"),
     ModuleRouter(users.router, "identity"),
     ModuleRouter(products.router, "tenancy"),
+    ModuleRouter(products.accept_router, "tenancy"),
     ModuleRouter(tenants.router, "tenancy"),
     ModuleRouter(access.router, "access"),
     ModuleRouter(records.router, "data"),

@@ -32,6 +32,16 @@ class Role(BaseModel):
     permissions: list[str]
     builtin: bool
     version: int = 1
+    name_key: str | None = Field(
+        default=None,
+        description="Built-in roles: a stable translation key for `name` (`axentra.role.<key>.name`);"
+        " `null` for custom roles, whose name and description are the product's own text",
+    )
+    description_key: str | None = Field(
+        default=None,
+        description="Built-in roles: a stable translation key for `description`"
+        " (`axentra.role.<key>.description`); `null` for custom roles",
+    )
 
 
 class ApiKey(BaseModel):
@@ -48,6 +58,23 @@ class ApiKey(BaseModel):
     revoked_at: datetime | None
     replaces: str | None
     status: Literal["active", "revoked", "expired"]
+    grace_until: datetime | None = Field(
+        default=None,
+        description="Set while a rotated key still works (the grace period of `rotate`): the time it"
+        " stops working (`revoked_at`, in the future). `null` otherwise",
+    )
+    creator_has_access: bool | None = Field(
+        default=None,
+        description="For active keys: `true` while the key's creator holds every permission of the"
+        " key in its scope, `false` when the creator lost some (requests needing them are refused"
+        " with `api_key_creator_lost_access`, see `withheld_permissions`). `null` for revoked or"
+        " expired keys and for keys created in process by a system caller (not bounded)",
+    )
+    withheld_permissions: list[str] = Field(
+        default_factory=list,
+        description="The key's permissions its creator no longer holds (empty when `creator_has_access`"
+        " is not `false`)",
+    )
 
 
 class NewApiKey(BaseModel):

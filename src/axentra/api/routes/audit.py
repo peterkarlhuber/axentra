@@ -35,6 +35,10 @@ class EffectiveSettings(BaseModel):
     notify: dict[str, Any]
     billing: dict[str, Any]
     observability: dict[str, Any]
+    events: dict[str, Any] = Field(default_factory=dict)
+    """Job and webhook retry schedule: default_max_attempts, backoff_base_seconds, backoff_max_seconds,
+    webhook_max_attempts, webhook_backoff_base_seconds, webhook_backoff_max_seconds,
+    webhook_timeout_seconds, lease_seconds (empty when the events module is disabled)."""
     encryption_key_ids: list[str]
     active_encryption_key: str
     features: dict[str, bool]
@@ -158,6 +162,18 @@ def effective_settings(principal: CurrentPrincipal, ax: Ax) -> EffectiveSettings
             "audit_retention_days": s.observability.audit_retention_days,
             "job_retention_days": s.observability.job_retention_days,
         },
+        events={
+            "default_max_attempts": s.events.default_max_attempts,
+            "backoff_base_seconds": s.events.backoff_base_seconds,
+            "backoff_max_seconds": s.events.backoff_max_seconds,
+            "webhook_max_attempts": s.events.webhook_max_attempts,
+            "webhook_backoff_base_seconds": s.events.webhook_backoff_base_seconds,
+            "webhook_backoff_max_seconds": s.events.webhook_backoff_max_seconds,
+            "webhook_timeout_seconds": s.events.webhook_timeout_seconds,
+            "lease_seconds": s.events.lease_seconds,
+        }
+        if s.module_enabled("events")
+        else {},
         encryption_key_ids=ax.keyring.kids,
         active_encryption_key=ax.keyring.active_kid,
         features=s.features,

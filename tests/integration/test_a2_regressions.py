@@ -434,10 +434,10 @@ def test_ax2_04_invitation_refused_after_inviter_downgrade(world: World) -> None
         f"/v1/products/{pid}/tenants/{tid}/members", json={"email": "ta@example.com", "role": "member"}
     )
     assert r.status_code == 201, r.text
-    assert (
-        world.login_as("x@example.com").post("/v1/invitations/accept", json={"token": token}).status_code
-        == 403
-    )
+    r = world.login_as("x@example.com").post("/v1/invitations/accept", json={"token": token})
+    assert r.status_code == 403
+    # AXS-B1: the reason is machine-readable (the code stays `forbidden`).
+    assert r.json()["code"] == "forbidden" and r.json()["reason"] == "inviter_lost_access"
 
 
 def test_ax2_04_invitation_refused_while_tenant_suspended(world: World) -> None:
@@ -447,7 +447,8 @@ def test_ax2_04_invitation_refused_while_tenant_suspended(world: World) -> None:
         == 200
     )
     x = world.login_as("x@example.com")
-    assert x.post("/v1/invitations/accept", json={"token": token}).status_code == 403
+    r = x.post("/v1/invitations/accept", json={"token": token})
+    assert r.status_code == 403 and r.json()["reason"] == "scope_inactive"
     # Still open: accepted once the tenant is active again (the inviter kept their rights).
     assert (
         world.admin.patch(f"/v1/products/{pid}/tenants/{tid}", json={"status": "active"}).status_code == 200
@@ -461,10 +462,8 @@ def test_ax2_04_refused_acceptance_is_audited(world: World) -> None:
     """The denied audit event of a refused acceptance is kept (it was rolled back with the refusal)."""
     pid, _, _, token = _invite_as_tenant_admin(world)
     world.user("other@example.com")
-    assert (
-        world.login_as("other@example.com").post("/v1/invitations/accept", json={"token": token}).status_code
-        == 403
-    )
+    r = world.login_as("other@example.com").post("/v1/invitations/accept", json={"token": token})
+    assert r.status_code == 403 and r.json()["reason"] == "email_mismatch"
     denied = world.ax.audit.list(DbScope.platform(), product_id=pid, action="tenancy.invitation.accept").items
     assert [(e.outcome, e.details.get("reason")) for e in denied] == [("denied", "email_mismatch")]
 
@@ -507,3 +506,38 @@ def test_dx_42_cli_operator_errors_without_traceback(
     assert main(["migrate", "--status"]) == 2
     err = capsys.readouterr().err
     assert err.startswith("axentra: database_unreachable: ") and "secret-pw" not in err
+    # The message says where the URL comes from (UX round 3 DX handover B19).
+    assert "AXENTRA__DATABASE__URL" in err and "[database]" in err
+
+
+def test_cli_closes_the_pool_when_a_command_fails_after_starting(
+    pg_urls: dict[str, str],
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A command that fails after starting Axentra (here ``axentra worker --once`` with a module
+    that does not exist, loaded after the pool opened) exits with status 2 and closes the pool; its
+    threads delayed the exit by about 20 seconds before."""
+    from axentra.cli import main
+    from axentra.platform import Axentra
+
+    created: list[Axentra] = []
+    original = Axentra.from_settings.__func__  # type: ignore[attr-defined]
+
+    def recording(cls: type[Axentra], *args: Any, **kwargs: Any) -> Axentra:
+        ax = original(cls, *args, **kwargs)
+        created.append(ax)
+        return ax
+
+    monkeypatch.chdir(tmp_path)  # the development keyring is written to ./var
+    monkeypatch.delenv("AXENTRA_CONFIG", raising=False)
+    monkeypatch.delenv("AXENTRA_DEBUG", raising=False)
+    monkeypatch.setenv("AXENTRA__DATABASE__URL", pg_urls["app"])
+    monkeypatch.setattr(Axentra, "from_settings", classmethod(recording))
+    started = time.monotonic()
+    assert main(["worker", "--once", "--load", "axentra_no_such_module"]) == 2
+    assert time.monotonic() - started < 15
+    assert capsys.readouterr().err.startswith("axentra: module_not_found: ")
+    (ax,) = created
+    assert ax.db.pool.closed

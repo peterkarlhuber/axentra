@@ -152,3 +152,57 @@ def test_keys_created_in_process_by_system_callers_are_not_bounded(world: World)
         Principal.system("test"), pid, name="sys", permissions=["records:read"]
     )
     _ok(_key_client(world, new.secret).get(f"/v1/products/{pid}/tenants/{tid}/records/notes"), 200)
+    listed = _ok(world.admin.get(f"/v1/products/{pid}/api-keys/{new.key.id}"), 200)
+    assert listed["creator_has_access"] is None and listed["withheld_permissions"] == []
+
+
+def test_key_list_shows_the_creators_effective_access(world: World) -> None:
+    """AX3-01 follow-up: the list shows whether a key's creator still holds its permissions."""
+    pid, tid = _setup(world)
+    a = world.admin
+    uid = world.user("op3@example.com")
+    _ok(a.post(f"/v1/products/{pid}/members", json={"email": "op3@example.com", "role": "product_admin"}))
+    op = world.login_as("op3@example.com")
+    product_key, _ = _create_key(op, pid, ["records:read", "records:write", "tenants:read"])
+    tenant_key, _ = _create_key(op, pid, ["records:read"], tid)
+
+    def listed() -> dict[str, dict[str, Any]]:
+        return {k["id"]: k for k in _ok(a.get(f"/v1/products/{pid}/api-keys"), 200)}
+
+    keys = listed()
+    for key_id in (product_key, tenant_key):
+        assert keys[key_id]["creator_has_access"] is True and keys[key_id]["withheld_permissions"] == []
+    # Demoted to viewer: the write permission is withheld, reads still work.
+    _ok(a.patch(f"/v1/products/{pid}/members/{uid}", json={"role": "product_viewer"}), 200)
+    keys = listed()
+    assert keys[product_key]["creator_has_access"] is False
+    assert keys[product_key]["withheld_permissions"] == ["records:write"]
+    assert keys[tenant_key]["creator_has_access"] is True
+    assert _ok(a.get(f"/v1/products/{pid}/api-keys/{product_key}"), 200)["withheld_permissions"] == [
+        "records:write"
+    ]
+    # Removed: everything is withheld; the status stays active (nothing was revoked).
+    assert a.delete(f"/v1/products/{pid}/members/{uid}").status_code == 204
+    keys = listed()
+    assert keys[tenant_key]["status"] == "active" and keys[tenant_key]["creator_has_access"] is False
+    assert keys[tenant_key]["withheld_permissions"] == ["records:read"]
+    # Revoked keys carry no effective state.
+    _ok(a.post(f"/v1/products/{pid}/api-keys/{tenant_key}/revoke"), 200)
+    keys = listed()
+    assert keys[tenant_key]["creator_has_access"] is None and keys[tenant_key]["withheld_permissions"] == []
+
+
+def test_rotated_key_shows_its_grace_period(world: World) -> None:
+    """AXS-B4: after a rotation with a grace period the old key is active with `grace_until`."""
+    pid, _ = _setup(world)
+    a = world.admin
+    key_id, _ = _create_key(a, pid, ["records:read"])
+    assert _ok(a.get(f"/v1/products/{pid}/api-keys/{key_id}"), 200)["grace_until"] is None
+    rotated = _ok(a.post(f"/v1/products/{pid}/api-keys/{key_id}/rotate", json={"grace_seconds": 3600}), 200)
+    old = _ok(a.get(f"/v1/products/{pid}/api-keys/{key_id}"), 200)
+    assert old["status"] == "active" and old["grace_until"] == old["revoked_at"] is not None
+    assert rotated["key"]["grace_until"] is None and rotated["key"]["creator_has_access"] is True
+    no_grace = _ok(a.post(f"/v1/products/{pid}/api-keys/{rotated['key']['id']}/rotate", json={}), 200)
+    old = _ok(a.get(f"/v1/products/{pid}/api-keys/{rotated['key']['id']}"), 200)
+    assert old["status"] == "revoked" and old["grace_until"] is None
+    assert no_grace["key"]["replaces"] == rotated["key"]["id"]

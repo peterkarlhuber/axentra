@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from axentra import API_VERSION, __version__
 from axentra.api.context import Ax
+from axentra.identity.passwords import MAX_PASSWORD_LENGTH
 from axentra.tenancy.models import Product
 
 router = APIRouter(prefix="/v1", tags=["meta"])
@@ -23,9 +24,17 @@ class OidcProviderInfo(BaseModel):
     name: str
 
 
+class PasswordPolicy(BaseModel):
+    """What a new password must satisfy, so clients can check before sending (the server checks again)."""
+
+    min_length: int
+    max_length: int
+
+
 class AuthInfo(BaseModel):
     password: bool
     oidc: list[OidcProviderInfo]
+    password_policy: PasswordPolicy
 
 
 class Meta(BaseModel):
@@ -57,6 +66,9 @@ def get_meta(ax: Ax) -> Meta:
         auth=AuthInfo(
             password=ax.settings.security.password_login,
             oidc=[OidcProviderInfo(id=p.id, name=p.name) for p in ax.settings.oidc],
+            password_policy=PasswordPolicy(
+                min_length=ax.settings.security.password_min_length, max_length=MAX_PASSWORD_LENGTH
+            ),
         ),
         setup_required=ax.identity.setup_required(),
     )

@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from axentra import API_VERSION, __version__
 from axentra.api.context import resolve_principal, valid_request_id
+from axentra.api.openapi import install_openapi
 from axentra.api.problems import (
     axentra_error_handler,
     http_error_handler,
@@ -204,6 +205,7 @@ def create_app(
     for router in ROUTERS:
         if router.module is None or ax.settings.module_enabled(router.module):
             app.include_router(router.router)
+    install_openapi(app, PUBLIC_ROUTES)
     _install_api_docs(app, ax.settings.api_docs_mode)
     _install_limits(app, ax)
 

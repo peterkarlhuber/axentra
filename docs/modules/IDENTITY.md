@@ -36,7 +36,11 @@ Connect), HTTP: `src/axentra/api/routes/auth.py`, `users.py`.
 
 Argon2id (`argon2-cffi` defaults; hashes are upgraded on login when parameters change). Policy:
 `security.password_min_length` (default 12), at most 1024 characters, not equal to the email,
-at least four distinct characters. Unknown accounts are verified against a dummy hash so the
+at least four distinct characters. `GET /v1/meta` publishes the lengths (`auth.password_policy:
+{min_length, max_length}`) so clients can check before sending. A refused password answers `422
+validation_failed` with `reason` (`too_short`, `too_long`, `equals_email`, `too_simple`),
+`min_length` and `errors: [{loc: ["body", "password"], msg}]` (`new_password` for a password change),
+so a client can mark the field. Unknown accounts are verified against a dummy hash so the
 timing stays similar. Failed logins are throttled per IP and per account in one-minute windows stored in
 PostgreSQL (`security.login_rate_per_minute`), so the limit holds across API processes. The
 throttle counts atomically *before* the password is verified and gives the attempt back after a
@@ -143,6 +147,8 @@ redirects and accept at most 1 MiB.
   also accepted right after the login (tenant membership with the invited role), and the callback
   adds `invitation_accepted=<tenant id>` to the `return_to` query so the frontend does not ask for
   a second confirmation (Studio checks that `/v1/me` lists that tenant before it shows "accepted").
+  A product team invitation (`axpinv_...`) works the same way: the operator joins the product
+  team and the callback adds `product_invitation_accepted=<product id>` instead.
   If accepting fails, the login still succeeds without the parameter and the frontend can call
   `POST /v1/invitations/accept`.
 - `allowed_email_domains` (case-insensitive, exact domain, no subdomains) is checked on **every**
@@ -167,7 +173,10 @@ carries one.
 **Errors** never echo provider text. The browser is redirected to the login page with
 `?login_error=<code>`: `security.login_page` (default `/login`) on the origin of `return_to` when
 `return_to` is an absolute URL, otherwise `security.login_page` as configured (it may itself be
-an absolute URL). Codes:
+an absolute URL). The login's checked `return_to` (secret query parameters already removed) comes
+along as `&return_to=<path>`, relative to the login page's origin, so a deep link such as an
+invitation accept page survives a failed login; it is left out when it is `/` or when it is a path
+on the API origin while `login_page` is an absolute URL elsewhere. Codes:
 
 | code | meaning |
 | --- | --- |

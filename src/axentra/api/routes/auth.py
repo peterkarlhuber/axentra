@@ -151,19 +151,16 @@ def oidc_start(
     return_to: Annotated[str | None, Query(max_length=2000)] = None,
     invitation: Annotated[
         str | None,
-        Query(
-            max_length=200,
-            deprecated=True,
-            description="Refused: a start with an invitation token goes to the login page with"
-            " `?login_error=invitation_requires_post`, without a login. This link has no `Origin`"
-            " check, and a URL query is recorded by proxies that log full URLs. Send the invitation"
-            " in the body of `POST /v1/auth/oidc/{provider}/start`.",
-        ),
+        # Not in the contract any more (it was declared as deprecated until the TODO round of
+        # 2026-11-06), still read so that it stays refused: a start with an invitation token goes
+        # to the login page with `?login_error=invitation_requires_post`, without a login.
+        Query(max_length=200, include_in_schema=False),
     ] = None,
 ) -> Response:
     """``return_to``: a path on the API origin or an absolute URL on an allowed origin (else ``/``);
     query parameters that carry secrets (``token``, ``*_token``, ``invitation``, ...) are removed
-    and never used as an invitation. ``invitation``: refused, use the ``POST`` start."""
+    and never used as an invitation. An ``invitation`` query parameter is refused
+    (`?login_error=invitation_requires_post`): send invitations with the ``POST`` start."""
     from axentra.identity.oidc import OidcLoginError, login_error_url
 
     oidc = _oidc(ax)
@@ -290,6 +287,9 @@ def oidc_callback(
         # Tells the frontend that the invitation was accepted during the login (and for which
         # tenant), so it does not ask the person to confirm a used invitation again.
         target = with_query_param(target, "invitation_accepted", result.invitation_tenant_id)
+    elif result.invitation_product_id:
+        # The same for an invitation to the product team (accepted for this product).
+        target = with_query_param(target, "product_invitation_accepted", result.invitation_product_id)
     out = RedirectResponse(target, status_code=302)
     _login_cookie(ax, out, None)
     set_session_cookie(ax, out, result.session)

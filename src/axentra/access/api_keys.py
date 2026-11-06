@@ -54,9 +54,18 @@ def _status(row: dict[str, Any]) -> str:
     return "active"
 
 
-def _model(row: dict[str, Any]) -> ApiKey:
+def _model(row: dict[str, Any], withheld: frozenset[str] | None = None) -> ApiKey:
+    """The key as listed; ``withheld`` (from :meth:`Authorizer.key_withheld`) for active keys only."""
     body = row["id"].split("_", 1)[1]
-    return ApiKey.model_validate({**row, "prefix": f"axk_{body}_", "status": _status(row)})
+    status = _status(row)
+    revoked_at = row["revoked_at"]
+    extra: dict[str, Any] = {
+        "grace_until": revoked_at if status == "active" and revoked_at is not None else None,
+    }
+    if status == "active" and withheld is not None:
+        extra["creator_has_access"] = not withheld
+        extra["withheld_permissions"] = sorted(withheld)
+    return ApiKey.model_validate({**row, "prefix": f"axk_{body}_", "status": status, **extra})
 
 
 class ApiKeyService:
@@ -74,7 +83,14 @@ class ApiKeyService:
             sql += " AND revoked_at IS NULL"
         with self.db.transaction(DbScope.product(product_id), read_only=True) as tx:
             rows = tx.all(sql + " ORDER BY created_at DESC LIMIT 1000", (product_id,))
-        return [_model(r) for r in rows]
+        return [self._listed(r) for r in rows]
+
+    def _listed(self, row: dict[str, Any]) -> ApiKey:
+        """:func:`_model` with the creator's current access for an active key."""
+        if _status(row) != "active":
+            return _model(row)
+        withheld = self.authz.key_withheld(row["id"], row["product_id"], row["tenant_id"], row["permissions"])
+        return _model(row, withheld)
 
     def get_key(self, principal: Principal, product_id: str, key_id: str) -> ApiKey:
         self.authz.require(principal, "api_keys:read", product_id)
@@ -84,7 +100,7 @@ class ApiKeyService:
                 (key_id, product_id),
                 what="API key",
             )
-        return _model(row)
+        return self._listed(row)
 
     def create_key(
         self,
@@ -159,7 +175,7 @@ class ApiKeyService:
                 details={"name": name, "permissions": sorted(perms), "replaces": _replaces},
             )
             row = tx.one_or_404("SELECT * FROM axentra_api_keys WHERE id = %s", (key_id,))
-        return NewApiKey(key=_model(row), secret=full)
+        return NewApiKey(key=self._listed(row), secret=full)
 
     def rotate_key(
         self, principal: Principal, product_id: str, key_id: str, *, grace_seconds: int = 0

@@ -137,16 +137,28 @@ def safe_return_to(value: str | None, allowed_origins: Iterable[str]) -> str:
 
 
 def login_error_url(login_page: str, return_to: str | None, code: str) -> str:
-    """The login page for ``code``: on the origin of ``return_to`` when that is an absolute URL."""
+    """The login page for ``code``: on the origin of ``return_to`` when that is an absolute URL.
+
+    ``return_to`` (already checked by :func:`safe_return_to` and stripped of secrets) is passed on as
+    ``?return_to=<path>``, relative to the login page's origin, so a deep link survives a failed login.
+    It is left out when it is ``/`` or when it is not on the login page's origin (a path on the API
+    origin with an absolute ``login_page`` elsewhere)."""
     page = login_page or "/login"
     page_parts = urlsplit(page)
+    params = {"login_error": code}
     if return_to and not return_to.startswith("/"):
         origin = _origin(return_to)
         if origin:
             path = page_parts.path or "/login"
             page = origin + path + (f"?{page_parts.query}" if page_parts.query else "")
+            target = urlsplit(return_to)
+            params["return_to"] = urlunsplit(("", "", target.path or "/", target.query, target.fragment))
+    elif return_to and not page_parts.scheme:
+        params["return_to"] = return_to
+    if params.get("return_to") == "/":
+        del params["return_to"]
     sep = "&" if "?" in page else "?"
-    return f"{page}{sep}{urlencode({'login_error': code})}"
+    return f"{page}{sep}{urlencode(params)}"
 
 
 def with_query_param(url: str, key: str, value: str) -> str:
@@ -435,6 +447,8 @@ class LoginResult:
     invitation_accepted: bool = False
     #: The tenant of the invitation accepted right after the login (``invitation`` on start), if any.
     invitation_tenant_id: str | None = None
+    #: The product of a product-team invitation (``axpinv_``) accepted right after the login, if any.
+    invitation_product_id: str | None = None
     #: The host context given to :meth:`OidcService.start` (empty when none was given).
     context: dict[str, str] = field(default_factory=dict)
     identity: ExternalIdentity | None = None
@@ -718,6 +732,7 @@ class OidcService:
         )
         accepted = False
         tenant_id: str | None = None
+        product_id: str | None = None
         if invitation and self.accept_invitation is not None:
             principal = Principal(
                 actor=Actor(
@@ -735,6 +750,8 @@ class OidcService:
                 membership = self.accept_invitation(principal, invitation)
                 accepted = True
                 tenant_id = getattr(membership, "tenant_id", None)
+                if tenant_id is None:
+                    product_id = getattr(membership, "product_id", None)
             except AxentraError as exc:
                 # The login stands; the invitation can still be accepted explicitly.
                 logger.info("invitation not accepted after OIDC login: %s", exc.detail)
@@ -744,6 +761,7 @@ class OidcService:
             return_to=row["return_to"],
             invitation_accepted=accepted,
             invitation_tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+            invitation_product_id=product_id if isinstance(product_id, str) else None,
             context=context,
             identity=identity,
         )

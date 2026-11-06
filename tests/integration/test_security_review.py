@@ -288,6 +288,41 @@ def test_F4_members_enqueue_only_declared_kinds_and_handlers_are_confined(world:
     assert world.ax.authz.has(world.ax.jobs.principal_for(job2), "members:manage", pid, tid)
 
 
+def test_enqueueable_job_kinds_are_listed_per_caller(world: World) -> None:
+    pid = _product(world, "crm")
+    tid = _tenant(world, pid, "acme")
+    _member(world, pid, tid, "m@example.com", "member")
+    _member(world, pid, tid, "v@example.com", "viewer")
+    world.ax.jobs.declare("reports.export", enqueue_permission="events:publish", permissions={"records:read"})
+    world.ax.jobs.declare("reports.trusted")
+    world.ax.jobs.register("reports.cleanup", lambda ctx: None)
+    world.ax.jobs.declare("axentra.internal")  # reserved kinds are never listed
+    url = f"/v1/products/{pid}/jobs/kinds"
+    # A member holding events:publish sees only the kind opened to it.
+    m = world.login_as("m@example.com")
+    r = m.get(url, params={"tenant_id": tid})
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "any_kind": False,
+        "items": [{"kind": "reports.export", "enqueue_permission": "events:publish"}],
+    }
+    # ... and nothing at product level, where only jobs:manage enqueues.
+    assert m.get(url).json() == {"any_kind": False, "items": []}
+    # A viewer (no events:publish) sees no kind; what it lists matches what enqueue accepts.
+    v = world.login_as("v@example.com")
+    assert v.get(url, params={"tenant_id": tid}).json() == {"any_kind": False, "items": []}
+    r = v.post(f"/v1/products/{pid}/jobs", json={"kind": "reports.export", "tenant_id": tid})
+    assert r.status_code == 403
+    # An operator (jobs:manage) may enqueue any kind: all known kinds are listed.
+    for params in ({}, {"tenant_id": tid}):
+        body = world.admin.get(url, params=params).json()
+        assert body["any_kind"] is True
+        assert [k["kind"] for k in body["items"]] == ["reports.cleanup", "reports.export", "reports.trusted"]
+    # A stranger has no access to the scope.
+    world.user("x@example.com")
+    assert world.login_as("x@example.com").get(url, params={"tenant_id": tid}).status_code in (403, 404)
+
+
 # -- F5: derived API keys ----------------------------------------------------------------------------
 
 

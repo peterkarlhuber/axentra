@@ -124,6 +124,11 @@ def test_custom_roles(world):
     assert world.admin.delete(f"/v1/products/{pid}/roles/{role_id}").status_code == 409
     roles = world.admin.get(f"/v1/products/{pid}/roles").json()
     assert {r["key"] for r in roles} >= {"product_owner", "member", "auditor"}
+    # AXS-B5: built-in roles carry stable translation keys, custom roles none.
+    by_key = {r["key"]: r for r in roles}
+    assert by_key["member"]["name_key"] == "axentra.role.member.name"
+    assert by_key["member"]["description_key"] == "axentra.role.member.description"
+    assert by_key["auditor"]["name_key"] is None and by_key["auditor"]["description_key"] is None
 
 
 def test_unauthenticated_requests(world):
@@ -138,6 +143,30 @@ def test_settings_do_not_leak_secrets(world):
     text = r.text
     assert "master_keys" not in text and world.ax.settings.security.master_keys.split(":")[1] not in text
     assert "postgres" not in text
+    # The job and webhook retry schedule, so clients can show it.
+    assert r.json()["events"] == {
+        "default_max_attempts": 5,
+        "backoff_base_seconds": 2.0,
+        "backoff_max_seconds": 3600.0,
+        "webhook_max_attempts": 8,
+        "webhook_backoff_base_seconds": 120.0,
+        "webhook_backoff_max_seconds": 21600.0,
+        "webhook_timeout_seconds": 10.0,
+        "lease_seconds": 60,
+    }
+
+
+def test_settings_omit_the_events_schedule_without_the_module(ax_factory):
+    from fastapi.testclient import TestClient
+
+    from axentra.api.app import create_app
+    from tests.integration.conftest import bootstrap_admin
+
+    ax = ax_factory(modules=["identity", "tenancy", "access", "audit"])
+    app = create_app(axentra=ax, start=False)
+    admin = bootstrap_admin(ax, app)
+    assert isinstance(admin.client, TestClient)
+    assert admin.get("/v1/settings").json()["events"] == {}
 
 
 def test_audit_trail_records_changes(world):

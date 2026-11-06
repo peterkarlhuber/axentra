@@ -48,6 +48,25 @@ class KindStats(BaseModel):
     cancelled: int = 0
 
 
+class EnqueueableKind(BaseModel):
+    kind: str
+    enqueue_permission: str | None = Field(
+        default=None,
+        description="The permission that opens this kind to callers without `jobs:manage` (`null`: only"
+        " `jobs:manage` holders may enqueue it)",
+    )
+
+
+class EnqueueableKinds(BaseModel):
+    """The job kinds the caller may enqueue in a scope, as declared in the answering API process."""
+
+    any_kind: bool = Field(
+        description="The caller holds `jobs:manage` here and may enqueue any kind, also kinds this"
+        " process does not declare"
+    )
+    items: list[EnqueueableKind]
+
+
 class JobStats(BaseModel):
     """Dashboard summary of the jobs of a product (optionally one tenant)."""
 

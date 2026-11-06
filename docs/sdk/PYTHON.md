@@ -100,6 +100,11 @@ the credentials. Every request carries
 | `billing` | `plans`, `tenant_plans`, `create_plan`, `subscriptions`, `subscription`, `subscribe`, `change_plan`, `cancel`, `resume`, `entitlements` |
 | `notify` | `send(idempotency_key=)`, `messages`, `iter_messages`, `message` |
 | `audit` | `list`, `iter`, `get` |
+| `events` | `publish(idempotency_key=)`, `list` (page; `type` exact or `prefix.*`), `iter`, `get` |
+| `jobs` | `enqueue(idempotency_key=)`, `list` (page), `iter`, `get`, `retry`, `cancel`, `stats`, `kinds` (what the caller may enqueue) |
+| `schedules` | `create` (`interval_seconds` or `cron`), `list` (page), `iter`, `get`, `update(version=)`, `delete(version=)` |
+| `webhooks` | `create` and `rotate_secret` (return the signing `secret` once), `list` (page), `iter`, `get`, `update(version=)`, `delete(version=)`, `test`, `deliveries`, `iter_deliveries`, `delivery`, `redeliver` |
+| `search` | `index` (add or replace a document), `query` (page; `kinds=`), `iter`, `document`, `remove`, `kinds` |
 
 Models (`axentra_client.models`) are pydantic v2 models. Following the API conventions they
 **never reject what they do not know**: unknown fields are kept (`model_extra`), enum-like fields
@@ -109,7 +114,8 @@ limits are `Decimal`. `version` arguments send `If-Match`; a stale version raise
 
 `Idempotency-Key`: `usage.record` always sends one. Pass your own stable key (request id, order
 id) so that retries are safe; without one a random key is generated and the call is not safe to
-retry. `notify.send` sends one only when you pass it.
+retry. `notify.send`, `events.publish` and `jobs.enqueue` send one only when you pass it; a key
+reused with a different request raises `AxentraApiError(409)`.
 
 ## Errors
 
@@ -122,11 +128,11 @@ Both derive from `AxentraError`.
 
 ## Endpoints without a typed method
 
-New endpoints (for example the events/jobs/webhooks module when it lands) are reachable at once
-through the generic methods, with the same authentication and error mapping:
+New endpoints are reachable at once through the generic methods, with the same authentication
+and error mapping:
 
 ```python
-jobs = ax.request_json("GET", f"/v1/products/{pid}/jobs", params={"status": "queued"})
+templates = ax.request_json("GET", f"/v1/products/{pid}/notify/templates")
 with ax.stream("GET", f"/v1/products/{pid}/exports/{eid}/content") as resp: ...
 ```
 
@@ -162,7 +168,9 @@ AXENTRA_TEST_DATABASE_URL=postgresql://postgres:pg@127.0.0.1:5432/postgres pytes
 
 - Covers the main resources (table above), not every operation (no OIDC browser flow, templates,
   preferences, reservations, meters update/delete, plan update/delete, checkout, storage quotas,
-  users admin). Use `request_json` for those until typed methods are added.
+  users admin, product invitations, permission declarations). Use `request_json` for those until
+  typed methods are added. The event and job streams (server-sent events) have no parser; read
+  them with `stream()`.
 - No automatic retries or rate-limit backoff (use idempotency keys and `retry_after`).
 - `files.upload` in the async client reads a given file object synchronously while sending.
 - Not yet published to PyPI.

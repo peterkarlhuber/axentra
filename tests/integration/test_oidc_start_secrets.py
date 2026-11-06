@@ -145,7 +145,7 @@ def test_post_start_refusals(world) -> None:  # type: ignore[no-untyped-def]
     w.ax.settings.security.login_rate_per_minute = 0
     r = b.post(START, json={"return_to": "http://studio.test/x"})
     assert r.status_code == 200, r.text
-    assert r.json()["redirect_url"] == "http://studio.test/login?login_error=rate_limited"
+    assert r.json()["redirect_url"] == "http://studio.test/login?login_error=rate_limited&return_to=%2Fx"
     assert "set-cookie" not in r.headers
 
 
@@ -276,7 +276,10 @@ def test_get_start_with_invitation_is_refused(world, headers: dict[str, str]) ->
         follow_redirects=False,
     )
     assert r.status_code == 302, r.text
-    assert r.headers["location"] == "http://studio.test/login?login_error=invitation_requires_post"
+    # The return_to comes back without the token (a deep link survives, the secret does not).
+    assert r.headers["location"] == (
+        "http://studio.test/login?login_error=invitation_requires_post&return_to=%2Finvitations%2Faccept"
+    )
     assert "set-cookie" not in r.headers
     with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
         assert tx.scalar("SELECT count(*) FROM axentra_login_states") == 0
@@ -337,7 +340,9 @@ def test_refused_login_audit_and_error_redirect_hold_no_token(world) -> None:  #
         w, b, return_to=f"http://studio.test/invitations/accept/?token={quote(token, safe='')}"
     ).json()["redirect_url"]
     done = b.get(w.idp.authorize(location, "kim-sub", email="kim@example.com"), follow_redirects=False)
-    assert done.headers["location"] == "http://studio.test/login?login_error=login_failed"
+    assert done.headers["location"] == (
+        "http://studio.test/login?login_error=login_failed&return_to=%2Finvitations%2Faccept%2F"
+    )
     events = w.admin.get("/v1/audit", params={"action": "identity.login", "outcome": "denied"}).json()
     assert events["items"]
     _assert_nowhere(w, token, json.dumps(events))

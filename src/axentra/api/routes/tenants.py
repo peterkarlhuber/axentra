@@ -57,8 +57,13 @@ def list_tenants(
     status: Literal["active", "suspended"] | None = None,
     limit: Limit = None,
     cursor: Cursor = None,
+    sort: Literal["id", "name"] = Query(
+        "id", description="`id` (default, oldest first) or `name` (case-insensitive, then id)"
+    ),
 ) -> Page[Tenant]:
-    return ax.tenancy.list_tenants(principal, product_id, q=q, status=status, limit=limit, cursor=cursor)
+    return ax.tenancy.list_tenants(
+        principal, product_id, q=q, status=status, limit=limit, cursor=cursor, sort=sort
+    )
 
 
 @router.post(T, response_model=Tenant, status_code=201)
@@ -168,4 +173,8 @@ def revoke_invitation(
     "/invitations/accept", response_model=Membership, summary="Accept an invitation as the logged-in user"
 )
 def accept_invitation(body: InvitationAccept, principal: CurrentPrincipal, ax: Ax) -> Membership:
+    """A refusal answers ``403 forbidden`` with a ``reason`` member: ``email_mismatch`` (the
+    invitation was sent to another email address), ``scope_inactive`` (the tenant or product is
+    not active; the invitation stays open) or ``inviter_lost_access`` (its sender can no longer
+    grant the role). An unknown, used, revoked or expired token answers ``404``."""
     return ax.tenancy.accept_invitation(principal, body.token)
