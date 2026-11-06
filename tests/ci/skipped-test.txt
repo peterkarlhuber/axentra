@@ -1,0 +1,4 @@
+# Skipped tests expected in the CI job "test" (.github/workflows/ci.yml), checked by scripts/check_skips.py.
+# One line per test: <classname>::<name>  # <reason>. Any difference fails the job; a change here needs a reason
+# in the pull request (MUP-ONA plan 10.8). The job runs with PostgreSQL and every needed extra, so no test is
+# expected to skip.

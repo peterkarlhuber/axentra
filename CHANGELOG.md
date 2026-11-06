@@ -6,6 +6,10 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
 
 ## [Unreleased]
 
+- CI (MUP-ONA A0): every pytest job compares its skipped tests with `tests/ci/skipped-<job>.txt`
+  (`scripts/check_skips.py`, one line per expected skip with its reason; none today), replacing the inline
+  "no skips" checks; the dependency audit pins `pip-audit` and takes reviewed exceptions from
+  `PIP_AUDIT_IGNORE` (empty). `docs/TODO.md` lists the open MUP-ONA packages for Axentra.
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
