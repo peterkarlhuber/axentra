@@ -5,11 +5,12 @@ from __future__ import annotations
 from decimal import Decimal
 import io
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from axentra_client import API_VERSION, AsyncAxentraClient, AxentraApiError, AxentraClient
-from axentra_client.models import Membership, NewApiKey, Page, Record, Tenant
+from axentra_client.models import Job, Membership, NewApiKey, Page, Record, Tenant
 
 from .conftest import ADMIN_EMAIL, Server, unique
 
@@ -316,6 +317,88 @@ def test_audit_list_iter_get(admin: AxentraClient, product: str, tenant: str) ->
     assert {"tenancy.product.create", "tenancy.tenant.create"} <= {e.action for e in events}
     assert admin.audit.get(events[0].id).id == events[0].id
     assert all(e.actor_kind == "user" and e.actor_display == ADMIN_EMAIL for e in events)
+
+
+def test_events_jobs_schedules_and_webhooks(
+    server: Server, admin: AxentraClient, product: str, tenant: str
+) -> None:
+    hook = admin.webhooks.create(product, "https://hooks.example.com/axentra", ["sdk.*"], description="SDK")
+    assert hook.secret and hook.endpoint.event_types == ["sdk.*"] and hook.endpoint.enabled
+    endpoint = admin.webhooks.update(
+        product, hook.endpoint.id, description="SDK hook", version=hook.endpoint.version
+    )
+    assert endpoint.description == "SDK hook" and endpoint.version == hook.endpoint.version + 1
+    with pytest.raises(AxentraApiError) as stale:
+        admin.webhooks.update(product, endpoint.id, enabled=False, version=hook.endpoint.version)
+    assert stale.value.status == 412
+    rotated = admin.webhooks.rotate_secret(product, endpoint.id, grace_seconds=60)
+    assert rotated.secret != hook.secret and rotated.endpoint.has_previous_secret
+    assert [w.id for w in admin.webhooks.iter(product)] == [endpoint.id]
+
+    key = _key(admin, product, ["events:publish"], tenant=tenant)
+    c = server.client(api_key=key.secret)
+    event = c.events.publish(product, tenant, "sdk.created", {"n": 1}, idempotency_key="sdk-e-1")
+    again = c.events.publish(product, tenant, "sdk.created", {"n": 1}, idempotency_key="sdk-e-1")
+    assert again.id == event.id and event.data == {"n": 1} and event.actor_kind == "api_key"
+    assert [e.id for e in admin.events.iter(product, type="sdk.*", page_size=1)] == [event.id]
+    assert admin.events.get(product, event.id).type == "sdk.created"
+    # Deliveries are created by the worker's fan-out (not running here); their parsing, test()
+    # and redeliver() are covered by the unit tests.
+    assert admin.webhooks.deliveries(product, endpoint.id, status="failed").items == []
+
+    def enqueue(**extra: Any) -> Job:
+        return admin.jobs.enqueue(
+            product, "sdk.report", tenant_id=tenant, delay_seconds=3600, idempotency_key="sdk-j-1", **extra
+        )
+
+    job = enqueue(payload={"month": 11})
+    assert job.status == "queued" and job.payload == {"month": 11} and job.tenant_id == tenant
+    assert enqueue(payload={"month": 11}).id == job.id
+    with pytest.raises(AxentraApiError) as reused:
+        enqueue(payload={"month": 12})
+    assert reused.value.status == 409
+    assert [j.id for j in admin.jobs.iter(product, kind="sdk.report")] == [job.id]
+    assert admin.jobs.get(product, job.id).kind == "sdk.report"
+    stats = admin.jobs.stats(product, tenant_id=tenant)
+    assert any(k.kind == "sdk.report" and k.queued == 1 for k in stats.by_kind)
+    assert admin.jobs.kinds(product, tenant_id=tenant).any_kind is True
+    assert admin.jobs.cancel(product, job.id).status == "cancelled"
+    with pytest.raises(AxentraApiError) as no_perm:
+        c.jobs.enqueue(product, "sdk.report", tenant_id=tenant)
+    assert no_perm.value.status == 403
+
+    schedule = admin.schedules.create(product, "SDK nightly", "sdk.report", cron="0 3 * * *", enabled=False)
+    assert schedule.cron == "0 3 * * *" and schedule.interval_seconds is None
+    changed = admin.schedules.update(product, schedule.id, interval_seconds=900, version=schedule.version)
+    assert changed.interval_seconds == 900 and changed.cron is None
+    assert [s.id for s in admin.schedules.iter(product)] == [schedule.id]
+    assert admin.schedules.get(product, schedule.id).version == changed.version
+    admin.schedules.delete(product, schedule.id, version=changed.version)
+    admin.webhooks.delete(product, endpoint.id)
+    with pytest.raises(AxentraApiError) as gone:
+        admin.webhooks.get(product, endpoint.id)
+    assert gone.value.status == 404
+
+
+def test_search_index_query_kinds_and_remove(
+    server: Server, admin: AxentraClient, product: str, tenant: str
+) -> None:
+    key = _key(admin, product, ["search:query", "search:index"], tenant=tenant)
+    c = server.client(api_key=key.secret)
+    doc = c.search.index(product, tenant, "note", "n-1", title="Quarterly plan", body="budget for Q4")
+    assert doc.version == 1 and doc.kind == "note"
+    c.search.index(product, tenant, "task", "t-1", title="Plan the offsite", metadata={"due": "2026-12-01"})
+    hits = c.search.query(product, tenant, "plan")
+    assert {h.ref_id for h in hits.items} == {"n-1", "t-1"}
+    only_tasks = [h.ref_id for h in c.search.iter(product, tenant, "plan", kinds=["task"], page_size=1)]
+    assert only_tasks == ["t-1"]
+    assert {(k.kind, k.count) for k in c.search.kinds(product, tenant)} == {("note", 1), ("task", 1)}
+    assert c.search.document(product, tenant, "task", "t-1").metadata == {"due": "2026-12-01"}
+    c.search.remove(product, tenant, "note", "n-1")
+    assert [h.ref_id for h in c.search.query(product, tenant, "plan").items] == ["t-1"]
+    with pytest.raises(AxentraApiError) as gone:
+        c.search.document(product, tenant, "note", "n-1")
+    assert gone.value.status == 404
 
 
 @pytest.mark.anyio

@@ -161,5 +161,5 @@ grant `search:index` through a custom role.
   of a kind" endpoint.
 - **Paging is offset based** (not a snapshot) and bounded by `search.max_offset`.
 - `metadata` is returned but not searchable or filterable.
-- Typed methods in the Python SDK (`axentra-client`) do not exist yet; use `request_json()`. The
-  TypeScript SDK types are generated and include the search endpoints.
+- The Python SDK (`axentra-client`) has typed methods (`client.search`); the TypeScript SDK types
+  are generated and include the search endpoints.

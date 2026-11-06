@@ -35,11 +35,16 @@ from axentra_client._base import (
 from axentra_client.models import (
     ApiKey,
     AuditEvent,
+    Delivery,
     DownloadUrl,
     EffectiveLimit,
+    EnqueueableKinds,
     Entitlements,
+    Event,
     FileInfo,
     Invitation,
+    Job,
+    JobStats,
     Me,
     Membership,
     Message,
@@ -48,6 +53,7 @@ from axentra_client.models import (
     MeterUsage,
     NewApiKey,
     NewInvitation,
+    NewWebhookSecret,
     Page,
     PermissionInfo,
     Plan,
@@ -55,6 +61,10 @@ from axentra_client.models import (
     ProductMember,
     Record,
     Role,
+    Schedule,
+    SearchDocument,
+    SearchHit,
+    SearchKindCount,
     Session,
     SessionInfo,
     Subscription,
@@ -62,6 +72,7 @@ from axentra_client.models import (
     UsageEvent,
     UsageRecordResult,
     User,
+    WebhookEndpoint,
 )
 
 M = TypeVar("M", bound=BaseModel)
@@ -143,6 +154,11 @@ class AxentraClient:
         self.billing = Billing(self)
         self.notify = Notify(self)
         self.audit = Audit(self)
+        self.events = Events(self)
+        self.jobs = Jobs(self)
+        self.schedules = Schedules(self)
+        self.webhooks = Webhooks(self)
+        self.search = Search(self)
 
     # -- lifecycle and credentials ---------------------------------------------------------------
 
@@ -1225,3 +1241,452 @@ class Audit(_Resource):
 
 
 __all__ = ["CSRF_HEADER", "AxentraClient"]
+
+
+class Events(_Resource):
+    """Domain events: publish into a tenant, list and read (``events:read``/``events:publish``).
+    The live stream (``GET .../events/stream``, server-sent events) is reachable through
+    ``client.stream(...)``."""
+
+    def publish(
+        self,
+        product_id: str,
+        tenant_id: str,
+        type: str,
+        data: Json | None = None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Event:
+        """Publish an event; matching webhooks are delivered asynchronously. With an
+        ``idempotency_key``, a repeated call returns the original event."""
+        headers = {"Idempotency-Key": check_idempotency_key(idempotency_key)} if idempotency_key else None
+        result: Event = self._c._send(
+            "POST", _tenant(product_id, tenant_id, "events"), Event, _body(type=type, data=data), headers
+        )
+        return result
+
+    def list(
+        self,
+        product_id: str,
+        *,
+        tenant_id: str | None = None,
+        type: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Event]:
+        """Newest first. ``type`` is an exact type or a prefix ending in ``*``."""
+        params = {"tenant_id": tenant_id, "type": type, "limit": limit, "cursor": cursor}
+        result: Page[Event] = self._c._get(_product(product_id, "events"), Page[Event], params)
+        return result
+
+    def iter(
+        self,
+        product_id: str,
+        *,
+        tenant_id: str | None = None,
+        type: str | None = None,
+        page_size: int | None = None,
+    ) -> Iterator[Event]:
+        return self._c._iterate(
+            _product(product_id, "events"), Event, {"tenant_id": tenant_id, "type": type}, page_size
+        )
+
+    def get(self, product_id: str, event_id: str) -> Event:
+        result: Event = self._c._get(_product(product_id, "events", event_id), Event)
+        return result
+
+
+class Jobs(_Resource):
+    """Background jobs of a product: enqueue, list, inspect, retry and cancel."""
+
+    def enqueue(
+        self,
+        product_id: str,
+        kind: str,
+        payload: Json | None = None,
+        *,
+        tenant_id: str | None = None,
+        priority: int | None = None,
+        delay_seconds: float | None = None,
+        run_after: datetime | None = None,
+        max_attempts: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> Job:
+        """Enqueue a job. Callers without ``jobs:manage`` need a ``tenant_id`` and a kind opened
+        to them (see ``kinds()``). With an ``idempotency_key``, a repeated call returns the
+        original job."""
+        body = _body(
+            kind=kind,
+            payload=payload,
+            tenant_id=tenant_id,
+            priority=priority,
+            delay_seconds=delay_seconds,
+            run_after=run_after.isoformat() if run_after else None,
+            max_attempts=max_attempts,
+        )
+        headers = {"Idempotency-Key": check_idempotency_key(idempotency_key)} if idempotency_key else None
+        result: Job = self._c._send("POST", _product(product_id, "jobs"), Job, body, headers)
+        return result
+
+    def list(
+        self,
+        product_id: str,
+        *,
+        status: str | None = None,
+        kind: str | None = None,
+        tenant_id: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Job]:
+        """Newest first."""
+        params = {"status": status, "kind": kind, "tenant_id": tenant_id, "limit": limit, "cursor": cursor}
+        result: Page[Job] = self._c._get(_product(product_id, "jobs"), Page[Job], params)
+        return result
+
+    def iter(
+        self,
+        product_id: str,
+        *,
+        status: str | None = None,
+        kind: str | None = None,
+        tenant_id: str | None = None,
+        page_size: int | None = None,
+    ) -> Iterator[Job]:
+        return self._c._iterate(
+            _product(product_id, "jobs"),
+            Job,
+            {"status": status, "kind": kind, "tenant_id": tenant_id},
+            page_size,
+        )
+
+    def get(self, product_id: str, job_id: str) -> Job:
+        result: Job = self._c._get(_product(product_id, "jobs", job_id), Job)
+        return result
+
+    def retry(self, product_id: str, job_id: str) -> Job:
+        """Re-queue a failed or dead job."""
+        result: Job = self._c._send("POST", _product(product_id, "jobs", job_id, "retry"), Job)
+        return result
+
+    def cancel(self, product_id: str, job_id: str) -> Job:
+        """Cancel a queued job, or ask a running one to stop (``cancel_requested``)."""
+        result: Job = self._c._send("POST", _product(product_id, "jobs", job_id, "cancel"), Job)
+        return result
+
+    def stats(self, product_id: str, *, tenant_id: str | None = None) -> JobStats:
+        result: JobStats = self._c._get(
+            _product(product_id, "jobs", "stats"), JobStats, {"tenant_id": tenant_id}
+        )
+        return result
+
+    def kinds(self, product_id: str, *, tenant_id: str | None = None) -> EnqueueableKinds:
+        """The job kinds the caller may enqueue (in ``tenant_id`` when given)."""
+        result: EnqueueableKinds = self._c._get(
+            _product(product_id, "jobs", "kinds"), EnqueueableKinds, {"tenant_id": tenant_id}
+        )
+        return result
+
+
+class Schedules(_Resource):
+    """Recurring jobs (an interval or a cron expression)."""
+
+    def create(
+        self,
+        product_id: str,
+        name: str,
+        kind: str,
+        *,
+        interval_seconds: int | None = None,
+        cron: str | None = None,
+        payload: Json | None = None,
+        tenant_id: str | None = None,
+        enabled: bool | None = None,
+        priority: int | None = None,
+        max_attempts: int | None = None,
+    ) -> Schedule:
+        """Pass exactly one of ``interval_seconds`` and ``cron``."""
+        if (interval_seconds is None) == (cron is None):
+            raise ValueError("pass exactly one of interval_seconds or cron")
+        body = _body(
+            name=name,
+            kind=kind,
+            interval_seconds=interval_seconds,
+            cron=cron,
+            payload=payload,
+            tenant_id=tenant_id,
+            enabled=enabled,
+            priority=priority,
+            max_attempts=max_attempts,
+        )
+        result: Schedule = self._c._send("POST", _product(product_id, "schedules"), Schedule, body)
+        return result
+
+    def list(
+        self,
+        product_id: str,
+        *,
+        tenant_id: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Schedule]:
+        params = {"tenant_id": tenant_id, "limit": limit, "cursor": cursor}
+        result: Page[Schedule] = self._c._get(_product(product_id, "schedules"), Page[Schedule], params)
+        return result
+
+    def iter(
+        self, product_id: str, *, tenant_id: str | None = None, page_size: int | None = None
+    ) -> Iterator[Schedule]:
+        return self._c._iterate(
+            _product(product_id, "schedules"), Schedule, {"tenant_id": tenant_id}, page_size
+        )
+
+    def get(self, product_id: str, schedule_id: str) -> Schedule:
+        result: Schedule = self._c._get(_product(product_id, "schedules", schedule_id), Schedule)
+        return result
+
+    def update(
+        self,
+        product_id: str,
+        schedule_id: str,
+        *,
+        name: str | None = None,
+        kind: str | None = None,
+        interval_seconds: int | None = None,
+        cron: str | None = None,
+        payload: Json | None = None,
+        enabled: bool | None = None,
+        priority: int | None = None,
+        max_attempts: int | None = None,
+        version: int | None = None,
+    ) -> Schedule:
+        """Change the given fields. Setting ``cron`` switches an interval schedule to cron and
+        the other way round. With ``version``, a concurrent change fails with 412."""
+        body = _body(
+            name=name,
+            kind=kind,
+            interval_seconds=interval_seconds,
+            cron=cron,
+            payload=payload,
+            enabled=enabled,
+            priority=priority,
+            max_attempts=max_attempts,
+        )
+        result: Schedule = self._c._send(
+            "PATCH", _product(product_id, "schedules", schedule_id), Schedule, body, if_match(version)
+        )
+        return result
+
+    def delete(self, product_id: str, schedule_id: str, *, version: int | None = None) -> None:
+        self._c.request(
+            "DELETE", _product(product_id, "schedules", schedule_id), headers=if_match(version)
+        )
+
+
+class Webhooks(_Resource):
+    """Webhook endpoints and their deliveries. The signing secret is returned only by
+    ``create()`` and ``rotate_secret()``."""
+
+    def create(
+        self,
+        product_id: str,
+        url: str,
+        event_types: Sequence[str],
+        *,
+        tenant_id: str | None = None,
+        description: str | None = None,
+        enabled: bool | None = None,
+    ) -> NewWebhookSecret:
+        body = _body(
+            url=url,
+            event_types=list(event_types),
+            tenant_id=tenant_id,
+            description=description,
+            enabled=enabled,
+        )
+        result: NewWebhookSecret = self._c._send(
+            "POST", _product(product_id, "webhooks"), NewWebhookSecret, body
+        )
+        return result
+
+    def list(
+        self, product_id: str, *, limit: int | None = None, cursor: str | None = None
+    ) -> Page[WebhookEndpoint]:
+        result: Page[WebhookEndpoint] = self._c._get(
+            _product(product_id, "webhooks"), Page[WebhookEndpoint], {"limit": limit, "cursor": cursor}
+        )
+        return result
+
+    def iter(self, product_id: str, *, page_size: int | None = None) -> Iterator[WebhookEndpoint]:
+        return self._c._iterate(_product(product_id, "webhooks"), WebhookEndpoint, {}, page_size)
+
+    def get(self, product_id: str, webhook_id: str) -> WebhookEndpoint:
+        result: WebhookEndpoint = self._c._get(
+            _product(product_id, "webhooks", webhook_id), WebhookEndpoint
+        )
+        return result
+
+    def update(
+        self,
+        product_id: str,
+        webhook_id: str,
+        *,
+        url: str | None = None,
+        event_types: Sequence[str] | None = None,
+        description: str | None = None,
+        enabled: bool | None = None,
+        version: int | None = None,
+    ) -> WebhookEndpoint:
+        body = _body(
+            url=url,
+            event_types=list(event_types) if event_types is not None else None,
+            description=description,
+            enabled=enabled,
+        )
+        result: WebhookEndpoint = self._c._send(
+            "PATCH", _product(product_id, "webhooks", webhook_id), WebhookEndpoint, body, if_match(version)
+        )
+        return result
+
+    def delete(self, product_id: str, webhook_id: str, *, version: int | None = None) -> None:
+        self._c.request(
+            "DELETE", _product(product_id, "webhooks", webhook_id), headers=if_match(version)
+        )
+
+    def rotate_secret(
+        self, product_id: str, webhook_id: str, *, grace_seconds: int | None = None
+    ) -> NewWebhookSecret:
+        """A new signing secret; with ``grace_seconds``, the old one also signs until then."""
+        result: NewWebhookSecret = self._c._send(
+            "POST",
+            _product(product_id, "webhooks", webhook_id, "rotate-secret"),
+            NewWebhookSecret,
+            _body(grace_seconds=grace_seconds),
+        )
+        return result
+
+    def test(self, product_id: str, webhook_id: str) -> Delivery:
+        """Send a test event to the endpoint now and return the delivery."""
+        result: Delivery = self._c._send(
+            "POST", _product(product_id, "webhooks", webhook_id, "test"), Delivery
+        )
+        return result
+
+    def deliveries(
+        self,
+        product_id: str,
+        webhook_id: str,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Delivery]:
+        result: Page[Delivery] = self._c._get(
+            _product(product_id, "webhooks", webhook_id, "deliveries"),
+            Page[Delivery],
+            {"status": status, "limit": limit, "cursor": cursor},
+        )
+        return result
+
+    def iter_deliveries(
+        self,
+        product_id: str,
+        webhook_id: str,
+        *,
+        status: str | None = None,
+        page_size: int | None = None,
+    ) -> Iterator[Delivery]:
+        return self._c._iterate(
+            _product(product_id, "webhooks", webhook_id, "deliveries"),
+            Delivery,
+            {"status": status},
+            page_size,
+        )
+
+    def delivery(self, product_id: str, webhook_id: str, delivery_id: str) -> Delivery:
+        result: Delivery = self._c._get(
+            _product(product_id, "webhooks", webhook_id, "deliveries", delivery_id), Delivery
+        )
+        return result
+
+    def redeliver(self, product_id: str, webhook_id: str, delivery_id: str) -> Delivery:
+        """Queue the delivery again (202)."""
+        result: Delivery = self._c._send(
+            "POST",
+            _product(product_id, "webhooks", webhook_id, "deliveries", delivery_id, "redeliver"),
+            Delivery,
+        )
+        return result
+
+
+class Search(_Resource):
+    """Full-text search inside one tenant (``search:query``) and its index (``search:index``)."""
+
+    def query(
+        self,
+        product_id: str,
+        tenant_id: str,
+        q: str,
+        *,
+        kinds: Sequence[str] | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[SearchHit]:
+        """Best matches first. ``q`` takes words, "phrases" and -exclusions."""
+        params = {"q": q, "kind": list(kinds) if kinds else None, "limit": limit, "cursor": cursor}
+        result: Page[SearchHit] = self._c._get(
+            _tenant(product_id, tenant_id, "search"), Page[SearchHit], params
+        )
+        return result
+
+    def iter(
+        self,
+        product_id: str,
+        tenant_id: str,
+        q: str,
+        *,
+        kinds: Sequence[str] | None = None,
+        page_size: int | None = None,
+    ) -> Iterator[SearchHit]:
+        return self._c._iterate(
+            _tenant(product_id, tenant_id, "search"),
+            SearchHit,
+            {"q": q, "kind": list(kinds) if kinds else None},
+            page_size,
+        )
+
+    def index(
+        self,
+        product_id: str,
+        tenant_id: str,
+        kind: str,
+        ref_id: str,
+        *,
+        title: str = "",
+        body: str = "",
+        metadata: Json | None = None,
+    ) -> SearchDocument:
+        """Add or replace the document for ``(kind, ref_id)``."""
+        result: SearchDocument = self._c._send(
+            "PUT",
+            _tenant(product_id, tenant_id, "search", "documents", kind, ref_id),
+            SearchDocument,
+            _body(title=title, body=body, metadata=metadata),
+        )
+        return result
+
+    def document(self, product_id: str, tenant_id: str, kind: str, ref_id: str) -> SearchDocument:
+        result: SearchDocument = self._c._get(
+            _tenant(product_id, tenant_id, "search", "documents", kind, ref_id), SearchDocument
+        )
+        return result
+
+    def remove(self, product_id: str, tenant_id: str, kind: str, ref_id: str) -> None:
+        """Remove the document from the index."""
+        self._c.request("DELETE", _tenant(product_id, tenant_id, "search", "documents", kind, ref_id))
+
+    def kinds(self, product_id: str, tenant_id: str) -> list[SearchKindCount]:
+        """The tenant's indexed kinds with their document counts."""
+        result: list[SearchKindCount] = self._c._get(
+            _tenant(product_id, tenant_id, "search", "kinds"), list[SearchKindCount]
+        )
+        return result

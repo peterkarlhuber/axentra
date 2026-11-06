@@ -246,6 +246,36 @@ def test_every_client_path_exists_in_the_contract() -> None:
         lambda: ax.notify.message("P", "M"),
         lambda: ax.audit.list(),
         lambda: ax.audit.get("A"),
+        lambda: ax.events.publish("P", "T", "x.y"),
+        lambda: ax.events.list("P"),
+        lambda: ax.events.get("P", "E"),
+        lambda: ax.jobs.enqueue("P", "k"),
+        lambda: ax.jobs.list("P"),
+        lambda: ax.jobs.get("P", "J"),
+        lambda: ax.jobs.retry("P", "J"),
+        lambda: ax.jobs.cancel("P", "J"),
+        lambda: ax.jobs.stats("P"),
+        lambda: ax.jobs.kinds("P"),
+        lambda: ax.schedules.create("P", "n", "k", interval_seconds=60),
+        lambda: ax.schedules.list("P"),
+        lambda: ax.schedules.get("P", "S"),
+        lambda: ax.schedules.update("P", "S", name="n"),
+        lambda: ax.schedules.delete("P", "S"),
+        lambda: ax.webhooks.create("P", "https://h", ["*"]),
+        lambda: ax.webhooks.list("P"),
+        lambda: ax.webhooks.get("P", "W"),
+        lambda: ax.webhooks.update("P", "W", enabled=False),
+        lambda: ax.webhooks.delete("P", "W"),
+        lambda: ax.webhooks.rotate_secret("P", "W"),
+        lambda: ax.webhooks.test("P", "W"),
+        lambda: ax.webhooks.deliveries("P", "W"),
+        lambda: ax.webhooks.delivery("P", "W", "D"),
+        lambda: ax.webhooks.redeliver("P", "W", "D"),
+        lambda: ax.search.query("P", "T", "q"),
+        lambda: ax.search.index("P", "T", "k", "R", title="t"),
+        lambda: ax.search.document("P", "T", "k", "R"),
+        lambda: ax.search.remove("P", "T", "k", "R"),
+        lambda: ax.search.kinds("P", "T"),
     ]
     for call in calls:
         with pytest.raises(AxentraApiError):
@@ -537,6 +567,249 @@ def test_notify_send_validates_the_recipient() -> None:
         ax.notify.send("p", "t", "welcome", to_email="a@x", idempotency_key="n-1")
     assert json.loads(rec.last.content) == {"template_key": "welcome", "to": {"email": "a@x"}}
     assert rec.last.headers["idempotency-key"] == "n-1"
+
+
+# -- events, jobs, schedules, webhooks ------------------------------------------------------------
+
+
+def _job(**extra: Any) -> dict[str, Any]:
+    return {
+        "id": "job_1",
+        "product_id": "p",
+        "tenant_id": "t",
+        "kind": "report.build",
+        "status": "queued",
+        "run_after": NOW,
+        "max_attempts": 5,
+        "created_at": NOW,
+        "updated_at": NOW,
+        **extra,
+    }
+
+
+def _endpoint() -> dict[str, Any]:
+    return {
+        "id": "whk_1",
+        "product_id": "p",
+        "tenant_id": None,
+        "url": "https://hooks.example.com/a",
+        "description": "",
+        "event_types": ["order.*"],
+        "enabled": True,
+        "version": 2,
+        "created_by": "usr_1",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+
+
+def test_jobs_send_the_body_idempotency_key_and_filters() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/kinds"):
+            return httpx.Response(200, json={"any_kind": False, "items": [{"kind": "report.build"}]})
+        if request.url.path.endswith("/stats"):
+            return httpx.Response(
+                200,
+                json={
+                    "counts": {"queued": 1},
+                    "failed_last_24h": 0,
+                    "succeeded_last_24h": 2,
+                    "oldest_queued_at": NOW,
+                    "by_kind": [{"kind": "report.build", "queued": 1}],
+                },
+            )
+        if request.method == "GET" and request.url.path.endswith("/jobs"):
+            return httpx.Response(200, json={"items": [_job()], "next_cursor": None})
+        return httpx.Response(201 if request.method == "POST" else 200, json=_job(status="cancelled"))
+
+    ax, rec = client(handler, api_key="k")
+    job = ax.jobs.enqueue("p", "report.build", {"month": 11}, tenant_id="t", idempotency_key="r-11")
+    assert rec.last.method == "POST" and rec.last.url.path == "/v1/products/p/jobs"
+    assert rec.last.headers["idempotency-key"] == "r-11"
+    assert json.loads(rec.last.content) == {
+        "kind": "report.build",
+        "payload": {"month": 11},
+        "tenant_id": "t",
+    }
+    assert job.status == "cancelled" and job.max_attempts == 5
+    page = ax.jobs.list("p", status="queued", kind="report.build")
+    assert dict(rec.last.url.params) == {"status": "queued", "kind": "report.build"}
+    assert [j.id for j in page.items] == ["job_1"]
+    assert [j.id for j in ax.jobs.iter("p", tenant_id="t")] == ["job_1"]
+    ax.jobs.cancel("p", "job_1")
+    assert rec.last.url.path == "/v1/products/p/jobs/job_1/cancel"
+    ax.jobs.retry("p", "job_1")
+    assert rec.last.url.path == "/v1/products/p/jobs/job_1/retry"
+    kinds = ax.jobs.kinds("p", tenant_id="t")
+    assert rec.last.url.params["tenant_id"] == "t"
+    assert kinds.any_kind is False and kinds.items[0].enqueue_permission is None
+    stats = ax.jobs.stats("p")
+    assert stats.by_kind[0].queued == 1 and stats.by_kind[0].dead == 0
+    with pytest.raises(ValueError):
+        ax.jobs.enqueue("p", "k", idempotency_key="x" * 201)
+
+
+def test_events_publish_with_idempotency_key_and_type_filter() -> None:
+    event = {
+        "id": "evt_1",
+        "product_id": "p",
+        "tenant_id": "t",
+        "type": "order.paid",
+        "data": {"total": 3},
+        "idempotency_key": "o-1",
+        "actor_kind": "api_key",
+        "actor_id": "key_1",
+        "request_id": None,
+        "occurred_at": NOW,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(201, json=event)
+        if request.url.path.endswith("/events"):
+            return httpx.Response(200, json={"items": [event], "next_cursor": None})
+        return httpx.Response(200, json=event)
+
+    ax, rec = client(handler, api_key="k")
+    got = ax.events.publish("p", "t", "order.paid", {"total": 3}, idempotency_key="o-1")
+    assert rec.last.url.path == "/v1/products/p/tenants/t/events"
+    assert json.loads(rec.last.content) == {"type": "order.paid", "data": {"total": 3}}
+    assert rec.last.headers["idempotency-key"] == "o-1" and got.data == {"total": 3}
+    ax.events.list("p", type="order.*")
+    assert rec.last.url.params["type"] == "order.*"
+    assert [e.id for e in ax.events.iter("p", tenant_id="t")] == ["evt_1"]
+    assert ax.events.get("p", "evt_1").actor_kind == "api_key"
+
+
+def test_schedules_need_exactly_one_timing_and_send_if_match() -> None:
+    schedule: dict[str, Any] = {
+        "id": "sch_1",
+        "product_id": "p",
+        "tenant_id": None,
+        "name": "Nightly",
+        "kind": "report.build",
+        "payload": {},
+        "interval_seconds": None,
+        "cron": "0 3 * * *",
+        "enabled": True,
+        "priority": 0,
+        "max_attempts": 5,
+        "next_run_at": NOW,
+        "last_run_at": None,
+        "last_job_id": None,
+        "version": 4,
+        "created_by": "usr_1",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    ax, rec = client(
+        lambda r: httpx.Response(204) if r.method == "DELETE" else httpx.Response(200, json=schedule),
+        api_key="k",
+    )
+    with pytest.raises(ValueError):
+        ax.schedules.create("p", "Nightly", "report.build")
+    with pytest.raises(ValueError):
+        ax.schedules.create("p", "Nightly", "report.build", interval_seconds=60, cron="* * * * *")
+    created = ax.schedules.create("p", "Nightly", "report.build", cron="0 3 * * *")
+    assert json.loads(rec.last.content) == {"name": "Nightly", "kind": "report.build", "cron": "0 3 * * *"}
+    assert created.cron == "0 3 * * *" and created.version == 4
+    ax.schedules.update("p", "sch_1", enabled=False, version=4)
+    assert rec.last.method == "PATCH" and rec.last.headers["if-match"] == "4"
+    assert json.loads(rec.last.content) == {"enabled": False}
+    ax.schedules.delete("p", "sch_1", version=4)
+    assert rec.last.method == "DELETE" and rec.last.headers["if-match"] == "4"
+
+
+def test_webhooks_return_the_secret_once_and_list_deliveries() -> None:
+    delivery = {
+        "id": "dlv_1",
+        "product_id": "p",
+        "tenant_id": None,
+        "endpoint_id": "whk_1",
+        "event_id": "evt_1",
+        "event_type": "order.paid",
+        "status": "failed",
+        "attempts": 1,
+        "response_code": 500,
+        "response_body": "oops",
+        "duration_ms": 12,
+        "last_error": "HTTP 500",
+        "next_attempt_at": NOW,
+        "job_id": "job_1",
+        "created_at": NOW,
+        "updated_at": NOW,
+        "delivered_at": None,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if (path.endswith("/webhooks") and request.method == "POST") or path.endswith("/rotate-secret"):
+            return httpx.Response(201, json={"endpoint": _endpoint(), "secret": "whsec_x"})
+        if path.endswith("/deliveries"):
+            return httpx.Response(200, json={"items": [delivery], "next_cursor": None})
+        if "/deliveries/" in path or path.endswith("/test"):
+            return httpx.Response(202 if path.endswith("/redeliver") else 200, json=delivery)
+        if request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(200, json=_endpoint())
+
+    ax, rec = client(handler, api_key="k")
+    new = ax.webhooks.create("p", "https://hooks.example.com/a", ("order.*",), description="Orders")
+    assert json.loads(rec.last.content) == {
+        "url": "https://hooks.example.com/a",
+        "event_types": ["order.*"],
+        "description": "Orders",
+    }
+    assert new.secret == "whsec_x" and new.endpoint.version == 2
+    rotated = ax.webhooks.rotate_secret("p", "whk_1", grace_seconds=3600)
+    assert json.loads(rec.last.content) == {"grace_seconds": 3600} and rotated.secret == "whsec_x"
+    ax.webhooks.update("p", "whk_1", event_types=["*"], version=2)
+    assert json.loads(rec.last.content) == {"event_types": ["*"]} and rec.last.headers["if-match"] == "2"
+    ax.webhooks.delete("p", "whk_1")
+    assert rec.last.method == "DELETE" and "if-match" not in rec.last.headers
+    page = ax.webhooks.deliveries("p", "whk_1", status="failed")
+    assert rec.last.url.params["status"] == "failed" and page.items[0].response_code == 500
+    assert [d.id for d in ax.webhooks.iter_deliveries("p", "whk_1")] == ["dlv_1"]
+    assert ax.webhooks.redeliver("p", "whk_1", "dlv_1").status == "failed"
+    assert rec.last.url.path == "/v1/products/p/webhooks/whk_1/deliveries/dlv_1/redeliver"
+    assert ax.webhooks.test("p", "whk_1").event_type == "order.paid"
+
+
+def test_search_sends_repeated_kinds_and_parses_hits() -> None:
+    hit = {
+        "id": "sdoc_1",
+        "kind": "note",
+        "ref_id": "rec_1",
+        "title": "Q4 plan",
+        "metadata": {},
+        "rank": 0.6,
+        "title_highlight": "<mark>Q4</mark> plan",
+        "body_highlight": "",
+        "updated_at": NOW,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/kinds"):
+            return httpx.Response(200, json=[{"kind": "note", "count": 3}])
+        return httpx.Response(200, json={"items": [hit], "next_cursor": None})
+
+    ax, rec = client(handler, api_key="k")
+    page = ax.search.query("p", "t", "q4", kinds=["note", "task"], limit=5)
+    assert rec.last.url.path == "/v1/products/p/tenants/t/search"
+    assert rec.last.url.params.get_list("kind") == ["note", "task"] and rec.last.url.params["q"] == "q4"
+    assert page.items[0].rank == 0.6 and page.items[0].title_highlight.startswith("<mark>")
+    assert [h.ref_id for h in ax.search.iter("p", "t", "q4")] == ["rec_1"]
+    assert "kind" not in rec.last.url.params
+    assert ax.search.kinds("p", "t")[0].count == 3
+
+
+@pytest.mark.anyio
+async def test_async_jobs_and_events() -> None:
+    ax, rec = aclient(lambda r: httpx.Response(201, json=_job()), api_key="k")
+    async with ax:
+        job = await ax.jobs.enqueue("p", "report.build", delay_seconds=30)
+        assert job.id == "job_1"
+        assert json.loads(rec.last.content) == {"kind": "report.build", "delay_seconds": 30}
 
 
 # -- files ---------------------------------------------------------------------------------------

@@ -473,17 +473,200 @@ class AuditEvent(AxentraModel):
     request_id: str | None = None
 
 
+# -- events, jobs, schedules, webhooks ----------------------------------------------------------
+
+
+class Job(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str | None = None
+    kind: str
+    status: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    priority: int = 0
+    run_after: datetime
+    attempts: int = 0
+    max_attempts: int
+    lease_until: datetime | None = None
+    worker: str | None = None
+    cancel_requested: bool = False
+    last_error: str | None = None
+    result: Any = None
+    idempotency_key: str | None = None
+    schedule_id: str | None = None
+    created_by: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class KindStats(AxentraModel):
+    kind: str
+    queued: int = 0
+    running: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    dead: int = 0
+    cancelled: int = 0
+
+
+class JobStats(AxentraModel):
+    counts: dict[str, int] = Field(default_factory=dict)
+    failed_last_24h: int
+    succeeded_last_24h: int
+    oldest_queued_at: datetime | None = None
+    by_kind: list[KindStats] = Field(default_factory=list)
+
+
+class EnqueueableKind(AxentraModel):
+    kind: str
+    enqueue_permission: str | None = None
+
+
+class EnqueueableKinds(AxentraModel):
+    """``any_kind`` is true for ``jobs:manage`` holders, who may enqueue every kind; ``items``
+    lists the kinds opened to the caller through their ``enqueue_permission``."""
+
+    any_kind: bool
+    items: list[EnqueueableKind] = Field(default_factory=list)
+
+
+class Event(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str | None = None
+    type: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = None
+    actor_kind: str
+    actor_id: str
+    request_id: str | None = None
+    occurred_at: datetime
+
+
+class Schedule(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str | None = None
+    name: str
+    kind: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    interval_seconds: int | None = None
+    cron: str | None = None
+    enabled: bool
+    priority: int = 0
+    max_attempts: int
+    next_run_at: datetime | None = None
+    last_run_at: datetime | None = None
+    last_job_id: str | None = None
+    version: int
+    created_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WebhookEndpoint(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str | None = None
+    url: str
+    description: str = ""
+    event_types: list[str] = Field(default_factory=list)
+    enabled: bool
+    has_previous_secret: bool = False
+    previous_secret_expires_at: datetime | None = None
+    version: int
+    created_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NewWebhookSecret(AxentraModel):
+    """A webhook endpoint with its signing ``secret``, returned once (create, rotate)."""
+
+    endpoint: WebhookEndpoint
+    secret: str
+
+
+class Delivery(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str | None = None
+    endpoint_id: str
+    event_id: str | None = None
+    event_type: str
+    status: str
+    attempts: int
+    response_code: int | None = None
+    response_body: str | None = None
+    duration_ms: int | None = None
+    last_error: str | None = None
+    next_attempt_at: datetime | None = None
+    job_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    delivered_at: datetime | None = None
+
+
+# -- search -------------------------------------------------------------------------------------
+
+
+class SearchHit(AxentraModel):
+    """A match. ``title_highlight`` and ``body_highlight`` are HTML-escaped text in which only
+    the matched words are wrapped in ``<mark>``."""
+
+    id: str
+    kind: str
+    ref_id: str
+    title: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    rank: float
+    title_highlight: str
+    body_highlight: str
+    updated_at: datetime
+
+
+class SearchDocument(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str
+    kind: str
+    ref_id: str
+    title: str
+    body: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    language: str
+    version: int
+    created_by: str | None = None
+    updated_by: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SearchKindCount(AxentraModel):
+    kind: str
+    count: int
+
+
 __all__ = [
     "ApiKey",
     "ApiVersion",
     "AuditEvent",
     "AuthInfo",
     "AxentraModel",
+    "Delivery",
     "DownloadUrl",
     "EffectiveLimit",
+    "EnqueueableKind",
+    "EnqueueableKinds",
     "Entitlements",
+    "Event",
     "FileInfo",
     "Invitation",
+    "Job",
+    "JobStats",
+    "KindStats",
     "Me",
     "Membership",
     "Message",
@@ -493,6 +676,7 @@ __all__ = [
     "MeterUsage",
     "NewApiKey",
     "NewInvitation",
+    "NewWebhookSecret",
     "OidcProviderInfo",
     "Page",
     "Plan",
@@ -503,6 +687,10 @@ __all__ = [
     "QuotaStatus",
     "Record",
     "Role",
+    "Schedule",
+    "SearchDocument",
+    "SearchHit",
+    "SearchKindCount",
     "Session",
     "SessionInfo",
     "Subscription",
@@ -511,4 +699,5 @@ __all__ = [
     "UsageEvent",
     "UsageRecordResult",
     "User",
+    "WebhookEndpoint",
 ]
