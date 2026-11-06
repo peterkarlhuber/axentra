@@ -104,7 +104,14 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
     from starlette.routing import compile_path
 
     from axentra.api.context import client_ip, session_cookie_name
-    from axentra.api.limits import BodyLimitMiddleware, RateLimitMiddleware, TokenBuckets, has_own_body_limit
+    from axentra.api.limits import (
+        BodyLimitMiddleware,
+        Budgets,
+        DatabaseWindows,
+        RateLimitMiddleware,
+        TokenBuckets,
+        has_own_body_limit,
+    )
 
     sec = ax.settings.security
     exempt = [
@@ -113,15 +120,19 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
         if has_own_body_limit(route.endpoint)
     ]
     app.add_middleware(BodyLimitMiddleware, max_bytes=sec.max_body_bytes, exempt=exempt)
+
+    def budgets(per_minute: int | None, prefix: str) -> Budgets | None:
+        if not per_minute:
+            return None
+        if sec.rate_limit_store == "database":
+            return DatabaseWindows(ax.db, per_minute, prefix=prefix)
+        return TokenBuckets(per_minute, sec.rate_limit_burst)
+
     if sec.rate_limit_per_minute or sec.rate_limit_ip_per_minute:
         app.add_middleware(
             RateLimitMiddleware,
-            per_credential=TokenBuckets(sec.rate_limit_per_minute, sec.rate_limit_burst)
-            if sec.rate_limit_per_minute
-            else None,
-            per_ip=TokenBuckets(sec.rate_limit_ip_per_minute, sec.rate_limit_burst)
-            if sec.rate_limit_ip_per_minute
-            else None,
+            per_credential=budgets(sec.rate_limit_per_minute, "req:"),
+            per_ip=budgets(sec.rate_limit_ip_per_minute, "req:"),
             client_ip=client_ip,
             session_cookie=lambda: session_cookie_name(ax),
         )

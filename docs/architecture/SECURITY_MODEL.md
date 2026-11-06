@@ -521,15 +521,20 @@ allow unlimited guessing of one account from many IP addresses.
 
 General request rate limiting is optional and **off by default** (`security.rate_limit_per_minute`
 per credential, `security.rate_limit_ip_per_minute` per client IP, `security.rate_limit_burst`).
-It is an in-memory token bucket per process: a request is charged to a hash of its credential
+By default (`security.rate_limit_store = "memory"`) it is an in-memory token bucket per process: a
+request is charged to a hash of its credential
 (bearer token, API key or session cookie; the client IP for anonymous requests) and independently
 to its client IP, before authentication runs. An empty bucket answers `429` (`rate_limited`) with
 a computed `Retry-After`. Health checks and `/metrics` are never limited.
 
 Trade-off: the in-memory buckets cost nothing per request (no database write) but are not shared;
-N API processes allow N times the configured rate and a restart refills them. The database-backed
-fixed windows (`axentra_rate_limits`) remain for logins, where a shared budget matters. For a hard
-global limit use the reverse proxy or an API gateway.
+N API processes allow N times the configured rate and a restart refills them. With
+`security.rate_limit_store = "database"` the same budgets are counted in one-minute windows in
+`axentra_rate_limits` (keys `req:ip:...` and `req:cred:<hash>`; never the credential itself), shared
+by every API process: one upsert per request and limit, up to twice the budget across a window
+boundary, `rate_limit_burst` does not apply, and a request is let through (with a logged warning)
+when the database cannot be reached. For a hard limit in front of the database too, use the
+reverse proxy or an API gateway.
 
 ## Request body size
 
@@ -587,7 +592,7 @@ listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mo
 | Secret leakage | Hash-only credentials, secrets shown once, secret references, AES-GCM with context binding, redaction in logs/problems/audit, startup refusal of inline secrets in production | Database dumps contain hashes and ciphertexts; the keyring must be stored separately |
 | RLS bypass via misconfiguration | Startup check for superuser/BYPASSRLS; separate owner and app roles in compose | `allow_superuser = true` disables this protection |
 | Spoofed client IP | `X-Forwarded-For` only from `trusted_proxies` | Wrong proxy configuration makes throttling per IP ineffective |
-| Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits, request body limit (`security.max_body_bytes`), optional per-credential/per-IP rate limits | Rate limits are per process and off by default; use the reverse proxy for global limits and slow-client (slowloris) protection |
+| Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits, request body limit (`security.max_body_bytes`), optional per-credential/per-IP rate limits | Rate limits are off by default and per process unless `security.rate_limit_store = "database"`; use the reverse proxy for limits in front of the API and slow-client (slowloris) protection |
 
 ## EU hosting and GDPR
 

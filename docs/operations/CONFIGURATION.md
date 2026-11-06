@@ -103,9 +103,10 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `master_keys` | `AXENTRA__SECURITY__MASTER_KEYS` | none | Inline keyring; refused in production. Without either, development uses `./var/dev-keyring`, test an ephemeral key |
 | `setup_token_ttl_minutes` | `AXENTRA__SECURITY__SETUP_TOKEN_TTL_MINUTES` | `60` | Lifetime of first-run setup tokens (>= 5) |
 | `max_body_bytes` | `AXENTRA__SECURITY__MAX_BODY_BYTES` | `10485760` (10 MiB) | Largest request body (413 above it); file uploads use `storage.max_file_bytes` instead |
-| `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); in-memory, per process |
+| `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); see `rate_limit_store` |
 | `rate_limit_ip_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_IP_PER_MINUTE` | none (off) | Requests per minute per client IP, whatever the credential |
-| `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size |
+| `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size (memory store only) |
+| `rate_limit_store` | `AXENTRA__SECURITY__RATE_LIMIT_STORE` | `memory` | `memory` (per process) or `database` (one-minute windows in PostgreSQL shared by all API processes; one write per request and limit) |
 | `api_docs` | `AXENTRA__SECURITY__API_DOCS` | `disabled` in production, else `public` | `/v1/docs` and `/v1/openapi.json`: `public`, `authenticated` or `disabled` |
 
 Generate keyring entries with `axentra keys generate --kid k1`. Rotation (with

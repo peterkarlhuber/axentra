@@ -19,7 +19,7 @@ from axentra.core.context import Actor, ActorKind, Principal
 from axentra.data.database import DbScope
 from axentra.platform import Axentra
 from tests.conftest import make_settings
-from tests.integration.conftest import Browser, World
+from tests.integration.conftest import ADMIN_PASSWORD, Browser, World
 from tests.integration.test_notify import _member, _product, _send, _template, _tenant
 
 # -- secrets reencrypt ----------------------------------------------------------------------------
@@ -328,6 +328,46 @@ def test_rate_limit_per_credential_and_ip(ax_factory):
     assert codes[-1] == 429
     # Health endpoints are never limited.
     assert other.get("/v1/health/live").status_code == 200
+
+
+def test_rate_limit_database_store_is_shared_by_processes(ax_factory):
+    """Two API apps (standing for two processes) over one database share the budget."""
+    from fastapi.testclient import TestClient
+
+    from tests.integration.conftest import bootstrap_admin
+
+    ax = ax_factory(security={"rate_limit_per_minute": 4, "rate_limit_store": "database"})
+    first = create_app(axentra=ax, start=False)
+    second = create_app(axentra=ax, start=False)
+    admin = bootstrap_admin(ax, first)
+    other = TestClient(second, headers={"Origin": "http://studio.test"})
+    other.cookies.update(admin.client.cookies)
+    codes = [admin.get("/v1/products").status_code, other.get("/v1/products").status_code]
+    codes += [admin.get("/v1/products").status_code, other.get("/v1/products").status_code]
+    codes += [other.get("/v1/products").status_code]
+    assert codes == [200, 200, 200, 200, 429]
+    r = admin.get("/v1/products")
+    assert r.status_code == 429 and r.json()["code"] == "rate_limited"
+    assert 1 <= int(r.headers["retry-after"]) <= 60
+    with ax.db.transaction(DbScope.platform()) as tx:
+        buckets = [row["bucket"] for row in tx.all("SELECT bucket FROM axentra_rate_limits")]
+    assert any(b.startswith("req:cred:") for b in buckets)
+    assert not any(ADMIN_PASSWORD in b or "axs_" in b for b in buckets)  # hashed keys only
+    # The memory store keeps a budget per app.
+    ax2 = ax_factory(security={"rate_limit_per_minute": 4})
+    a1, a2 = create_app(axentra=ax2, start=False), create_app(axentra=ax2, start=False)
+    admin2 = bootstrap_admin(ax2, a1)
+    other2 = TestClient(a2, headers={"Origin": "http://studio.test"})
+    other2.cookies.update(admin2.client.cookies)
+    assert [other2.get("/v1/products").status_code for _ in range(4)] == [200] * 4
+    # A database failure lets requests through instead of answering 429 or 500.
+    from axentra.api.limits import DatabaseWindows
+
+    class Down:
+        def transaction(self, *args, **kwargs):
+            raise psycopg.OperationalError("connection refused")
+
+    assert DatabaseWindows(Down(), 1).take("ip:1.2.3.4") == 0.0  # type: ignore[arg-type]
 
 
 def test_rate_limit_is_off_by_default(world: World):

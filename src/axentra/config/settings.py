@@ -128,11 +128,16 @@ class SecuritySettings(_Section):
     """Largest request body accepted (413 above it). File uploads use ``storage.max_file_bytes`` instead."""
     rate_limit_per_minute: int | None = Field(None, ge=1)
     """Requests per minute per credential (API key or session; per IP for anonymous requests).
-    ``None`` (default): off. In-memory token bucket per process; see SECURITY_MODEL.md."""
+    ``None`` (default): off. Counted per process or in the database (``rate_limit_store``); see
+    SECURITY_MODEL.md."""
     rate_limit_ip_per_minute: int | None = Field(None, ge=1)
     """Requests per minute per client IP regardless of credentials (``None``: off)."""
     rate_limit_burst: int | None = Field(None, ge=1)
-    """Bucket size (burst); defaults to the per-minute budget."""
+    """Bucket size (burst); defaults to the per-minute budget. Only for ``rate_limit_store = "memory"``."""
+    rate_limit_store: Literal["memory", "database"] = "memory"
+    """Where the general rate limits are counted: ``memory`` (per process, no database write) or
+    ``database`` (one-minute windows in PostgreSQL shared by all API processes; one write per
+    request and limit)."""
     api_docs: Literal["public", "authenticated", "disabled"] | None = None
     """``/v1/docs`` and ``/v1/openapi.json``: ``None`` (default) means ``disabled`` in production and
     ``public`` otherwise; ``authenticated`` requires a session or API key."""
