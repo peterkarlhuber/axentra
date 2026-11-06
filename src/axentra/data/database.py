@@ -387,8 +387,9 @@ class Database:
         """Verify that row-level security applies to the application role (see :meth:`role_info`).
 
         Refuses a superuser or ``BYPASSRLS`` role unless ``allow_superuser``, and a role that owns
-        protected tables unless ``allow_table_owner`` (the default, for compatibility; a deployment
-        with separate owner and runtime roles turns it off with ``database.allow_table_owner``)."""
+        protected tables unless ``allow_table_owner`` (the default of this method; ``Axentra.start()``
+        passes ``Settings.table_owner_allowed``, which is ``False`` in production unless
+        ``database.allow_table_owner = true``)."""
         info = self.role_info()
         if (info["superuser"] or info["bypass_rls"]) and not allow_superuser:
             raise ConfigurationError(

@@ -301,6 +301,14 @@ product or platform scope only.
 **Non-superuser role checked at startup.** `Axentra.start()` calls `Database.check_role`: if the
 connected role is a superuser or has `BYPASSRLS`, startup fails in production unless
 `database.allow_superuser = true` is set explicitly. In `development` and `test` it is allowed.
+**Table owner refused in production.** FORCE ROW LEVEL SECURITY applies to the owner too, but the
+owner can switch it off, change the policies or drop the tables. In production `Axentra.start()`
+therefore refuses (`ConfigurationError`, "refusing to start: the database role owns the tables
+protected by row-level security ...") a role that owns RLS-protected tables, unless
+`database.allow_table_owner = true` is set explicitly; with that override it starts and logs a
+warning. The default (`None`) allows the owner in `development` and `test`; `false` refuses it
+everywhere (MUP-ONA A6, PS-6). Migrations run with a separate owner role (`database.migration_url_ref`,
+`axentra migrate --grant-runtime-role <role>`), see [DEPLOYMENT](../operations/DEPLOYMENT.md).
 The compose setup uses an owner role for migrations and a separate application role for the API
 (`deploy/compose/initdb/01-roles.sql`); the test suite runs as a non-superuser owner role so the
 policies are really exercised.
@@ -586,11 +594,11 @@ listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mo
 | SQL injection | Parameterized queries only (psycopg placeholders); dynamic identifiers come from fixed allow-lists (sort fields, regex-checked field names); JSON filters passed as bound `jsonb` | Product code using `ax.db` must follow the same rule |
 | Session fixation / theft | New random token per login, hash-only storage, HttpOnly + Secure + `__Host-` cookie, idle and absolute expiry, revocation | A stolen token is valid until it expires or is revoked |
 | Brute force / credential stuffing | Argon2id, per-account and per-IP throttling, uniform error message and timing | Fixed windows; no CAPTCHA or lockout; distributed attacks across many IPs are limited only per account |
-| SSRF | Webhook targets: https only in production, every resolved address checked against private, loopback, link-local, multicast, reserved, unspecified and IPv6 site-local (`fec0::/10`) ranges, connection pinned to the checked address, no redirects | `events.webhook_allow_private_targets` turns the check off; production refuses to start with it unless `events.webhook_allow_private_targets_in_production` is also set |
+| SSRF | Webhook targets: https only in production, every resolved address checked against private, loopback, link-local, multicast, reserved, unspecified and IPv6 site-local (`fec0::/10`) ranges; IPv6 addresses that lead to an IPv4 address (IPv4-mapped, 6to4 `2002::/16`, Teredo `2001::/32` server and client, NAT64 `64:ff9b::/96` and `64:ff9b:1::/48`) are judged by the embedded address, and 6to4, Teredo and NAT64 local-use are refused as a whole, by explicit prefix checks that do not depend on the Python patch level (`ipaddress.is_global` treated `2002::/16` as global before CVE-2024-4032 was fixed; MUP-ONA PS-4, tests `tests/unit/test_http_client_addresses.py`); connection pinned to the checked address, no redirects | `events.webhook_allow_private_targets` turns the check off; production refuses to start with it unless `events.webhook_allow_private_targets_in_production` is also set |
 | Account enumeration | Uniform login errors and timing; adding members resolves only users visible to the caller (same `404` otherwise); invitations answer the same for every address; audit lookups answer `404` for missing and not-permitted events alike | Unique constraints (emails, slugs) can reveal existence through `409` to callers allowed to create those |
 | Mail relay / phishing | System-only invitation template; external recipients need `notify:send_external` | No per-tenant send rate limit yet (see docs/TODO.md) |
 | Secret leakage | Hash-only credentials, secrets shown once, secret references, AES-GCM with context binding, redaction in logs/problems/audit, startup refusal of inline secrets in production | Database dumps contain hashes and ciphertexts; the keyring must be stored separately |
-| RLS bypass via misconfiguration | Startup check for superuser/BYPASSRLS; separate owner and app roles in compose | `allow_superuser = true` disables this protection |
+| RLS bypass via misconfiguration | Startup check for superuser/BYPASSRLS; production refuses a role that owns the RLS-protected tables; separate owner and app roles in compose | `allow_superuser = true` disables this protection; `allow_table_owner = true` lets an owning role start in production (with a warning) |
 | Spoofed client IP | `X-Forwarded-For` only from `trusted_proxies` | Wrong proxy configuration makes throttling per IP ineffective |
 | Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits, request body limit (`security.max_body_bytes`), optional per-credential/per-IP rate limits | Rate limits are off by default and per process unless `security.rate_limit_store = "database"`; use the reverse proxy for limits in front of the API and slow-client (slowloris) protection |
 

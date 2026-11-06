@@ -164,8 +164,9 @@ table. So run migrations (Axentra's and the host's namespaces) as an owner role
 - `inspect_role(conn, role)` / `axentra db inspect-role [ROLE]` (exit 3 when RLS does not fully
   apply) and `Database.role_info()` report `superuser`, `bypass_rls` and `table_owner`.
 - `Database.check_role(allow_superuser=..., allow_table_owner=...)`; `ax.start()` refuses an owning
-  role in production with `database.allow_table_owner = false` (default `true` for compatibility;
-  a warning is logged in production).
+  role in production unless `database.allow_table_owner = true` is set explicitly (then it logs a
+  warning). The default (`None`, `Settings.table_owner_allowed`) allows it in development and test
+  only; `false` refuses it in every environment (MUP-ONA A6).
 - Negative tests (`tests/integration/test_db_roles_and_pool.py`): the runtime role sees no rows
   without a scope, cannot write into another tenant, cannot `ALTER ... NO FORCE / DISABLE ROW LEVEL
   SECURITY`, drop or create policies, drop, truncate or create tables, replace the scope function,

@@ -77,11 +77,12 @@ class DatabaseSettings(_Section):
     statement_timeout_ms: int = Field(30_000, ge=0)
     allow_superuser: bool = False
     """Superusers bypass row-level security; refused in production unless explicitly allowed."""
-    allow_table_owner: bool = True
+    allow_table_owner: bool | None = None
     """Allow an application role that owns the tables protected by row-level security (it could
-    switch RLS off). ``false`` makes ``Axentra.start()`` refuse such a role in production: use it
-    with a separate owner role for migrations (``migration_url_ref``) and
-    ``axentra db grant-runtime-role``."""
+    switch RLS off). ``None`` (default): refused in production, allowed in development and test.
+    In production ``Axentra.start()`` refuses such a role unless this is set to ``true`` explicitly
+    (then it starts with a warning): migrate with a separate owner role (``migration_url_ref``) and
+    grant the runtime role with ``axentra db grant-runtime-role``. See :attr:`Settings.table_owner_allowed`."""
     require_current_schema: bool = False
     """``Axentra.start()`` refuses to start (``SchemaNotCurrent``) while a registered migration
     namespace has pending migrations or applied versions unknown to the code; ``/v1/health/ready``
@@ -406,6 +407,14 @@ class Settings(_Section):
     @property
     def is_production(self) -> bool:
         return self.environment is Environment.PRODUCTION
+
+    @property
+    def table_owner_allowed(self) -> bool:
+        """Whether the application role may own the RLS-protected tables: ``database.allow_table_owner``
+        when it is set, otherwise ``False`` in production and ``True`` in every other environment."""
+        if self.database.allow_table_owner is not None:
+            return self.database.allow_table_owner
+        return not self.is_production
 
     @property
     def api_docs_mode(self) -> str:
