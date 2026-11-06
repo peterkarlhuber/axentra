@@ -59,6 +59,8 @@ class RoleService:
                 scope=r.scope,
                 permissions=sorted(catalog.builtin_role(r.key)),
                 builtin=True,
+                name_key=f"axentra.role.{r.key}.name",
+                description_key=f"axentra.role.{r.key}.description",
             )
             for r in BUILTIN_ROLES.values()
         ]

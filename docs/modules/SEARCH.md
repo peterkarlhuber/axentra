@@ -65,6 +65,7 @@ All paths are under `/v1/products/{product_id}/tenants/{tenant_id}/search`. Erro
 | Method | Path | Permission | Response |
 |---|---|---|---|
 | GET | `?q&kind&limit&cursor` | `search:query` | `Page[SearchHit]`. `q` 1..500 characters, required. `kind` repeatable (at most 20). `limit` 1..200, default 20 |
+| GET | `/kinds` | `search:query` | `[{kind, count}]`: the kinds indexed in the tenant with their document counts, in kind order (at most 500), for a kind picker. An adapter without `kinds()` answers `409` |
 | GET | `/documents/{kind}/{ref_id}` | `search:query` | `SearchDocument` |
 | PUT | `/documents/{kind}/{ref_id}` `{title, body, metadata}` | `search:index` | `201 SearchDocument` when created, `200` when replaced. `413` when the body is too long, `422` on invalid input (e.g. neither title nor body) |
 | DELETE | `/documents/{kind}/{ref_id}` | `search:index` | `204`, `404` when not indexed |

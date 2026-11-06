@@ -1571,6 +1571,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/kinds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The document kinds indexed in the tenant, with counts (kind order, at most 500)
+         * @description Lets clients offer a kind picker for the `kind` filter. `search:query` in the tenant.
+         */
+        get: operations["list_kinds_v1_products__product_id__tenants__tenant_id__search_kinds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/tenants/{tenant_id}/storage/quota": {
         parameters: {
             query?: never;
@@ -2052,8 +2072,18 @@ export interface components {
             created_at: string;
             /** Created By */
             created_by: string | null;
+            /**
+             * Creator Has Access
+             * @description For active keys: `true` while the key's creator holds every permission of the key in its scope, `false` when the creator lost some (requests needing them are refused with `api_key_creator_lost_access`, see `withheld_permissions`). `null` for revoked or expired keys and for keys created in process by a system caller (not bounded)
+             */
+            creator_has_access?: boolean | null;
             /** Expires At */
             expires_at: string | null;
+            /**
+             * Grace Until
+             * @description Set while a rotated key still works (the grace period of `rotate`): the time it stops working (`revoked_at`, in the future). `null` otherwise
+             */
+            grace_until?: string | null;
             /** Id */
             id: string;
             /** Last Used At */
@@ -2077,6 +2107,11 @@ export interface components {
             status: "active" | "revoked" | "expired";
             /** Tenant Id */
             tenant_id: string | null;
+            /**
+             * Withheld Permissions
+             * @description The key's permissions its creator no longer holds (empty when `creator_has_access` is not `false`)
+             */
+            withheld_permissions?: string[];
         };
         /** ApiKeyCreate */
         ApiKeyCreate: {
@@ -2374,6 +2409,10 @@ export interface components {
             encryption_key_ids: string[];
             /** Environment */
             environment: string;
+            /** Events */
+            events?: {
+                [key: string]: unknown;
+            };
             /** Features */
             features: {
                 [key: string]: boolean;
@@ -2740,6 +2779,16 @@ export interface components {
             oldest_queued_at: string | null;
             /** Succeeded Last 24H */
             succeeded_last_24h: number;
+        };
+        /**
+         * KindCount
+         * @description An indexed document kind of a tenant and how many documents it has.
+         */
+        KindCount: {
+            /** Count */
+            count: number;
+            /** Kind */
+            kind: string;
         };
         /** KindStats */
         KindStats: {
@@ -3881,12 +3930,22 @@ export interface components {
             builtin: boolean;
             /** Description */
             description: string;
+            /**
+             * Description Key
+             * @description Built-in roles: a stable translation key for `description` (`axentra.role.<key>.description`); `null` for custom roles
+             */
+            description_key?: string | null;
             /** Id */
             id: string | null;
             /** Key */
             key: string;
             /** Name */
             name: string;
+            /**
+             * Name Key
+             * @description Built-in roles: a stable translation key for `name` (`axentra.role.<key>.name`); `null` for custom roles, whose name and description are the product's own text
+             */
+            name_key?: string | null;
             /** Permissions */
             permissions: string[];
             /**
@@ -10136,6 +10195,47 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_kinds_v1_products__product_id__tenants__tenant_id__search_kinds_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KindCount"][];
+                };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
             422: {

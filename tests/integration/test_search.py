@@ -397,3 +397,42 @@ def test_concurrent_upserts_of_one_document(two_tenants):
     assert doc.version == 10
     with world.ax.db.transaction(DbScope.platform()) as tx:
         assert tx.scalar("SELECT count(*) FROM axentra_search_documents") == 1
+
+
+def test_kinds_are_listed_per_tenant_with_counts(two_tenants):
+    """AXS-B2: clients can offer a kind picker instead of a free-text kind filter."""
+    world, pid, t1, t2 = two_tenants
+    for kind, ref in [("note", "n1"), ("invoice", "i1"), ("note", "n2"), ("invoice", "i2"), ("note", "n3")]:
+        assert _put(world.admin, pid, t1, kind, ref, title="x").status_code == 201
+    assert _put(world.admin, pid, t2, "contract", "c1", title="y").status_code == 201
+    r = world.admin.get(f"{_base(pid, t1)}/kinds")
+    assert r.status_code == 200, r.text
+    assert r.json() == [{"kind": "invoice", "count": 2}, {"kind": "note", "count": 3}]
+    assert world.admin.get(f"{_base(pid, t2)}/kinds").json() == [{"kind": "contract", "count": 1}]
+    # search:query in the tenant: a viewer may list, an unrelated key may not.
+    viewer = _member(world, pid, t1, "kv@example.com", "viewer")
+    assert [k["kind"] for k in viewer.get(f"{_base(pid, t1)}/kinds").json()] == ["invoice", "note"]
+    assert viewer.get(f"{_base(pid, t2)}/kinds").status_code in (403, 404)
+    key = world.admin.post(
+        f"/v1/products/{pid}/api-keys",
+        json={"name": "reader", "permissions": ["records:read"], "tenant_id": t1},
+    ).json()["secret"]
+    c = TestClient(world.app, headers={"Authorization": f"Bearer {key}"})
+    assert c.get(f"{_base(pid, t1)}/kinds").status_code == 403
+    # Removing the last document of a kind removes the kind.
+    for ref in ("i1", "i2"):
+        assert world.admin.delete(f"{_base(pid, t1)}/documents/invoice/{ref}").status_code == 204
+    assert world.admin.get(f"{_base(pid, t1)}/kinds").json() == [{"kind": "note", "count": 3}]
+
+
+def test_kinds_need_an_adapter_that_can_list_them(two_tenants):
+    world, pid, t1, _ = two_tenants
+    svc = world.ax.search
+    assert svc is not None
+
+    class NoKinds:
+        name = "external"
+
+    svc.adapter = NoKinds()  # type: ignore[assignment]
+    r = world.admin.get(f"{_base(pid, t1)}/kinds")
+    assert r.status_code == 409 and "cannot list kinds" in r.json()["detail"]

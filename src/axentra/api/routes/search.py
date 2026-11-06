@@ -18,6 +18,7 @@ from axentra.search.models import (
     MAX_QUERY_CHARS,
     MAX_TITLE_CHARS,
     REF_ID_PATTERN,
+    KindCount,
     SearchDocument,
     SearchHit,
 )
@@ -67,6 +68,16 @@ def search(
     cursor: Cursor = None,
 ) -> Page[SearchHit]:
     return _svc(ax).query(principal, product_id, tenant_id, q, kinds=kind, limit=limit, cursor=cursor)
+
+
+@router.get(
+    "/kinds",
+    response_model=list[KindCount],
+    summary="The document kinds indexed in the tenant, with counts (kind order, at most 500)",
+)
+def list_kinds(product_id: str, tenant_id: str, principal: CurrentPrincipal, ax: Ax) -> list[KindCount]:
+    """Lets clients offer a kind picker for the `kind` filter. `search:query` in the tenant."""
+    return _svc(ax).kinds(principal, product_id, tenant_id)
 
 
 @router.get(D, response_model=SearchDocument, summary="An indexed document")

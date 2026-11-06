@@ -29,6 +29,7 @@ from axentra.search.models import (
     MARK_STOP,
     IndexDocument,
     IndexResult,
+    KindCount,
     SearchDocument,
     SearchHit,
     SearchQuery,
@@ -60,6 +61,10 @@ class SearchAdapter(Protocol):
     def query(self, product_id: str, tenant_id: str, query: SearchQuery) -> tuple[list[SearchHit], bool]:
         """Ranked hits of one tenant at ``query.offset`` and whether more follow."""
         ...
+
+    # Optional: ``kinds(product_id, tenant_id, limit) -> list[KindCount]`` (the tenant's indexed
+    # kinds in kind order with their counts). Adapters without it answer ``GET .../search/kinds``
+    # with ``409 conflict``; the PostgreSQL adapter has it.
 
 
 _COLUMNS = (
@@ -168,6 +173,15 @@ class PostgresSearchAdapter:
             if hook is not None:
                 hook(tx, removed)
         return removed
+
+    def kinds(self, product_id: str, tenant_id: str, limit: int) -> list[KindCount]:
+        with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
+            rows = tx.all(
+                "SELECT kind, count(*) AS n FROM axentra_search_documents"
+                " WHERE product_id = %s AND tenant_id = %s GROUP BY kind ORDER BY kind LIMIT %s",
+                (product_id, tenant_id, limit),
+            )
+        return [KindCount(kind=r["kind"], count=int(r["n"])) for r in rows]
 
     def query(self, product_id: str, tenant_id: str, query: SearchQuery) -> tuple[list[SearchHit], bool]:
         lang = self._lang()

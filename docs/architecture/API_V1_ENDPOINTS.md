@@ -69,8 +69,8 @@ summary. Permission names in brackets.
   declares (creates, changes, re-activates) a product permission; `DELETE` retires it (`204`,
   idempotent) [permissions:manage; `409` for permissions registered by the product's code; `422`
   for names that are not `<namespace>.<resource>:<action>`]. See SECURITY_MODEL.md, "Product-defined permissions"
-- `GET /v1/products/{pid}/roles` (built-in + custom), `POST`, `PATCH/DELETE /v1/products/{pid}/roles/{role_id}` [roles:manage]
-- `GET/POST /v1/products/{pid}/api-keys`, `GET .../{kid}`, `POST .../{kid}/rotate`, `POST .../{kid}/revoke` [api_keys:manage]
+- `GET /v1/products/{pid}/roles` (built-in + custom; built-in roles carry the translation keys `name_key` and `description_key`, `axentra.role.<key>.name|description`), `POST`, `PATCH/DELETE /v1/products/{pid}/roles/{role_id}` [roles:manage]
+- `GET/POST /v1/products/{pid}/api-keys`, `GET .../{kid}`, `POST .../{kid}/rotate`, `POST .../{kid}/revoke` [api_keys:manage]. A listed key has `grace_until` while a rotated key still works (its future `revoked_at`) and, for active keys, `creator_has_access` (`false` when its creator lost some of the key's permissions, which are then refused with `api_key_creator_lost_access`) with `withheld_permissions`; `null` for keys created in process by a system caller
 - Custom roles and API keys accept built-in names and the product's active permissions; anything
   else (unknown, retired, another product's) is `422`
 - Every request made with an API key is bounded by what the key's creator holds now in that scope;
@@ -91,4 +91,4 @@ Files, download URLs, usage and quotas: see docs/modules/STORAGE.md.
 ## Audit and settings
 - `GET /v1/audit?product_id=&tenant_id=&action=&actor_id=&since=&until=&q=` [audit:read]
 - `GET /v1/audit/{event_id}` (`404` both for unknown events and for events the caller may not read)
-- `GET /v1/settings` (effective non-secret configuration) [platform admin or product admin read-only]
+- `GET /v1/settings` (effective non-secret configuration, including the job and webhook retry schedule in `events`) [platform admin or product admin read-only]

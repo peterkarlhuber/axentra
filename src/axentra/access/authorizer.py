@@ -25,7 +25,7 @@ Rules:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import threading
 import time
@@ -126,6 +126,20 @@ class Authorizer:
             return self._grant(creator, product_id, tenant_id, depth + 1).permissions
         except (Forbidden, NotFound):
             return frozenset()
+
+    def key_withheld(
+        self, key_id: str, product_id: str, tenant_id: str | None, permissions: Iterable[str]
+    ) -> frozenset[str] | None:
+        """The key's ``permissions`` that its creator no longer holds in the key's scope (the
+        product, or the key's tenant), so requests with the key are refused for them
+        (``api_key_creator_lost_access``); empty while the creator holds them all. ``None`` for a
+        key created in process by a system caller, which is not bounded. For API key listings."""
+        created_by, creator = self._key_creator(key_id)
+        if creator is None:
+            return None
+        del created_by
+        held = self._creator_permissions(creator, product_id, tenant_id, 0)
+        return frozenset(permissions) - held
 
     def _bound_by_creator(
         self, principal: Principal, g: Grant, product_id: str, tenant_id: str | None, depth: int

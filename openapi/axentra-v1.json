@@ -19,6 +19,18 @@
             ],
             "title": "Created By"
           },
+          "creator_has_access": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For active keys: `true` while the key's creator holds every permission of the key in its scope, `false` when the creator lost some (requests needing them are refused with `api_key_creator_lost_access`, see `withheld_permissions`). `null` for revoked or expired keys and for keys created in process by a system caller (not bounded)",
+            "title": "Creator Has Access"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -30,6 +42,19 @@
               }
             ],
             "title": "Expires At"
+          },
+          "grace_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set while a rotated key still works (the grace period of `rotate`): the time it stops working (`revoked_at`, in the future). `null` otherwise",
+            "title": "Grace Until"
           },
           "id": {
             "title": "Id",
@@ -108,6 +133,14 @@
               }
             ],
             "title": "Tenant Id"
+          },
+          "withheld_permissions": {
+            "description": "The key's permissions its creator no longer holds (empty when `creator_has_access` is not `false`)",
+            "items": {
+              "type": "string"
+            },
+            "title": "Withheld Permissions",
+            "type": "array"
           }
         },
         "required": [
@@ -907,6 +940,11 @@
           "environment": {
             "title": "Environment",
             "type": "string"
+          },
+          "events": {
+            "additionalProperties": true,
+            "title": "Events",
+            "type": "object"
           },
           "features": {
             "additionalProperties": {
@@ -1899,6 +1937,25 @@
           "by_kind"
         ],
         "title": "JobStats",
+        "type": "object"
+      },
+      "KindCount": {
+        "description": "An indexed document kind of a tenant and how many documents it has.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "count"
+        ],
+        "title": "KindCount",
         "type": "object"
       },
       "KindStats": {
@@ -5050,6 +5107,18 @@
             "title": "Description",
             "type": "string"
           },
+          "description_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Built-in roles: a stable translation key for `description` (`axentra.role.<key>.description`); `null` for custom roles",
+            "title": "Description Key"
+          },
           "id": {
             "anyOf": [
               {
@@ -5068,6 +5137,18 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "name_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Built-in roles: a stable translation key for `name` (`axentra.role.<key>.name`); `null` for custom roles, whose name and description are the product's own text",
+            "title": "Name Key"
           },
           "permissions": {
             "items": {
@@ -16665,6 +16746,72 @@
           }
         },
         "summary": "Index a document (create or replace by kind and ref_id)",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/kinds": {
+      "get": {
+        "description": "Lets clients offer a kind picker for the `kind` filter. `search:query` in the tenant.",
+        "operationId": "list_kinds_v1_products__product_id__tenants__tenant_id__search_kinds_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KindCount"
+                  },
+                  "title": "Response List Kinds V1 Products  Product Id  Tenants  Tenant Id  Search Kinds Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "The document kinds indexed in the tenant, with counts (kind order, at most 500)",
         "tags": [
           "search"
         ]
