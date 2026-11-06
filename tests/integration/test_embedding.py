@@ -126,7 +126,9 @@ def test_injected_keyring_in_production(pg_urls, tmp_path):
             environ={},
             environment="production",
             mode="multi",
-            database={"url": pg_urls["app"], "pool_max": 2},
+            # Without AXENTRA_TEST_SPLIT_ROLES the app role owns the tables, which production refuses unless
+            # allowed explicitly (MUP-ONA A6; tests/integration/test_platform_roles.py covers the refusal).
+            database={"url": pg_urls["app"], "pool_max": 2, "allow_table_owner": True},
             security={
                 "public_url": "https://api.example",
                 "allowed_origins": ["https://studio.example"],

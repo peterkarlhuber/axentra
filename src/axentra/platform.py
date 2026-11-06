@@ -264,15 +264,31 @@ class Axentra:
         if self._started:
             return
         self.db.open()
-        relaxed = not self.settings.is_production
-        info = self.db.check_role(
-            allow_superuser=self.settings.database.allow_superuser or relaxed,
-            allow_table_owner=self.settings.database.allow_table_owner or relaxed,
-        )
-        if info["table_owner"] and self.settings.is_production:
+        production = self.settings.is_production
+        try:
+            info = self.db.check_role(
+                allow_superuser=self.settings.database.allow_superuser or not production,
+                allow_table_owner=True,  # decided below, also when allow_superuser is set
+            )
+            # A superuser or BYPASSRLS role was allowed explicitly above (it may act as any owner); any other
+            # role that owns the RLS-protected tables needs database.allow_table_owner = true in production.
+            privileged = info["superuser"] or info["bypass_rls"]
+            if info["table_owner"] and not privileged and not self.settings.table_owner_allowed:
+                raise ConfigurationError(
+                    "refusing to start: the database role owns the tables protected by row-level security and"
+                    " could switch it off. In production run migrations with a separate owner role"
+                    " (database.migration_url_ref, axentra migrate --grant-runtime-role <role>) and connect as a"
+                    " runtime role without ownership, or accept the risk with database.allow_table_owner = true"
+                    " (AXENTRA__DATABASE__ALLOW_TABLE_OWNER=true)"
+                )
+        except Exception:
+            self.db.close()
+            raise
+        if info["table_owner"] and production:
             logger.warning(
                 "the database role owns tables protected by row-level security (it could switch RLS off);"
-                " use a separate owner role for migrations (database.allow_table_owner = false enforces it)"
+                " database.allow_table_owner = true allows it. Use a separate owner role for migrations"
+                " and a runtime role without ownership"
             )
         if self.settings.database.require_current_schema:
             try:

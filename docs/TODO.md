@@ -25,7 +25,6 @@ the change that completes its package.
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | data | **AX-MUP-A6** (MP-A6, PS-6): production refuses to start with a database role that owns the RLS tables unless `database.allow_table_owner = true` is set explicitly; migrations run with a separate owner role |
 | P2 | security | **AX-MUP-A7** (MP-A7, VB-3/VB-4/VB-5): OIDC responses read as a stream with a 1 MiB cap and a maximum `iat` age; more redaction patterns (`whsec_`, `Authorization: Basic`, session cookies, `password=`, `client_secret=`); DNS resolution of webhook targets inside the attempt's time budget |
 | P2 | tests | **AX-MUP-A8** (MP-A8): shared security test vectors vendored as JSON with a checksum (no dependency on orkexa or Nodestro) |
 | P2 | build | **AX-MUP-B0** (MP-B0): release rules in the CHANGELOG (tag scheme `axentra-vX.Y.Z`, SemVer from 0.2, no PyPI, tags only after approval) |

@@ -90,6 +90,12 @@ TLS; `.env.example` uses `development` so that plain HTTP on localhost works.
   from database backups.
 - Database URL via `database.url_ref`; the API role is not a superuser and has no `BYPASSRLS`
   (startup fails otherwise). Do not set `database.allow_superuser`.
+- Separate roles: migrations run as the **owner** role (`axentra migrate --grant-runtime-role
+  axentra_app`, or `database.migration_url_ref`), and the API, the worker and the notification
+  dispatcher connect as the **runtime** role, which owns no table. Production refuses to start when
+  the runtime role owns the tables protected by row-level security (it could switch RLS off);
+  `database.allow_table_owner = true` (`AXENTRA__DATABASE__ALLOW_TABLE_OWNER=true`) overrides this
+  with a warning at every start and should stay a temporary measure.
 - `database.pool_max` x number of API processes stays below PostgreSQL `max_connections` (leave
   room for migrations, backups and administration).
 - Limits: Axentra refuses bodies above `security.max_body_bytes` (10 MiB; uploads use

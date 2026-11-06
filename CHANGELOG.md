@@ -23,6 +23,17 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   The prefixes are module constants of `axentra.events.http_client`. CI prints the Python version of every
   test matrix entry (3.11, 3.12, 3.13).
 
+### Changed (breaking for production)
+- Database roles (MUP-ONA A6, PS-6): `database.allow_table_owner` is now `bool | None` with default `None`
+  (was `true`). `None` means refused in production and allowed in development and test, so a production
+  instance whose database role owns the tables protected by row-level security now refuses to start with a
+  `ConfigurationError` that names the fix: migrate with a separate owner role (`database.migration_url_ref`,
+  `axentra migrate --grant-runtime-role <role>`) and connect as a runtime role without ownership, or set
+  `database.allow_table_owner = true` (`AXENTRA__DATABASE__ALLOW_TABLE_OWNER=true`), which starts with the
+  warning as before. An explicit `false` refuses the owner in every environment; `allow_superuser = true` no
+  longer lets a non-superuser owning role through in production. New `Settings.table_owner_allowed`. The
+  compose files already use separate roles. The database pool is closed when the start-up role check fails.
+
 ### Added (TODO abatement round 2, 2026-11-06; all `/v1` changes are additive)
 - Password reset and email verification by single-use email links: `POST /v1/auth/password-reset` (always `202`,
   the work runs after the response, so neither the answer nor its timing reveals whether the address exists),
