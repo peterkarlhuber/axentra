@@ -10675,6 +10675,8 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description Page size (1-200, default 50) */
                 limit?: number | null;
+                /** @description `words`: web search syntax. `prefix` (search as you type): every term must match, and terms of two or more characters also match words that start with them */
+                match?: "words" | "prefix";
                 /** @description Web search syntax: words (all must match), "quoted phrase", or, -excluded */
                 q: string;
             };

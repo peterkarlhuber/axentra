@@ -27,6 +27,7 @@ from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.search.models import (
     MARK_START,
     MARK_STOP,
+    MAX_PREFIX_TERMS,
     IndexDocument,
     IndexResult,
     KindCount,
@@ -197,9 +198,22 @@ class PostgresSearchAdapter:
             "body_opts": _BODY_OPTS,
         }
         kind_filter = " AND d.kind = ANY(%(kinds)s)" if query.kinds else ""
+        if query.match == "prefix":
+            # Terms are only letters and digits (split on everything else), so quoting them in the
+            # tsquery syntax is safe; the configuration still normalizes each one (case, stemming).
+            params["max_terms"] = MAX_PREFIX_TERMS
+            tsquery = (
+                "(SELECT to_tsquery(%(lang)s::regconfig, coalesce(string_agg("
+                " chr(39) || term || chr(39) || CASE WHEN char_length(term) >= 2 THEN ':*' ELSE '' END,"
+                " ' & ' ORDER BY n), ''))"
+                " FROM (SELECT term, n FROM regexp_split_to_table(%(q)s, '[^[:alnum:]]+')"
+                " WITH ORDINALITY AS t(term, n) WHERE term <> '' ORDER BY n LIMIT %(max_terms)s) terms)"
+            )
+        else:
+            tsquery = "websearch_to_tsquery(%(lang)s::regconfig, %(q)s)"
         # Rank and page first; ts_headline (expensive on long bodies) runs only for the page.
         sql = (
-            "WITH q AS (SELECT websearch_to_tsquery(%(lang)s::regconfig, %(q)s) AS query),"
+            f"WITH q AS (SELECT {tsquery} AS query),"
             " page AS ("
             "  SELECT d.id, d.kind, d.ref_id, d.title, d.body, d.metadata, d.updated_at, d.language,"
             "         ts_rank(d.search_vector, q.query) AS rank"

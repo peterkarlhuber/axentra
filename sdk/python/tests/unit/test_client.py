@@ -799,7 +799,9 @@ def test_search_sends_repeated_kinds_and_parses_hits() -> None:
     assert rec.last.url.params.get_list("kind") == ["note", "task"] and rec.last.url.params["q"] == "q4"
     assert page.items[0].rank == 0.6 and page.items[0].title_highlight.startswith("<mark>")
     assert [h.ref_id for h in ax.search.iter("p", "t", "q4")] == ["rec_1"]
-    assert "kind" not in rec.last.url.params
+    assert "kind" not in rec.last.url.params and "match" not in rec.last.url.params
+    ax.search.query("p", "t", "q", match="prefix")
+    assert rec.last.url.params["match"] == "prefix"
     assert ax.search.kinds("p", "t")[0].count == 3
 
 

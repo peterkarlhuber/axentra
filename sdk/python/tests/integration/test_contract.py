@@ -390,6 +390,7 @@ def test_search_index_query_kinds_and_remove(
     c.search.index(product, tenant, "task", "t-1", title="Plan the offsite", metadata={"due": "2026-12-01"})
     hits = c.search.query(product, tenant, "plan")
     assert {h.ref_id for h in hits.items} == {"n-1", "t-1"}
+    assert [h.ref_id for h in c.search.query(product, tenant, "quart", match="prefix").items] == ["n-1"]
     only_tasks = [h.ref_id for h in c.search.iter(product, tenant, "plan", kinds=["task"], page_size=1)]
     assert only_tasks == ["t-1"]
     assert {(k.kind, k.count) for k in c.search.kinds(product, tenant)} == {("note", 1), ("task", 1)}

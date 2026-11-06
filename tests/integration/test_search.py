@@ -436,3 +436,42 @@ def test_kinds_need_an_adapter_that_can_list_them(two_tenants):
     svc.adapter = NoKinds()  # type: ignore[assignment]
     r = world.admin.get(f"{_base(pid, t1)}/kinds")
     assert r.status_code == 409 and "cannot list kinds" in r.json()["detail"]
+
+
+def test_prefix_match_for_search_as_you_type(two_tenants):
+    world, pid, t1, t2 = two_tenants
+    a = world.admin
+    assert _put(
+        a, pid, t1, "invoice", "inv-1", title="Invoice 2026-001", body="Consulting for ACME"
+    ).status_code in (200, 201)
+    assert _put(
+        a, pid, t1, "contact", "c-1", title="Ingrid Invers", body="o'brien@example.com"
+    ).status_code in (200, 201)
+    assert _put(a, pid, t2, "invoice", "inv-9", title="Invoice other tenant").status_code in (200, 201)
+
+    def refs(q, **params):
+        r = _search(a, pid, t1, q, **params)
+        assert r.status_code == 200, r.text
+        return sorted(h["ref_id"] for h in r.json()["items"])
+
+    # Words mode (default) needs whole words; prefix mode completes them.
+    assert refs("inv") == []
+    assert refs("inv", match="prefix") == ["c-1", "inv-1"]
+    assert refs("Invo", match="prefix") == ["inv-1"]
+    assert refs("invoice cons", match="prefix") == ["inv-1"]  # every term must match
+    assert refs("invoice zzz", match="prefix") == []
+    # Highlighting marks the completed word.
+    hit = _search(a, pid, t1, "consult", match="prefix").json()["items"][0]
+    assert "Consulting" in str(hit["body_highlight"])
+    # Operators and quotes are plain text in prefix mode (no tsquery syntax injection).
+    for text in ("inv & !x", "'inv':*", "inv | (", "o'brien", "\\", "-inv", "<->", ":*"):
+        r = _search(a, pid, t1, text, match="prefix")
+        assert r.status_code == 200, (text, r.text)
+    assert refs("o'brien", match="prefix") == ["c-1"]
+    # Only punctuation: no terms, no hits (not an error).
+    assert refs("!!! ---", match="prefix") == []
+    # One-letter terms match whole words only (a prefix of one letter would match nearly all).
+    assert refs("i", match="prefix") == []
+    # Tenant isolation holds in prefix mode.
+    assert refs("other", match="prefix") == []
+    assert _search(a, pid, t1, "inv", match="fuzzy").status_code == 422

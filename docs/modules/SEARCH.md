@@ -18,7 +18,7 @@ by itself.
 | **Product namespace** | Every document carries its `product_id` and `tenant_id`. Products never see each other's documents, even when they use the same kinds and ref ids. |
 | **Search vector** | A generated `tsvector` column: `title` with weight A, `body` with weight B, in the document's text search configuration. GIN index. |
 | **Language** | `search.language` (default `simple`: lower-casing, no stemming, no stop words, language independent). Any PostgreSQL text search configuration works, e.g. `english` or `german` (stemming, stop words). Each document stores the configuration it was indexed with; queries use the configured one. After changing the setting, re-index (upsert) existing documents. Until then, they match only on tokens that both configurations produce the same way. |
-| **Query** | Web search syntax (`websearch_to_tsquery`): all words must match; `"quoted phrase"`; `or`; `-word` excludes. User input is never parsed as raw `tsquery` operators, so it cannot cause a syntax error. A query without searchable words (e.g. only punctuation, or only stop words) returns no hits. |
+| **Query** | Web search syntax (`websearch_to_tsquery`): all words must match; `"quoted phrase"`; `or`; `-word` excludes. User input is never parsed as raw `tsquery` operators, so it cannot cause a syntax error. A query without searchable words (e.g. only punctuation, or only stop words) returns no hits. With `match=prefix` (search as you type) the text is split into terms of letters and digits (at most 8; operators and quotes are plain text); every term must match, and terms of two or more characters also match longer words that start with them (`inv` finds `invoice`). |
 | **Ranking** | `ts_rank` (title matches outweigh body matches; more occurrences rank higher), then newest `updated_at`, then id. |
 | **Highlights** | `title_highlight` (the whole title) and `body_highlight` (up to two fragments separated by ` ... `) from `ts_headline`. They are **HTML-escaped text** in which only the matches are wrapped in `<mark>...</mark>`, so a client may render them as HTML. All other fields (e.g. `title`) are raw text. |
 | **Adapter** | `SearchAdapter` protocol (`upsert`, `get`, `delete`, `query`). `PostgresSearchAdapter` is the default. |
@@ -64,7 +64,7 @@ All paths are under `/v1/products/{product_id}/tenants/{tenant_id}/search`. Erro
 
 | Method | Path | Permission | Response |
 |---|---|---|---|
-| GET | `?q&kind&limit&cursor` | `search:query` | `Page[SearchHit]`. `q` 1..500 characters, required. `kind` repeatable (at most 20). `limit` 1..200, default 20 |
+| GET | `?q&kind&match&limit&cursor` | `search:query` | `Page[SearchHit]`. `q` 1..500 characters, required. `kind` repeatable (at most 20). `match` `words` (default) or `prefix` (search as you type). `limit` 1..200, default 20 |
 | GET | `/kinds` | `search:query` | `[{kind, count}]`: the kinds indexed in the tenant with their document counts, in kind order (at most 500), for a kind picker. An adapter without `kinds()` answers `409` |
 | GET | `/documents/{kind}/{ref_id}` | `search:query` | `SearchDocument` |
 | PUT | `/documents/{kind}/{ref_id}` `{title, body, metadata}` | `search:index` | `201 SearchDocument` when created, `200` when replaced. `413` when the body is too long, `422` on invalid input (e.g. neither title nor body) |
@@ -122,7 +122,8 @@ grant `search:index` through a custom role.
 - Highlights are HTML-escaped on the server. The highlighter's delimiters are private-use
   characters (U+E000/U+E001) that are stripped from indexed text, so a document cannot inject
   markup or fake `<mark>` tags. NUL characters are stripped as well.
-- `q` is passed to `websearch_to_tsquery` as a bound parameter; `search.language` must match
+- `q` is passed to `websearch_to_tsquery` as a bound parameter (`match=prefix`: split on every
+  character that is not a letter or digit, so only letters and digits reach `to_tsquery`, quoted); `search.language` must match
   `^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$` and is checked against PostgreSQL on first use (an unknown
   configuration is a server configuration error, reported as `500 internal` without details).
 - The audit trail never contains title, body or metadata. Do not put secrets into indexed text or
@@ -149,8 +150,11 @@ grant `search:index` through a custom role.
 - **No external adapters shipped.** Only `PostgresSearchAdapter` exists. An external engine
   (OpenSearch, Meilisearch, ...) cannot share Axentra's transaction, so its audit event would follow
   the write instead of being atomic with it.
-- **No prefix (search-as-you-type) or fuzzy matching**, and no accent folding (`unaccent` is not
-  used): `café` does not match `cafe` with the `simple` configuration.
+- **No fuzzy matching and no accent folding** (`unaccent` and `pg_trgm` are not used): `café`
+  does not match `cafe` with the `simple` configuration, and a typo finds nothing. Both need
+  PostgreSQL extensions, and `unaccent` in the generated `tsvector` needs an immutable wrapper
+  function and a rebuild of the index; an operator would have to install the extensions (Axentra's
+  migrations never create extensions). Prefix matching (`match=prefix`) needs neither.
 - **One language per installation.** There is no per-document or per-tenant language; changing it
   requires re-indexing.
 - **Tenant scope only.** There is no product-wide search across tenants, and no per-document access

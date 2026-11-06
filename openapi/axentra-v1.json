@@ -17183,6 +17183,22 @@
             }
           },
           {
+            "description": "`words`: web search syntax. `prefix` (search as you type): every term must match, and terms of two or more characters also match words that start with them",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "default": "words",
+              "description": "`words`: web search syntax. `prefix` (search as you type): every term must match, and terms of two or more characters also match words that start with them",
+              "enum": [
+                "words",
+                "prefix"
+              ],
+              "title": "Match",
+              "type": "string"
+            }
+          },
+          {
             "description": "Page size (1-200, default 50)",
             "in": "query",
             "name": "limit",

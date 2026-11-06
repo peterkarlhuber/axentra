@@ -1659,9 +1659,17 @@ class AsyncSearch(_Resource):
         kinds: Sequence[str] | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        match: str | None = None,
     ) -> Page[SearchHit]:
-        """Best matches first. ``q`` takes words, "phrases" and -exclusions."""
-        params = {"q": q, "kind": list(kinds) if kinds else None, "limit": limit, "cursor": cursor}
+        """Best matches first. ``q`` takes words, "phrases" and -exclusions; with
+        ``match="prefix"`` (search as you type) terms also match words that start with them."""
+        params = {
+            "q": q,
+            "kind": list(kinds) if kinds else None,
+            "limit": limit,
+            "cursor": cursor,
+            "match": match,
+        }
         result: Page[SearchHit] = await self._c._get(
             _tenant(product_id, tenant_id, "search"), Page[SearchHit], params
         )
@@ -1675,11 +1683,12 @@ class AsyncSearch(_Resource):
         *,
         kinds: Sequence[str] | None = None,
         page_size: int | None = None,
+        match: str | None = None,
     ) -> AsyncIterator[SearchHit]:
         return self._c._iterate(
             _tenant(product_id, tenant_id, "search"),
             SearchHit,
-            {"q": q, "kind": list(kinds) if kinds else None},
+            {"q": q, "kind": list(kinds) if kinds else None, "match": match},
             page_size,
         )
 

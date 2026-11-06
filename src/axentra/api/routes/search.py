@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Path, Query, Response
 from pydantic import BaseModel, Field
@@ -64,10 +64,19 @@ def search(
     kind: list[str] | None = Query(
         None, max_length=MAX_KINDS, description="Only these kinds (repeat the parameter for several)"
     ),
+    match: Literal["words", "prefix"] = Query(
+        "words",
+        description=(
+            "`words`: web search syntax. `prefix` (search as you type): every term must match, and"
+            " terms of two or more characters also match words that start with them"
+        ),
+    ),
     limit: Limit = None,
     cursor: Cursor = None,
 ) -> Page[SearchHit]:
-    return _svc(ax).query(principal, product_id, tenant_id, q, kinds=kind, limit=limit, cursor=cursor)
+    return _svc(ax).query(
+        principal, product_id, tenant_id, q, kinds=kind, limit=limit, cursor=cursor, match=match
+    )
 
 
 @router.get(
