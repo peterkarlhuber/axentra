@@ -10,7 +10,7 @@ from typing import Any
 
 INVITATION = "invitation"
 PRODUCT_INVITATION = "product_invitation"
-PASSWORD_RESET = "password_reset"  # noqa: S105 - a template key, not a secret
+PASSWORD_RESET = "password_reset"  # noqa: S105 - a template key, not a secret  # nosec B105
 EMAIL_VERIFICATION = "email_verification"
 
 #: Template keys only Axentra itself may send (never through ``POST .../notify/send``), whether or

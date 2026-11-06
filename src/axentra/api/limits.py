@@ -162,7 +162,7 @@ class DatabaseWindows:
                     " RETURNING hits, 60 - extract(epoch FROM now() - window_start)::float8 AS left_s",
                     (self.prefix + key,),
                 )
-                if random.random() < 0.01:  # noqa: S311 - housekeeping, not security
+                if random.random() < 0.01:  # noqa: S311 - housekeeping, not security  # nosec B311
                     tx.execute(
                         "DELETE FROM axentra_rate_limits WHERE window_start < now() - interval '10 minutes'"
                     )

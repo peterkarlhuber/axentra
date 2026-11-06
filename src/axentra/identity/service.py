@@ -48,8 +48,8 @@ _USER_COLUMNS = (
     " pr.role AS platform_role"
 )
 #: Token prefixes (recognizable in logs and by secret scanners; the rest is 256 random bits).
-RESET_TOKEN_PREFIX = "axpwr_"  # noqa: S105 (a prefix, not a secret)
-VERIFY_TOKEN_PREFIX = "axemv_"  # noqa: S105
+RESET_TOKEN_PREFIX = "axpwr_"  # noqa: S105 - a prefix, not a secret  # nosec B105
+VERIFY_TOKEN_PREFIX = "axemv_"  # noqa: S105 - a prefix, not a secret  # nosec B105
 #: A new reset or verification email for the same account is sent at most once per this period.
 ACCOUNT_EMAIL_COOLDOWN = timedelta(seconds=60)
 _USER_FROM = "axentra_users u LEFT JOIN axentra_platform_roles pr ON pr.user_id = u.id"
