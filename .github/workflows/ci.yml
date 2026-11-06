@@ -77,22 +77,16 @@ jobs:
           sudo apt-get install -y -q postgresql-client-${{ matrix.postgres }}
           echo "AXENTRA_TEST_PG_BINDIR=/usr/lib/postgresql/${{ matrix.postgres }}/bin" >> "$GITHUB_ENV"
       - name: Run tests (skips are reported, not hidden)
-        run: pytest -ra --cov --cov-report=term --junitxml=test-results.xml
-      - name: Fail if PostgreSQL tests were skipped
-        run: |
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-          root = ET.parse("test-results.xml").getroot()
-          suite = root if root.tag == "testsuite" else root.find("testsuite")
-          skipped = int(suite.get("skipped", 0))
-          print(f"tests={suite.get('tests')} failures={suite.get('failures')} errors={suite.get('errors')} skipped={skipped}")
-          raise SystemExit(1 if skipped else 0)
-          PY
+        run: pytest -ra --cov --cov-report=term --junitxml=junit-test.xml
+      # The skipped tests must equal tests/ci/skipped-test.txt (one line per test with its reason); an unexpected
+      # skip (for example PostgreSQL tests without a database) or a test that no longer skips fails the job.
+      - name: Skipped tests match the expectation
+        run: python scripts/check_skips.py junit-test.xml tests/ci/skipped-test.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-results-py${{ matrix.python }}-pg${{ matrix.postgres }}
-          path: test-results.xml
+          path: junit-test.xml
 
   sdk-typescript:
     name: TypeScript SDK (generated types, unit tests, build)
@@ -157,18 +151,11 @@ jobs:
           ruff format --check src tests scripts
           mypy
           python scripts/unasync.py --check
-      - name: Unit + integration tests against an in-process server (skips are failures)
+      - name: Unit + integration tests against an in-process server
         working-directory: sdk/python
-        run: |
-          pytest -ra tests/unit tests/integration --junitxml=sdk-results.xml
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-          root = ET.parse("sdk-results.xml").getroot()
-          suite = root if root.tag == "testsuite" else root.find("testsuite")
-          skipped = int(suite.get("skipped", 0))
-          print(f"tests={suite.get('tests')} failures={suite.get('failures')} errors={suite.get('errors')} skipped={skipped}")
-          raise SystemExit(1 if skipped else 0)
-          PY
+        run: pytest -ra tests/unit tests/integration --junitxml=junit-sdk-python.xml
+      - name: Skipped tests match the expectation
+        run: python scripts/check_skips.py sdk/python/junit-sdk-python.xml tests/ci/skipped-sdk-python.txt
 
   sdk-e2e:
     name: SDK contract tests against axentra serve
@@ -200,7 +187,9 @@ jobs:
       - run: npm ci --no-audit --no-fund
         working-directory: sdk/typescript
       - name: Start a PostgreSQL-backed server and run both SDK e2e suites
-        run: AXENTRA_PYTHON="$(command -v python)" scripts/sdk-e2e.sh
+        run: AXENTRA_PYTHON="$(command -v python)" SDK_E2E_JUNITXML="$PWD/junit-sdk-e2e.xml" scripts/sdk-e2e.sh
+      - name: Skipped tests match the expectation (Python SDK e2e suite)
+        run: python scripts/check_skips.py junit-sdk-e2e.xml tests/ci/skipped-sdk-e2e.txt
 
   package:
     name: Package builds and installs headless
@@ -282,6 +271,14 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
-      - run: pip install -e ".[server,oidc,s3]" pip-audit bandit
+      - run: pip install -e ".[server,oidc,s3]" pip-audit==2.10.1 bandit
       - run: bandit -q -r src -c pyproject.toml
-      - run: pip-audit --skip-editable --progress-spinner off
+      # Known vulnerabilities in the installed dependencies (the pattern of nodestro-runtime's CI). Blocking: an
+      # advisory that was reviewed and cannot be fixed yet goes into PIP_AUDIT_IGNORE (space-separated IDs, each
+      # with its reason in this comment). None today.
+      - name: Dependency audit
+        env:
+          PIP_AUDIT_IGNORE: ""
+        run: |
+          args=(); for id in $PIP_AUDIT_IGNORE; do args+=(--ignore-vuln "$id"); done
+          pip-audit --skip-editable --progress-spinner off "${args[@]}"

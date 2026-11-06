@@ -20,6 +20,8 @@
 #   NPM                        npm binary (default: npm on PATH)
 #   SDK_E2E_ONLY               "ts" or "python" to run only one suite
 #   SDK_E2E_KEEP               "1" keeps the server running and prints the env (debugging; Ctrl-C ends it)
+#   SDK_E2E_JUNITXML           absolute path: the Python e2e suite writes its JUnit XML report there (CI compares
+#                              its skipped tests with tests/ci/skipped-sdk-e2e.txt, scripts/check_skips.py)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -149,7 +151,8 @@ if [[ -z "$ONLY" || "$ONLY" == "ts" ]]; then
 fi
 if [[ -z "$ONLY" || "$ONLY" == "python" ]]; then
   log "Python SDK e2e"
-  (cd "$ROOT/sdk/python" && "$PY" -m pytest -q -p no:cacheprovider tests/e2e) || status=1
+  junit=(); [[ -n "${SDK_E2E_JUNITXML:-}" ]] && junit=(--junitxml="$SDK_E2E_JUNITXML")
+  (cd "$ROOT/sdk/python" && "$PY" -m pytest -q -rs -p no:cacheprovider tests/e2e "${junit[@]}") || status=1
 fi
 [[ $status -eq 0 ]] && log "all SDK e2e suites passed" || log "SDK e2e FAILED"
 exit $status
