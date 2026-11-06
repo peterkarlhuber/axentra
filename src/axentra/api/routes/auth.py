@@ -287,6 +287,9 @@ def oidc_callback(
         # Tells the frontend that the invitation was accepted during the login (and for which
         # tenant), so it does not ask the person to confirm a used invitation again.
         target = with_query_param(target, "invitation_accepted", result.invitation_tenant_id)
+    elif result.invitation_product_id:
+        # The same for an invitation to the product team (accepted for this product).
+        target = with_query_param(target, "product_invitation_accepted", result.invitation_product_id)
     out = RedirectResponse(target, status_code=302)
     _login_cookie(ax, out, None)
     set_session_cookie(ax, out, result.session)

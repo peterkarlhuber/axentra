@@ -134,7 +134,7 @@ class Axentra:
                 settings,
                 self.identity,
                 self.secrets,
-                accept_invitation=self.tenancy.accept_invitation,
+                accept_invitation=self.tenancy.accept_any_invitation,
             )
         self.storage: StorageService | None = (
             StorageService(self.db, settings, self.authz, self.audit, self.keyring)
@@ -156,6 +156,7 @@ class Axentra:
                 self.db, settings, self.authz, self.audit, self.secrets, metrics=self.metrics
             )
             self.on_invitation = self.notify.on_invitation
+            self.on_product_invitation = self.notify.on_product_invitation
         # Usage and billing (billing feeds plan limits and billing periods into usage via a policy).
         self.usage = UsageService(self.db, self.authz, self.audit)
         self.billing = BillingService(

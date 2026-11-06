@@ -424,3 +424,42 @@ def test_tenants_sorted_by_name_with_cursor_paging(world):
         "zeta",
     ]
     assert world.admin.get(url, params={"sort": "slug"}).status_code == 422
+
+
+def test_user_memberships_are_listed_as_far_as_the_caller_may_read(world):
+    p1, p2 = _product(world, "crm"), _product(world, "erp")
+    t1, t2 = _tenant(world, p1, "acme"), _tenant(world, p1, "globex")
+    t3 = _tenant(world, p2, "initech")
+    uid = world.user("multi@example.com")
+    for pid, tid, role in [(p1, t1, "member"), (p1, t2, "viewer"), (p2, t3, "tenant_admin")]:
+        r = world.admin.post(
+            f"/v1/products/{pid}/tenants/{tid}/members", json={"email": "multi@example.com", "role": role}
+        )
+        assert r.status_code == 201, r.text
+    r = world.admin.post(
+        f"/v1/products/{p2}/members", json={"email": "multi@example.com", "role": "product_viewer"}
+    )
+    assert r.status_code == 201, r.text
+    # Platform admin: everything.
+    body = world.admin.get(f"/v1/users/{uid}/memberships").json()
+    assert [(m["product_slug"], m["role"]) for m in body["products"]] == [("erp", "product_viewer")]
+    assert [(m["product_slug"], m["tenant_slug"], m["role"]) for m in body["tenants"]] == [
+        ("crm", "acme", "member"),
+        ("crm", "globex", "viewer"),
+        ("erp", "initech", "tenant_admin"),
+    ]
+    assert body["tenants"][0]["tenant_name"] == "Acme" and body["tenants"][0]["tenant_status"] == "active"
+    # A product admin of crm sees only crm's memberships of that user.
+    world.user("crm-admin@example.com")
+    r = world.admin.post(
+        f"/v1/products/{p1}/members", json={"email": "crm-admin@example.com", "role": "product_admin"}
+    )
+    assert r.status_code == 201, r.text
+    op = world.login_as("crm-admin@example.com")
+    body = op.get(f"/v1/users/{uid}/memberships").json()
+    assert body["products"] == []
+    assert [m["tenant_slug"] for m in body["tenants"]] == ["acme", "globex"]
+    # An unrelated user cannot see the user at all; an unknown id is 404 too.
+    world.user("nobody@example.com")
+    assert world.login_as("nobody@example.com").get(f"/v1/users/{uid}/memberships").status_code == 404
+    assert world.admin.get("/v1/users/usr_unknown/memberships").status_code == 404

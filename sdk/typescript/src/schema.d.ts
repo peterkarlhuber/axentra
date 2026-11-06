@@ -368,6 +368,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/product-invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept an invitation to a product team as the logged-in user
+         * @description A refusal answers `403 forbidden` with `reason`: `email_mismatch`, `scope_inactive` (the
+         *     product is archived; the invitation stays open) or `inviter_lost_access`. An unknown, used,
+         *     revoked or expired token (or a tenant invitation's token) answers `404`. A product role the
+         *     user already has is kept.
+         */
+        post: operations["accept_invitation_v1_product_invitations_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products": {
         parameters: {
             query?: never;
@@ -610,6 +633,47 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Invitations to the product team (newest first, at most 500) */
+        get: operations["list_invitations_v1_products__product_id__invitations_get"];
+        put?: never;
+        /**
+         * Invite an operator by email; the token is returned once
+         * @description For operators without an account, or with one the caller cannot see (`POST .../members`
+         *     resolves only visible users). `product_members:manage` and the role ceiling. With the notify
+         *     module the invitee gets the `product_invitation` email (link: the invitation accept URL with
+         *     the token); the invitee signs in and accepts with `POST /v1/product-invitations/accept`.
+         */
+        post: operations["invite_v1_products__product_id__invitations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/invitations/{invitation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Invitation */
+        delete: operations["revoke_invitation_v1_products__product_id__invitations__invitation_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2025,6 +2089,28 @@ export interface paths {
         patch: operations["update_user_v1_users__user_id__patch"];
         trace?: never;
     };
+    "/v1/users/{user_id}/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The products and tenants a user is a member of (as far as the caller may read them)
+         * @description Platform `users:read`: every membership. Product operators: the product roles where they
+         *     hold `product_members:read` and the tenant memberships where they hold `members:read`. `404`
+         *     for users the caller cannot see (as `GET /v1/users/{user_id}`).
+         */
+        get: operations["user_memberships_v1_users__user_id__memberships_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{user_id}/sessions": {
         parameters: {
             query?: never;
@@ -3184,6 +3270,14 @@ export interface components {
             /** Token */
             token: string;
         };
+        /** NewProductInvitation */
+        NewProductInvitation: {
+            /** Accept Url */
+            accept_url?: string | null;
+            invitation: components["schemas"]["ProductInvitation"];
+            /** Token */
+            token: string;
+        };
         /**
          * NewWebhookSecret
          * @description Returned exactly once, at creation and rotation.
@@ -3652,6 +3746,60 @@ export interface components {
             };
             /** Slug */
             slug: string;
+        };
+        /**
+         * ProductInvitation
+         * @description An invitation to a product's team (operators, ``axentra_product_members``) with a product role.
+         */
+        ProductInvitation: {
+            /** Accepted At */
+            accepted_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Id */
+            id: string;
+            /** Invited By */
+            invited_by: string | null;
+            /** Product Id */
+            product_id: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Role */
+            role: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "accepted" | "revoked" | "expired";
+        };
+        /** ProductInvitationAccept */
+        ProductInvitationAccept: {
+            /**
+             * Token
+             * @description The `axpinv_...` token of the invitation
+             */
+            token: string;
+        };
+        /** ProductInvitationCreate */
+        ProductInvitationCreate: {
+            /** Email */
+            email: string;
+            /**
+             * Role
+             * @description A product role
+             * @default product_viewer
+             */
+            role?: string;
         };
         /** ProductMember */
         ProductMember: {
@@ -4760,6 +4908,66 @@ export interface components {
              */
             updated_at: string;
         };
+        /**
+         * UserMemberships
+         * @description Where a user is a member, limited to what the caller may read (see
+         *     :meth:`~axentra.tenancy.service.TenancyService.user_memberships`).
+         */
+        UserMemberships: {
+            /** Products */
+            products: components["schemas"]["UserProductRole"][];
+            /** Tenants */
+            tenants: components["schemas"]["UserTenantRole"][];
+        };
+        /**
+         * UserProductRole
+         * @description A user's role on a product (product member), as listed for that user.
+         */
+        UserProductRole: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Product Id */
+            product_id: string;
+            /** Product Name */
+            product_name: string;
+            /** Product Slug */
+            product_slug: string;
+            /** Role */
+            role: string;
+        };
+        /**
+         * UserTenantRole
+         * @description A user's membership in a tenant, as listed for that user.
+         */
+        UserTenantRole: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Product Id */
+            product_id: string;
+            /** Product Name */
+            product_name: string;
+            /** Product Slug */
+            product_slug: string;
+            /** Role */
+            role: string;
+            /** Tenant Id */
+            tenant_id: string;
+            /** Tenant Name */
+            tenant_name: string;
+            /** Tenant Slug */
+            tenant_slug: string;
+            /**
+             * Tenant Status
+             * @enum {string}
+             */
+            tenant_status: "active" | "suspended";
+        };
         /** UserUpdate */
         UserUpdate: {
             /** Platform Role */
@@ -5683,6 +5891,48 @@ export interface operations {
             };
         };
     };
+    accept_invitation_v1_product_invitations_accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductInvitationAccept"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductMember"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     list_products_v1_products_get: {
         parameters: {
             query?: never;
@@ -6508,6 +6758,129 @@ export interface operations {
                 content: {
                     "text/event-stream": unknown;
                 };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    list_invitations_v1_products__product_id__invitations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductInvitation"][];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    invite_v1_products__product_id__invitations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductInvitationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewProductInvitation"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    revoke_invitation_v1_products__product_id__invitations__invitation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
             422: {
@@ -11737,6 +12110,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    user_memberships_v1_users__user_id__memberships_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMemberships"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

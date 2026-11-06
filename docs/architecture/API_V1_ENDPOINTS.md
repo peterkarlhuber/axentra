@@ -34,6 +34,7 @@ summary. Permission names in brackets.
   tenant the caller needs `tenant:read`, `members:read`, `records:read`), and `api_keys`,
   `audit_events_24h`, `denied_events_24h` are `null`
 - `GET/POST /v1/products/{pid}/members`, `PATCH/DELETE /v1/products/{pid}/members/{user_id}` [product_members:*]
+- `GET/POST /v1/products/{pid}/invitations`, `DELETE .../invitations/{inv_id}` [product_members:read / product_members:manage, role ceiling]: invitations to the product team with a product role, for operators without an account or with one the caller cannot see (`POST .../members` resolves only visible users). The token (`axpinv_...`, returned once; emailed with the `product_invitation` template) is accepted with `POST /v1/product-invitations/accept` `{token}` (authenticated user) -> `ProductMember`; refusals as for tenant invitations (`403` with `reason` `email_mismatch`, `scope_inactive`, `inviter_lost_access`; audited as `tenancy.product_invitation.accept` `denied`); a tenant token there, or a product token on `/v1/invitations/accept`, is `404`. An existing product role is kept
   (role ceiling: `403` for roles above the caller's permissions or the owner rank; `404` for users
   not visible to the caller, see SECURITY_MODEL.md rules 8-9)
 
@@ -59,6 +60,7 @@ summary. Permission names in brackets.
 - `GET /v1/users?q=&status=` platform admin: all users; product admin: users of the product (`?product_id=`) [users:read]
 - `GET /v1/users/{uid}`, `PATCH /v1/users/{uid}` `{status: active|disabled}` [users:manage]
 - `GET /v1/users/{uid}/sessions`, `POST /v1/users/{uid}/sessions/revoke` [users:manage]
+- `GET /v1/users/{uid}/memberships` -> `{products: [{product_id, product_slug, product_name, role, created_at}], tenants: [{product_id, product_slug, product_name, tenant_id, tenant_slug, tenant_name, tenant_status, role, created_at}]}`: everything with `users:read`; product operators see the product roles where they hold `product_members:read` and the tenant memberships where they hold `members:read` (`404` for users they cannot see)
 
 ## Access
 - `GET /v1/permissions` -> built-in permission catalog `{name, scope, description, source, read_like, ...}`

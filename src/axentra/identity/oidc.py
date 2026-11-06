@@ -447,6 +447,8 @@ class LoginResult:
     invitation_accepted: bool = False
     #: The tenant of the invitation accepted right after the login (``invitation`` on start), if any.
     invitation_tenant_id: str | None = None
+    #: The product of a product-team invitation (``axpinv_``) accepted right after the login, if any.
+    invitation_product_id: str | None = None
     #: The host context given to :meth:`OidcService.start` (empty when none was given).
     context: dict[str, str] = field(default_factory=dict)
     identity: ExternalIdentity | None = None
@@ -730,6 +732,7 @@ class OidcService:
         )
         accepted = False
         tenant_id: str | None = None
+        product_id: str | None = None
         if invitation and self.accept_invitation is not None:
             principal = Principal(
                 actor=Actor(
@@ -747,6 +750,8 @@ class OidcService:
                 membership = self.accept_invitation(principal, invitation)
                 accepted = True
                 tenant_id = getattr(membership, "tenant_id", None)
+                if tenant_id is None:
+                    product_id = getattr(membership, "product_id", None)
             except AxentraError as exc:
                 # The login stands; the invitation can still be accepted explicitly.
                 logger.info("invitation not accepted after OIDC login: %s", exc.detail)
@@ -756,6 +761,7 @@ class OidcService:
             return_to=row["return_to"],
             invitation_accepted=accepted,
             invitation_tenant_id=tenant_id if isinstance(tenant_id, str) else None,
+            invitation_product_id=product_id if isinstance(product_id, str) else None,
             context=context,
             identity=identity,
         )

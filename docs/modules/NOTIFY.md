@@ -13,7 +13,7 @@ development mailbox and delivery statistics. Package `axentra.notify`, HTTP rout
   `sample_data` (for previews), `variants` per locale (`subject`, `text`, optional `html`),
   `sensitive` flag, `version` (optimistic concurrency with `If-Match`). Every template needs an
   `en` variant. **Built-in defaults** live in code (`axentra.notify.builtin`, version 0): currently
-  `invitation` (de/en). Creating a template with the same key overrides the default; deleting the
+  `invitation` and `product_invitation` (de/en). Creating a template with the same key overrides the default; deleting the
   override restores it.
 - **Rendering** (`axentra.notify.render`): only `{{ name }}` placeholders. No expressions,
   filters, attribute access or code execution; anything else starting with `{{` is rejected when
@@ -110,7 +110,9 @@ member of the tenant or a product operator (else 404, so global users cannot be 
 
 `Axentra` sets `ax.on_invitation = ax.notify.on_invitation`; the tenancy API calls it after
 creating an invitation. It enqueues the `invitation` template (idempotency key
-`invitation:<inv_id>`) and sets `accept_url` in the API response. The link is the first of:
+`invitation:<inv_id>`) and sets `accept_url` in the API response. `ax.on_product_invitation`
+does the same for invitations to a product team (template `product_invitation`, a product-level
+message without tenant; the token starts with `axpinv_`). The link is the first of:
 
 1. the product setting `invitation_accept_url` (http(s) only; anything else is ignored),
 2. the installation setting `notify.invitation_accept_url` (http(s), https in production; checked

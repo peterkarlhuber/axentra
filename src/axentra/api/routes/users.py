@@ -10,7 +10,7 @@ from axentra.api.routes.common import Cursor, Limit
 from axentra.core.errors import Forbidden, NotFound
 from axentra.core.pagination import Page
 from axentra.identity.models import Session, User
-from axentra.tenancy.models import Product, Tenant
+from axentra.tenancy.models import Product, Tenant, UserMemberships
 
 router = APIRouter(prefix="/v1", tags=["users"])
 
@@ -159,6 +159,20 @@ def update_user(user_id: str, body: UserUpdate, principal: CurrentPrincipal, ax:
             principal, user_id, None if body.platform_role == "none" else body.platform_role
         )
     return user
+
+
+@router.get(
+    "/users/{user_id}/memberships",
+    response_model=UserMemberships,
+    summary="The products and tenants a user is a member of (as far as the caller may read them)",
+)
+def user_memberships(user_id: str, principal: CurrentPrincipal, ax: Ax) -> UserMemberships:
+    """Platform `users:read`: every membership. Product operators: the product roles where they
+    hold `product_members:read` and the tenant memberships where they hold `members:read`. `404`
+    for users the caller cannot see (as `GET /v1/users/{user_id}`)."""
+    _can_see_user(ax, principal, user_id)
+    ax.identity.get_user(user_id)  # 404 for an unknown id
+    return ax.tenancy.user_memberships(principal, user_id)
 
 
 @router.get("/users/{user_id}/sessions", response_model=list[Session], summary="Active sessions of a user")

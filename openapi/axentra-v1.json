@@ -3052,6 +3052,34 @@
         "title": "NewInvitation",
         "type": "object"
       },
+      "NewProductInvitation": {
+        "properties": {
+          "accept_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accept Url"
+          },
+          "invitation": {
+            "$ref": "#/components/schemas/ProductInvitation"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation",
+          "token"
+        ],
+        "title": "NewProductInvitation",
+        "type": "object"
+      },
       "NewWebhookSecret": {
         "description": "Returned exactly once, at creation and rotation.",
         "properties": {
@@ -4403,6 +4431,132 @@
           "name"
         ],
         "title": "ProductCreate",
+        "type": "object"
+      },
+      "ProductInvitation": {
+        "description": "An invitation to a product's team (operators, ``axentra_product_members``) with a product role.",
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "invited_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invited By"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "accepted",
+              "revoked",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "product_id",
+          "email",
+          "role",
+          "invited_by",
+          "created_at",
+          "expires_at",
+          "accepted_at",
+          "revoked_at",
+          "status"
+        ],
+        "title": "ProductInvitation",
+        "type": "object"
+      },
+      "ProductInvitationAccept": {
+        "properties": {
+          "token": {
+            "description": "The `axpinv_...` token of the invitation",
+            "maxLength": 200,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "ProductInvitationAccept",
+        "type": "object"
+      },
+      "ProductInvitationCreate": {
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "default": "product_viewer",
+            "description": "A product role",
+            "maxLength": 64,
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ProductInvitationCreate",
         "type": "object"
       },
       "ProductMember": {
@@ -7278,6 +7432,125 @@
         "title": "User",
         "type": "object"
       },
+      "UserMemberships": {
+        "description": "Where a user is a member, limited to what the caller may read (see\n:meth:`~axentra.tenancy.service.TenancyService.user_memberships`).",
+        "properties": {
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/UserProductRole"
+            },
+            "title": "Products",
+            "type": "array"
+          },
+          "tenants": {
+            "items": {
+              "$ref": "#/components/schemas/UserTenantRole"
+            },
+            "title": "Tenants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "products",
+          "tenants"
+        ],
+        "title": "UserMemberships",
+        "type": "object"
+      },
+      "UserProductRole": {
+        "description": "A user's role on a product (product member), as listed for that user.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "product_name": {
+            "title": "Product Name",
+            "type": "string"
+          },
+          "product_slug": {
+            "title": "Product Slug",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "product_slug",
+          "product_name",
+          "role",
+          "created_at"
+        ],
+        "title": "UserProductRole",
+        "type": "object"
+      },
+      "UserTenantRole": {
+        "description": "A user's membership in a tenant, as listed for that user.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "product_name": {
+            "title": "Product Name",
+            "type": "string"
+          },
+          "product_slug": {
+            "title": "Product Slug",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "tenant_id": {
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "tenant_name": {
+            "title": "Tenant Name",
+            "type": "string"
+          },
+          "tenant_slug": {
+            "title": "Tenant Slug",
+            "type": "string"
+          },
+          "tenant_status": {
+            "enum": [
+              "active",
+              "suspended"
+            ],
+            "title": "Tenant Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "product_slug",
+          "product_name",
+          "tenant_id",
+          "tenant_slug",
+          "tenant_name",
+          "tenant_status",
+          "role",
+          "created_at"
+        ],
+        "title": "UserTenantRole",
+        "type": "object"
+      },
       "UserUpdate": {
         "properties": {
           "platform_role": {
@@ -8856,6 +9129,58 @@
         ]
       }
     },
+    "/v1/product-invitations/accept": {
+      "post": {
+        "description": "A refusal answers `403 forbidden` with `reason`: `email_mismatch`, `scope_inactive` (the\nproduct is archived; the invitation stays open) or `inviter_lost_access`. An unknown, used,\nrevoked or expired token (or a tenant invitation's token) answers `404`. A product role the\nuser already has is kept.",
+        "operationId": "accept_invitation_v1_product_invitations_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductInvitationAccept"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductMember"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Accept an invitation to a product team as the logged-in user",
+        "tags": [
+          "products"
+        ]
+      }
+    },
     "/v1/products": {
       "get": {
         "operationId": "list_products_v1_products_get",
@@ -10237,6 +10562,177 @@
         "summary": "Get Event",
         "tags": [
           "events"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/invitations": {
+      "get": {
+        "operationId": "list_invitations_v1_products__product_id__invitations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProductInvitation"
+                  },
+                  "title": "Response List Invitations V1 Products  Product Id  Invitations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Invitations to the product team (newest first, at most 500)",
+        "tags": [
+          "products"
+        ]
+      },
+      "post": {
+        "description": "For operators without an account, or with one the caller cannot see (`POST .../members`\nresolves only visible users). `product_members:manage` and the role ceiling. With the notify\nmodule the invitee gets the `product_invitation` email (link: the invitation accept URL with\nthe token); the invitee signs in and accepts with `POST /v1/product-invitations/accept`.",
+        "operationId": "invite_v1_products__product_id__invitations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductInvitationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewProductInvitation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Invite an operator by email; the token is returned once",
+        "tags": [
+          "products"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/invitations/{invitation_id}": {
+      "delete": {
+        "operationId": "revoke_invitation_v1_products__product_id__invitations__invitation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Revoke Invitation",
+        "tags": [
+          "products"
         ]
       }
     },
@@ -19536,6 +20032,59 @@
           }
         },
         "summary": "Enable/disable a user or set the platform role",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{user_id}/memberships": {
+      "get": {
+        "description": "Platform `users:read`: every membership. Product operators: the product roles where they\nhold `product_members:read` and the tenant memberships where they hold `members:read`. `404`\nfor users the caller cannot see (as `GET /v1/users/{user_id}`).",
+        "operationId": "user_memberships_v1_users__user_id__memberships_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMemberships"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "The products and tenants a user is a member of (as far as the caller may read them)",
         "tags": [
           "users"
         ]

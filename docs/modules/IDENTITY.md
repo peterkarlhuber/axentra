@@ -147,6 +147,8 @@ redirects and accept at most 1 MiB.
   also accepted right after the login (tenant membership with the invited role), and the callback
   adds `invitation_accepted=<tenant id>` to the `return_to` query so the frontend does not ask for
   a second confirmation (Studio checks that `/v1/me` lists that tenant before it shows "accepted").
+  A product team invitation (`axpinv_...`) works the same way: the operator joins the product
+  team and the callback adds `product_invitation_accepted=<product id>` instead.
   If accepting fails, the login still succeeds without the parameter and the frontend can call
   `POST /v1/invitations/accept`.
 - `allowed_email_domains` (case-insensitive, exact domain, no subdomains) is checked on **every**

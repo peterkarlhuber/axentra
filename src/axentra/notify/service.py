@@ -37,7 +37,7 @@ from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.identity.service import normalize_email
-from axentra.notify.builtin import BUILTIN_TEMPLATES, INVITATION, SYSTEM_ONLY_TEMPLATES
+from axentra.notify.builtin import BUILTIN_TEMPLATES, INVITATION, PRODUCT_INVITATION, SYSTEM_ONLY_TEMPLATES
 from axentra.notify.models import (
     LOCKED_CATEGORIES,
     DeliveryStats,
@@ -58,7 +58,7 @@ from axentra.notify.render import check_variables, placeholders, render_variant
 if TYPE_CHECKING:
     from axentra.notify.dispatcher import NotifyDispatcher
     from axentra.observability.metrics import MetricsRegistry
-    from axentra.tenancy.models import NewInvitation
+    from axentra.tenancy.models import NewInvitation, NewProductInvitation
 
 logger = logging.getLogger(__name__)
 
@@ -1246,6 +1246,49 @@ class NotifyService:
                 variables={
                     "product_name": product["name"],
                     "tenant_name": tenant["name"],
+                    "inviter_name": (inviter["name"] or inviter["email"] or product["name"])
+                    if inviter
+                    else product["name"],
+                    "role": inv.role,
+                    "accept_url": url,
+                    "expires_at": inv.expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+                },
+                fallback_locale=default_locale
+                if isinstance(default_locale, str) and len(default_locale) <= 20
+                else None,
+                idempotency_key=f"invitation:{inv.id}",
+                reason="invitation",
+            )
+        except Exception as exc:
+            logger.warning(
+                "could not enqueue the invitation email for invitation %s (%s)", inv.id, type(exc).__name__
+            )
+
+    def on_product_invitation(self, result: NewProductInvitation) -> None:
+        """Like :meth:`on_invitation` for an invitation to the product team (template
+        ``product_invitation``); never raises, never logs the token or the link."""
+        inv = result.invitation
+        try:
+            with self.db.transaction(DbScope.product(inv.product_id), read_only=True) as tx:
+                product = tx.one_or_404(
+                    "SELECT name, settings FROM axentra_products WHERE id = %s", (inv.product_id,)
+                )
+                inviter = (
+                    tx.one("SELECT name, email FROM axentra_users WHERE id = %s", (inv.invited_by,))
+                    if inv.invited_by
+                    else None
+                )
+            settings = product["settings"] or {}
+            url = self.invitation_accept_url(settings, result.token)
+            result.accept_url = url
+            default_locale = settings.get("default_locale")
+            self.enqueue_system(
+                inv.product_id,
+                None,
+                template_key=PRODUCT_INVITATION,
+                to_email=inv.email,
+                variables={
+                    "product_name": product["name"],
                     "inviter_name": (inviter["name"] or inviter["email"] or product["name"])
                     if inviter
                     else product["name"],

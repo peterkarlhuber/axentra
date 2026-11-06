@@ -98,7 +98,8 @@ class FakeProvider:
 def test_template_crud_versioning_and_preview(world):
     pid = _product(world)
     listed = world.admin.get(f"/v1/products/{pid}/notify/templates").json()
-    assert [t["key"] for t in listed] == ["invitation"] and listed[0]["builtin"] and listed[0]["version"] == 0
+    assert [t["key"] for t in listed] == ["invitation", "product_invitation"]
+    assert all(t["builtin"] and t["version"] == 0 for t in listed)
     t = _template(world, pid)
     assert t["version"] == 1 and not t["builtin"]
     r = world.admin.patch(

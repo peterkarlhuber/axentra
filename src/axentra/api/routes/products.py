@@ -7,7 +7,13 @@ from pydantic import BaseModel, Field
 
 from axentra.api.context import Ax, CurrentPrincipal
 from axentra.api.routes.common import IfMatch, parse_if_match
-from axentra.tenancy.models import Product, ProductMember, ProductOverview
+from axentra.tenancy.models import (
+    NewProductInvitation,
+    Product,
+    ProductInvitation,
+    ProductMember,
+    ProductOverview,
+)
 
 router = APIRouter(prefix="/v1/products", tags=["products"])
 
@@ -112,3 +118,66 @@ def change_member(
 def remove_member(product_id: str, user_id: str, principal: CurrentPrincipal, ax: Ax) -> Response:
     ax.tenancy.remove_product_member(principal, product_id, user_id)
     return Response(status_code=204)
+
+
+# -- product team invitations (operators) ---------------------------------------------------------
+
+
+class ProductInvitationCreate(BaseModel):
+    email: str = Field(max_length=320)
+    role: str = Field(default="product_viewer", max_length=64, description="A product role")
+
+
+class ProductInvitationAccept(BaseModel):
+    token: str = Field(max_length=200, description="The `axpinv_...` token of the invitation")
+
+
+@router.get(
+    "/{product_id}/invitations",
+    response_model=list[ProductInvitation],
+    summary="Invitations to the product team (newest first, at most 500)",
+)
+def list_invitations(product_id: str, principal: CurrentPrincipal, ax: Ax) -> list[ProductInvitation]:
+    return ax.tenancy.list_product_invitations(principal, product_id)
+
+
+@router.post(
+    "/{product_id}/invitations",
+    response_model=NewProductInvitation,
+    status_code=201,
+    summary="Invite an operator by email; the token is returned once",
+)
+def invite(
+    product_id: str, body: ProductInvitationCreate, principal: CurrentPrincipal, ax: Ax
+) -> NewProductInvitation:
+    """For operators without an account, or with one the caller cannot see (`POST .../members`
+    resolves only visible users). `product_members:manage` and the role ceiling. With the notify
+    module the invitee gets the `product_invitation` email (link: the invitation accept URL with
+    the token); the invitee signs in and accepts with `POST /v1/product-invitations/accept`."""
+    result = ax.tenancy.invite_to_product(principal, product_id, email=body.email, role=body.role)
+    hook = getattr(ax, "on_product_invitation", None)
+    if hook is not None:
+        hook(result)
+    return result
+
+
+@router.delete("/{product_id}/invitations/{invitation_id}", status_code=204)
+def revoke_invitation(product_id: str, invitation_id: str, principal: CurrentPrincipal, ax: Ax) -> Response:
+    ax.tenancy.revoke_product_invitation(principal, product_id, invitation_id)
+    return Response(status_code=204)
+
+
+accept_router = APIRouter(prefix="/v1", tags=["products"])
+
+
+@accept_router.post(
+    "/product-invitations/accept",
+    response_model=ProductMember,
+    summary="Accept an invitation to a product team as the logged-in user",
+)
+def accept_invitation(body: ProductInvitationAccept, principal: CurrentPrincipal, ax: Ax) -> ProductMember:
+    """A refusal answers `403 forbidden` with `reason`: `email_mismatch`, `scope_inactive` (the
+    product is archived; the invitation stays open) or `inviter_lost_access`. An unknown, used,
+    revoked or expired token (or a tenant invitation's token) answers `404`. A product role the
+    user already has is kept."""
+    return ax.tenancy.accept_product_invitation(principal, body.token)
