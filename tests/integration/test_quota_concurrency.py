@@ -109,3 +109,45 @@ def test_quotas_reservations_and_idempotency_under_concurrency(world: World) -> 
     assert sorted(hv) == [201] * 8 + [429] * 4
     end = a.get(f"{base}/usage/summary").json()[0]
     assert (end["value"], end["remaining"]) == (10.0, 0.0)
+
+
+def test_if_match_races_have_exactly_one_winner(world: World) -> None:
+    """Optimistic concurrency under real parallelism: N writers send the same ``If-Match`` at the
+    same moment; exactly one wins (200), all others get 412, and the stored state is the winner's
+    with the version bumped once."""
+    a = world.admin
+    pid = _ok(a.post("/v1/products", json={"slug": "race", "name": "R"}))["id"]
+    tid = _ok(a.post(f"/v1/products/{pid}/tenants", json={"slug": "rt", "name": "T"}))["id"]
+    perms = sorted(TENANT | {"tenants:update"})
+    secret = _ok(a.post(f"/v1/products/{pid}/api-keys", json={"name": "k", "permissions": perms}))["secret"]
+    n = 8
+
+    def client() -> TestClient:
+        return TestClient(world.app, headers={"Authorization": f"Bearer {secret}"})
+
+    def race(method: str, url: str, etag: str, body: Callable[[int], dict[str, Any]]) -> int:
+        res = _par(n, lambda i: client().request(method, url, json=body(i), headers={"If-Match": etag}))
+        codes = sorted(r.status_code for r in res)
+        assert codes == [200] + [412] * (n - 1), [r.text for r in res if r.status_code not in (200, 412)]
+        return next(i for i, r in enumerate(res) if r.status_code == 200)
+
+    base = f"/v1/products/{pid}/tenants/{tid}"
+    # Records: two rounds of full replaces on the same record.
+    rec = _ok(client().post(f"{base}/records/notes", json={"n": -1}))
+    for version in (1, 2):
+        winner = race("PUT", f"{base}/records/notes/{rec['id']}", f'"{version}"', lambda i: {"n": i})
+        got = a.get(f"{base}/records/notes/{rec['id']}").json()
+        assert got["data"] == {"n": winner} and got["version"] == version + 1
+
+    # File metadata.
+    f = _ok(client().post(f"{base}/files", files={"file": ("a.txt", b"a", "text/plain")}))
+    winner = race("PATCH", f"{base}/files/{f['id']}", "1", lambda i: {"name": f"name-{i}.txt"})
+    got = a.get(f"{base}/files/{f['id']}").json()
+    assert got["name"] == f"name-{winner}.txt" and got["version"] == 2
+
+    # Tenant storage quota.
+    winner = race(
+        "PUT", f"{base}/storage/quota", "0", lambda i: {"quota_bytes": 1000 + i, "quota_files": None}
+    )
+    usage = a.get(f"{base}/storage/usage").json()
+    assert usage["quota_bytes"] == 1000 + winner and usage["quota_version"] == 1
