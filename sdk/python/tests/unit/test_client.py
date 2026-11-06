@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 import io
 import json
@@ -557,6 +558,36 @@ def test_usage_record_sends_the_idempotency_key() -> None:
         ax.usage.record("p", "t", "m", 1, idempotency_key="x" * 201)
 
 
+def test_usage_record_batch_sends_every_key_in_the_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        one = _usage_result(httpx.Request("POST", "http://x", headers={"Idempotency-Key": "a"})).json()
+        return httpx.Response(200, json={"results": [one, {**one, "replayed": True}]})
+
+    ax, rec = client(handler, api_key="k")
+    results = ax.usage.record_batch(
+        "p",
+        "t",
+        [
+            {"meter": "m", "quantity": Decimal("1.5"), "idempotency_key": "a"},
+            {
+                "meter": "m",
+                "quantity": 2,
+                "idempotency_key": "b",
+                "occurred_at": datetime(2026, 11, 1, tzinfo=UTC),
+            },
+        ],
+        enforce=True,
+    )
+    assert rec.last.url.path == "/v1/products/p/tenants/t/usage/events/batch"
+    body = json.loads(rec.last.content)
+    assert body["enforce"] is True and [e["idempotency_key"] for e in body["entries"]] == ["a", "b"]
+    assert body["entries"][0]["quantity"] == "1.5" and body["entries"][1]["occurred_at"].startswith("2026")
+    assert "idempotency-key" not in rec.last.headers
+    assert [r.replayed for r in results] == [False, True]
+    with pytest.raises(ValueError):
+        ax.usage.record_batch("p", "t", [{"meter": "m", "quantity": 1}])
+
+
 def test_notify_send_validates_the_recipient() -> None:
     ax, rec = client(lambda r: httpx.Response(202, json={}), api_key="k")
     with pytest.raises(ValueError):
@@ -799,7 +830,9 @@ def test_search_sends_repeated_kinds_and_parses_hits() -> None:
     assert rec.last.url.params.get_list("kind") == ["note", "task"] and rec.last.url.params["q"] == "q4"
     assert page.items[0].rank == 0.6 and page.items[0].title_highlight.startswith("<mark>")
     assert [h.ref_id for h in ax.search.iter("p", "t", "q4")] == ["rec_1"]
-    assert "kind" not in rec.last.url.params
+    assert "kind" not in rec.last.url.params and "match" not in rec.last.url.params
+    ax.search.query("p", "t", "q", match="prefix")
+    assert rec.last.url.params["match"] == "prefix"
     assert ax.search.kinds("p", "t")[0].count == 3
 
 
@@ -899,3 +932,34 @@ def test_generic_request_escape_hatch() -> None:
         "next_cursor": None,
     }
     assert dict(rec.last.url.params) == {"status": "queued"}
+
+
+def test_password_reset_and_email_verification_calls() -> None:
+    ax, rec = client(lambda r: httpx.Response(202 if "confirm" not in r.url.path else 204), session_token="s")
+    ax.auth.request_password_reset("a@example.com")
+    assert rec.last.url.path == "/v1/auth/password-reset"
+    assert json.loads(rec.last.content) == {"email": "a@example.com"}
+    ax.auth.request_password_reset("a@example.com", product_id="prd_1")
+    assert json.loads(rec.last.content) == {"email": "a@example.com", "product_id": "prd_1"}
+    ax.auth.confirm_password_reset("axpwr_t", "new passphrase 1234")
+    assert rec.last.url.path == "/v1/auth/password-reset/confirm"
+    assert json.loads(rec.last.content) == {"token": "axpwr_t", "new_password": "new passphrase 1234"}
+    ax.auth.confirm_email_verification("axemv_t")
+    assert json.loads(rec.last.content) == {"token": "axemv_t"}
+    ax.me.request_email_verification()
+    assert rec.last.url.path == "/v1/me/email-verification" and json.loads(rec.last.content) == {}
+
+
+def test_invalid_token_problem_is_raised() -> None:
+    problem = {
+        "type": "about:blank",
+        "title": "Invalid or expired link",
+        "status": 400,
+        "code": "invalid_token",
+    }
+    ax, _ = client(
+        lambda r: httpx.Response(400, json=problem, headers={"content-type": "application/problem+json"})
+    )
+    with pytest.raises(AxentraApiError) as err:
+        ax.auth.confirm_email_verification("axemv_x")
+    assert err.value.code == "invalid_token" and err.value.status == 400

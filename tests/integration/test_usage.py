@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from axentra.core.context import Principal
-from axentra.core.errors import Conflict, QuotaExceeded
+from axentra.core.errors import ConfigurationError, Conflict, QuotaExceeded
 
 SYSTEM = Principal.system("test")
 
@@ -426,3 +426,150 @@ def test_backdating_follows_the_tenant_billing_cycle(ax, world):
     finally:
         ax.usage.clock = real_clock
         ax.usage.set_policy(real_policy)
+
+
+# -- batches ----------------------------------------------------------------------------------------
+
+
+def _batch(client, pid, tid, entries, **body):
+    return client.post(
+        f"/v1/products/{pid}/tenants/{tid}/usage/events/batch", json={"entries": entries, **body}
+    )
+
+
+def test_batch_records_all_or_nothing_and_replays_per_entry(world):
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _meter(world, pid, default_limit=10)
+    _meter(world, pid, key="storage_gb", aggregation="max")
+    entries = [
+        {"meter": "api_calls", "quantity": 4, "idempotency_key": "b-1"},
+        {"meter": "storage_gb", "quantity": 7, "idempotency_key": "b-2", "properties": {"src": "x"}},
+        {"meter": "api_calls", "quantity": 3, "idempotency_key": "b-3"},
+    ]
+    r = _batch(world.admin, pid, tid, entries)
+    assert r.status_code == 200, r.text
+    results = r.json()["results"]
+    assert [x["event"]["meter"] for x in results] == ["api_calls", "storage_gb", "api_calls"]
+    assert [x["replayed"] for x in results] == [False, False, False]
+    assert results[0]["quota"]["used"] == 4 and results[2]["quota"]["used"] == 7  # in order
+    assert results[2]["quota"]["remaining"] == 3
+    # Replaying the batch adds nothing; a new entry next to replayed ones is recorded.
+    again = _batch(
+        world.admin, pid, tid, [*entries, {"meter": "api_calls", "quantity": 1, "idempotency_key": "b-4"}]
+    )
+    assert again.status_code == 200
+    assert [x["replayed"] for x in again.json()["results"]] == [True, True, True, False]
+    assert again.json()["results"][3]["quota"]["used"] == 8
+    # The single endpoint sees the same keys (one idempotency space per tenant).
+    assert _record(world.admin, pid, tid, "b-1", quantity=4).status_code == 200
+    # A key reused with a different request is refused, and nothing of the batch is kept.
+    r = _batch(
+        world.admin,
+        pid,
+        tid,
+        [
+            {"meter": "api_calls", "quantity": 1, "idempotency_key": "b-5"},
+            {"meter": "api_calls", "quantity": 99, "idempotency_key": "b-1"},
+        ],
+    )
+    assert r.status_code == 409
+    # A hard limit one entry would exceed refuses the whole batch (b-6 is not kept).
+    r = _batch(
+        world.admin,
+        pid,
+        tid,
+        [
+            {"meter": "api_calls", "quantity": 1, "idempotency_key": "b-6"},
+            {"meter": "api_calls", "quantity": 2, "idempotency_key": "b-7"},
+        ],
+    )
+    assert r.status_code == 429 and r.json()["code"] == "quota_exceeded", r.text
+    keys = {
+        e["idempotency_key"]
+        for e in world.admin.get(f"/v1/products/{pid}/tenants/{tid}/usage/events").json()["items"]
+    }
+    assert keys == {"b-1", "b-2", "b-3", "b-4"}
+    # Without enforcement (usage:manage) the same batch is recorded and over_limit tells.
+    r = _batch(
+        world.admin,
+        pid,
+        tid,
+        [
+            {"meter": "api_calls", "quantity": 1, "idempotency_key": "b-6"},
+            {"meter": "api_calls", "quantity": 2, "idempotency_key": "b-7"},
+        ],
+        enforce=False,
+    )
+    assert r.status_code == 200 and r.json()["results"][1]["quota"]["over_limit"] is True
+
+
+def test_batch_validation_and_permissions(world):
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _meter(world, pid)
+    one = {"meter": "api_calls", "quantity": 1, "idempotency_key": "v-1"}
+    assert _batch(world.admin, pid, tid, []).status_code == 422
+    assert _batch(world.admin, pid, tid, [one] * 101).status_code == 422
+    r = _batch(world.admin, pid, tid, [one, one])
+    assert r.status_code == 422 and "entry 1" in r.text and "twice" in r.text
+    r = _batch(world.admin, pid, tid, [one, {**one, "idempotency_key": "v-2", "quantity": -1}])
+    assert r.status_code == 422 and "entry 1" in r.text
+    assert _batch(world.admin, pid, tid, [{**one, "meter": "nope"}]).status_code == 404
+    member = _member(world, pid, tid, "m@example.com")
+    assert _batch(member, pid, tid, [one]).status_code == 200
+    assert _batch(member, pid, tid, [{**one, "idempotency_key": "v-3"}], enforce=False).status_code == 403
+    viewer = _member(world, pid, tid, "v@example.com", role="viewer")
+    assert _batch(viewer, pid, tid, [{**one, "idempotency_key": "v-4"}]).status_code == 403
+    other = _tenant(world, pid, "globex")
+    assert _batch(member, pid, other, [{**one, "idempotency_key": "v-5"}]).status_code in (403, 404)
+
+
+def test_concurrent_batches_never_deadlock_or_overshoot(ax, world):
+    from axentra.usage import UsageEntry
+
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _meter(world, pid, key="a", default_limit=40)
+    _meter(world, pid, key="b", default_limit=40)
+
+    def run(i: int) -> str:
+        names = ["a", "b"] if i % 2 else ["b", "a"]  # opposite orders in parallel batches
+        entries = [UsageEntry(meter=n, quantity=1, idempotency_key=f"c-{i}-{n}") for n in names]
+        try:
+            ax.usage.record_batch(SYSTEM, pid, tid, entries, enforce=True)
+            return "ok"
+        except QuotaExceeded:
+            return "quota"
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        outcomes = list(pool.map(run, range(60)))
+    assert outcomes.count("ok") == 40 and outcomes.count("quota") == 20
+    for key in ("a", "b"):
+        r = _record(world.admin, pid, tid, f"probe-{key}", meter=key, quantity=0)
+        assert r.status_code == 201 and Decimal(str(r.json()["quota"]["used"])) == 40
+
+
+def test_batch_joins_the_callers_transaction(ax, world):
+    from axentra.data.database import DbScope
+    from axentra.usage import UsageEntry
+
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    _meter(world, pid)
+    entries = [UsageEntry(meter="api_calls", quantity=2, idempotency_key="t-1")]
+
+    def caller_fails() -> None:
+        with ax.db.transaction(DbScope.tenant(pid, tid)) as tx:
+            ax.usage.record_batch(SYSTEM, pid, tid, entries, tx=tx)
+            raise RuntimeError("caller fails after recording")
+
+    with pytest.raises(RuntimeError):
+        caller_fails()
+    assert world.admin.get(f"/v1/products/{pid}/tenants/{tid}/usage/events").json()["items"] == []
+    with ax.db.transaction(DbScope.tenant(pid, tid)) as tx:
+        (res,) = ax.usage.record_batch(SYSTEM, pid, tid, entries, tx=tx)
+    assert res.event.quantity == 2 and not res.replayed
+    other = _tenant(world, pid, "globex")
+    with pytest.raises(ConfigurationError), ax.db.transaction(DbScope.tenant(pid, other)) as tx:
+        ax.usage.record_batch(SYSTEM, pid, tid, entries, tx=tx)

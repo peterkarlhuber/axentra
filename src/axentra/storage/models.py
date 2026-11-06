@@ -75,6 +75,26 @@ class PurgeReport(BaseModel):
     errors: int = 0
 
 
+class VerifyReport(BaseModel):
+    """Result of :meth:`axentra.storage.StorageService.verify` (ids, never names or contents)."""
+
+    files_checked: int = 0
+    missing: list[str] = []
+    """Active files whose object is missing from the backend."""
+    corrupt: list[str] = []
+    """Active files whose object differs from the stored SHA-256 (only with ``checksums``)."""
+    retained_objects: int = 0
+    """Objects of deleted files kept for ``storage.deleted_object_retention_hours``."""
+    orphans: int = 0
+    """Objects without a file row (removed by the next purge with orphans)."""
+    truncated: bool = False
+    """True when the ``limit`` stopped the check before every file was checked."""
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing and not self.corrupt
+
+
 class StoragePolicy(BaseModel):
     """The effective content-type policy of a product (``settings.storage`` of the product)."""
 

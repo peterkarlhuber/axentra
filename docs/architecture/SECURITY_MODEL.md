@@ -377,6 +377,15 @@ otherwise `403` with code `reauthentication_required` (log in again, then retry)
 `security.first_password = "disabled"` it is never allowed. Residual risk: a session stolen within
 those minutes can still set a password; installations that rely on IdP-side MFA should disable it.
 
+**Password reset.** A reset link proves control of the mailbox, nothing more, so it is only as
+strong as the user's email account. Mitigations: links are single-use, hashed at rest, expire after
+`security.password_reset_minutes` (default 30), are bound to the address they were sent to, and are
+sent only to users who already have a password (never to OIDC-only users, so a reset cannot add a
+password that bypasses the identity provider). The request endpoint answers `202` before doing any
+work, so neither the status, the body nor the timing tells whether an account exists. A completed
+reset ends every session of the user. The emails use sensitive templates, so the link is not
+visible in the message log of the delivering product. Details: modules/IDENTITY.md.
+
 **OIDC account linking (design decision).** The first OIDC login with a verified email (`email_verified`
 is `true`) that matches an existing account links that account to the provider subject, also for
 platform admins. This is the usual behaviour and keeps invitations working, but it trusts every
@@ -496,8 +505,9 @@ storing. Redaction is a safety net; code must still avoid logging secrets.
 ## Rate limiting
 
 Only authentication is throttled in this version: failed password logins count per account
-(`security.login_rate_per_minute`, default 10) and per client IP (three times that), and
-setup-token attempts per IP, in fixed one-minute windows stored in PostgreSQL (shared by all API
+(`security.login_rate_per_minute`, default 10) and per client IP (three times that), setup-token
+attempts per IP, password reset requests per IP (three times the login rate; one email per account
+and minute at most) and reset/verification confirmations per IP (failed ones only), in fixed one-minute windows stored in PostgreSQL (shared by all API
 processes). Exceeding a budget returns `429` with `Retry-After: 60`. Fixed windows allow up to
 twice the budget across a window boundary.
 
@@ -511,15 +521,20 @@ allow unlimited guessing of one account from many IP addresses.
 
 General request rate limiting is optional and **off by default** (`security.rate_limit_per_minute`
 per credential, `security.rate_limit_ip_per_minute` per client IP, `security.rate_limit_burst`).
-It is an in-memory token bucket per process: a request is charged to a hash of its credential
+By default (`security.rate_limit_store = "memory"`) it is an in-memory token bucket per process: a
+request is charged to a hash of its credential
 (bearer token, API key or session cookie; the client IP for anonymous requests) and independently
 to its client IP, before authentication runs. An empty bucket answers `429` (`rate_limited`) with
 a computed `Retry-After`. Health checks and `/metrics` are never limited.
 
 Trade-off: the in-memory buckets cost nothing per request (no database write) but are not shared;
-N API processes allow N times the configured rate and a restart refills them. The database-backed
-fixed windows (`axentra_rate_limits`) remain for logins, where a shared budget matters. For a hard
-global limit use the reverse proxy or an API gateway.
+N API processes allow N times the configured rate and a restart refills them. With
+`security.rate_limit_store = "database"` the same budgets are counted in one-minute windows in
+`axentra_rate_limits` (keys `req:ip:...` and `req:cred:<hash>`; never the credential itself), shared
+by every API process: one upsert per request and limit, up to twice the budget across a window
+boundary, `rate_limit_burst` does not apply, and a request is let through (with a logged warning)
+when the database cannot be reached. For a hard limit in front of the database too, use the
+reverse proxy or an API gateway.
 
 ## Request body size
 
@@ -577,7 +592,7 @@ listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mo
 | Secret leakage | Hash-only credentials, secrets shown once, secret references, AES-GCM with context binding, redaction in logs/problems/audit, startup refusal of inline secrets in production | Database dumps contain hashes and ciphertexts; the keyring must be stored separately |
 | RLS bypass via misconfiguration | Startup check for superuser/BYPASSRLS; separate owner and app roles in compose | `allow_superuser = true` disables this protection |
 | Spoofed client IP | `X-Forwarded-For` only from `trusted_proxies` | Wrong proxy configuration makes throttling per IP ineffective |
-| Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits, request body limit (`security.max_body_bytes`), optional per-credential/per-IP rate limits | Rate limits are per process and off by default; use the reverse proxy for global limits and slow-client (slowloris) protection |
+| Denial of service | Statement timeout, page size limit (200), record size limit (256 KiB), field length limits, request body limit (`security.max_body_bytes`), optional per-credential/per-IP rate limits | Rate limits are off by default and per process unless `security.rate_limit_store = "database"`; use the reverse proxy for limits in front of the API and slow-client (slowloris) protection |
 
 ## EU hosting and GDPR
 

@@ -61,6 +61,18 @@ class InvalidCursor(ValidationFailed):
         super().__init__(detail or "invalid cursor", **kwargs)
 
 
+class InvalidToken(AxentraError):
+    """A password reset or email verification token that is unknown, expired, already used or no
+    longer matches the account (always the same detail, so the reason is not revealed)."""
+
+    code = "invalid_token"
+    status = 400
+    title = "Invalid or expired link"
+
+    def __init__(self, detail: str | None = None, **kwargs: Any) -> None:
+        super().__init__(detail or "the link is invalid, expired or was already used", **kwargs)
+
+
 class Unauthenticated(AxentraError):
     code = "unauthenticated"
     status = 401

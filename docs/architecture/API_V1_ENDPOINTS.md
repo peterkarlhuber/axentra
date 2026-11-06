@@ -10,6 +10,9 @@ summary. Permission names in brackets.
 ## Auth
 - `POST /v1/auth/setup` `{setup_token, email, name, password}` -> first platform admin (token printed by `axentra admin setup-token`)
 - `POST /v1/auth/login/password` `{email, password}` -> `Session`
+- `POST /v1/auth/password-reset` `{email, product_id?}` -> `202` always (no account oracle; the email goes out afterwards);
+  `POST /v1/auth/password-reset/confirm` `{token, new_password}` -> `204` (ends all sessions of the user);
+  `POST /v1/auth/email-verification/confirm` `{token}` -> `204`; a refused token is `400 invalid_token`
 - `GET /v1/auth/oidc/{provider}/start?return_to=/path|<allowed origin URL>` -> 302 to the IdP (an `invitation=<token>` query, no longer declared in the OpenAPI, is refused: 302 to the login page with `?login_error=invitation_requires_post`, no login started); `POST /v1/auth/oidc/{provider}/start` `{return_to?, invitation?}` (Origin checked) -> `{redirect_url}` + login cookie, the only start that takes an invitation (no token in any URL); `GET /v1/auth/oidc/{provider}/callback?code&state` -> 302 to return_to (session cookie; with `invitation_accepted=<tenant id>` added when the start's invitation was accepted) or to the login page with `?login_error=<code>&return_to=<path>` (see docs/modules/IDENTITY.md)
 - `GET /v1/auth/session` -> `{user, csrf_token, expires_at, platform_role|null}`
 - `POST /v1/auth/logout`
@@ -23,6 +26,7 @@ summary. Permission names in brackets.
 - `PATCH /v1/me` `{name?, locale?, preferences?}`; `POST /v1/me/password` `{current_password, new_password}`
   (users without a password: only within `security.fresh_login_minutes` of the login, else `403`
   `reauthentication_required`; never with `security.first_password = "disabled"`)
+- `POST /v1/me/email-verification` `{product_id?}` -> `202` (`409` already verified or no product can send, `429` within a minute)
 
 ## Products
 - `GET /v1/products` (visible to caller), `POST /v1/products` [platform admin, multi mode only]

@@ -214,3 +214,92 @@ def test_dump_and_restore_preserves_data_rls_and_a_working_app(world, pg_urls, t
     finally:
         with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(restored)))
+
+
+def test_database_and_file_storage_restore_together(ax_factory, pg_urls, tmp_path):
+    """The documented order: dump the database, then copy file storage. With
+    ``storage.deleted_object_retention_hours`` covering the gap, a file deleted between the two
+    steps still has its object in the copy, and an upload after the dump is an orphan the purge
+    removes. ``axentra storage verify`` proves the restored pair consistent."""
+    pg_dump, pg_restore = _binary("pg_dump"), _binary("pg_restore")
+    with psycopg.connect(pg_urls["admin"]) as conn:
+        server_major = int(conn.execute("SHOW server_version_num").fetchone()[0]) // 10000  # type: ignore[index]
+    if _major(pg_dump) < server_major or _major(pg_restore) < server_major:
+        pytest.skip(f"pg_dump/pg_restore older than the PostgreSQL {server_major} server")
+    from tests.integration.conftest import bootstrap_admin
+
+    storage = tmp_path / "storage"
+    ax = ax_factory(_storage_path=str(storage), storage={"deleted_object_retention_hours": 24})
+    app = create_app(axentra=ax, start=False)
+    admin = bootstrap_admin(ax, app)
+    pid = admin.post("/v1/products", json={"slug": "crm", "name": "CRM"}).json()["id"]
+    tid = admin.post(f"/v1/products/{pid}/tenants", json={"slug": "acme", "name": "Acme"}).json()["id"]
+    files = f"/v1/products/{pid}/tenants/{tid}/files"
+    contents = {name: f"content of {name}".encode() * 50 for name in ("a.txt", "b.txt", "c.txt")}
+    ids = {}
+    for name, body in contents.items():
+        r = admin.post(files, files={"file": (name, body, "text/plain")})
+        assert r.status_code == 201, r.text
+        ids[name] = r.json()["id"]
+
+    # 1. Database dump.
+    dump = tmp_path / "axentra.dump"
+    env, dbname = _libpq_env(pg_urls["admin"])
+    subprocess.run(
+        [pg_dump, "--format=custom", "--file", str(dump), "--dbname", dbname],
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    # Between the dump and the file copy: one file is deleted, one uploaded.
+    assert admin.delete(f"{files}/{ids['b.txt']}").status_code == 204
+    late = admin.post(files, files={"file": ("d.txt", b"after the dump", "text/plain")})
+    assert late.status_code == 201
+    # 2. File storage copy.
+    copy = tmp_path / "storage-copy"
+    shutil.copytree(storage, copy)
+
+    restored = f"{pg_urls['dbname']}_files_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                sql.Identifier(restored), sql.Identifier(pg_urls["owner_role"])
+            )
+        )
+    try:
+        out = subprocess.run(
+            [pg_restore, "--exit-on-error", "--single-transaction", "--dbname", restored, str(dump)],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert out.returncode == 0, out.stderr
+        restored_app = make_conninfo(**{**conninfo_to_dict(pg_urls["app"]), "dbname": restored})
+        settings = make_settings(
+            {**pg_urls, "app": restored_app},
+            _storage_path=str(copy),
+            storage={"deleted_object_retention_hours": 24},
+        )
+        back = Axentra.from_settings(settings)
+        back.start()
+        try:
+            assert back.storage is not None
+            report = back.storage.verify(checksums=True)
+            assert report.ok, report
+            assert report.files_checked == 3 and report.orphans == 1 and report.retained_objects == 0
+            client = TestClient(create_app(axentra=back, start=False), headers={"Origin": ORIGIN})
+            login = client.post(
+                "/v1/auth/login/password", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
+            )
+            assert login.status_code == 200, login.text
+            for name, body in contents.items():  # b.txt too: it was active at dump time
+                got = client.get(f"{files}/{ids[name]}/content")
+                assert got.status_code == 200 and got.content == body, name
+            assert back.storage.purge().orphans_deleted == 1
+            assert back.storage.verify().orphans == 0
+        finally:
+            back.close()
+    finally:
+        with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(restored)))

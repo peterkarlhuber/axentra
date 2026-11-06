@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from axentra.api.context import Ax, CurrentPrincipal
+from axentra.api.context import Ax, CurrentPrincipal, request_id
 from axentra.api.routes.common import Cursor, Limit
 from axentra.core.errors import Forbidden, NotFound
 from axentra.core.pagination import Page
@@ -108,6 +108,32 @@ def update_me(body: MeUpdate, principal: CurrentPrincipal, ax: Ax) -> User:
 def change_password(body: PasswordChange, principal: CurrentPrincipal, ax: Ax) -> Response:
     ax.identity.change_password(principal, body.current_password, body.new_password)
     return Response(status_code=204)
+
+
+class VerificationRequest(BaseModel):
+    product_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The product whose notification settings send the email, when the user belongs to it.",
+    )
+
+
+@router.post(
+    "/me/email-verification",
+    status_code=202,
+    summary="Send me a link that confirms my email address",
+    description="`409` when the address is already verified, `429` within a minute of the last link.",
+)
+def request_email_verification(
+    body: VerificationRequest, request: Request, principal: CurrentPrincipal, ax: Ax
+) -> Response:
+    from axentra.api.routes.auth import send_account_email
+
+    mail = ax.identity.request_email_verification(
+        principal, product_hint=body.product_id, request_id=request_id(request)
+    )
+    send_account_email(ax, mail)
+    return Response(status_code=202)
 
 
 def _can_see_user(ax: Ax, principal: CurrentPrincipal, user_id: str) -> None:

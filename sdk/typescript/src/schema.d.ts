@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/email-verification/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm an email address with a verification link */
+        post: operations["confirm_email_verification_v1_auth_email_verification_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/login/password": {
         parameters: {
             query?: never;
@@ -134,6 +151,43 @@ export interface paths {
          *     Sets the same login cookie (send it with credentials) and answers the URL to navigate to.
          */
         post: operations["oidc_start_post_v1_auth_oidc__provider__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a password reset link by email
+         * @description Always answers `202` (unless rate limited or password login is off): whether an account exists for the address is never revealed. An active user with a password gets a single-use link that expires after `security.password_reset_minutes`.
+         */
+        post: operations["request_password_reset_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password-reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set a new password with a reset link (ends all sessions) */
+        post: operations["confirm_password_reset_v1_auth_password_reset_confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -315,6 +369,26 @@ export interface paths {
         head?: never;
         /** Update my profile and preferences */
         patch: operations["update_me_v1_me_patch"];
+        trace?: never;
+    };
+    "/v1/me/email-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send me a link that confirms my email address
+         * @description `409` when the address is already verified, `429` within a minute of the last link.
+         */
+        post: operations["request_email_verification_v1_me_email_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/me/password": {
@@ -1701,6 +1775,26 @@ export interface paths {
         put?: never;
         /** Record usage (idempotent; 200 when the Idempotency-Key was seen before) */
         post: operations["record_usage_v1_products__product_id__tenants__tenant_id__usage_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/tenants/{tenant_id}/usage/events/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record several usage entries in one transaction (all or nothing, idempotent per entry)
+         * @description Up to 100 entries, each with its own `idempotency_key` (a replayed key returns the stored event with `replayed: true`). With `enforce` (default) a hard limit that one entry would exceed refuses the whole batch with `429 quota_exceeded`; entries count in order.
+         */
+        post: operations["record_usage_batch_v1_products__product_id__tenants__tenant_id__usage_events_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3464,6 +3558,23 @@ export interface components {
             /** Min Length */
             min_length: number;
         };
+        /** PasswordResetConfirm */
+        PasswordResetConfirm: {
+            /** New Password */
+            new_password: string;
+            /** Token */
+            token: string;
+        };
+        /** PasswordResetRequest */
+        PasswordResetRequest: {
+            /** Email */
+            email: string;
+            /**
+             * Product Id
+             * @description The product whose notification settings send the email, when the user belongs to it.
+             */
+            product_id?: string | null;
+        };
         /** PermissionInfo */
         PermissionInfo: {
             /** Declared By */
@@ -4811,6 +4922,51 @@ export interface components {
              */
             until: string;
         };
+        /** TokenConfirm */
+        TokenConfirm: {
+            /** Token */
+            token: string;
+        };
+        /** UsageBatch */
+        UsageBatch: {
+            /**
+             * Enforce
+             * @description false records without the hard-limit check; needs usage:manage on the product
+             * @default true
+             */
+            enforce?: boolean;
+            /** Entries */
+            entries: components["schemas"]["UsageBatchEntry"][];
+        };
+        /** UsageBatchEntry */
+        UsageBatchEntry: {
+            /**
+             * Idempotency Key
+             * @description Unique per tenant (and within the batch)
+             */
+            idempotency_key: string;
+            /** Meter */
+            meter: string;
+            /**
+             * Occurred At
+             * @description As for a single record
+             */
+            occurred_at?: string | null;
+            /** Properties */
+            properties?: {
+                [key: string]: unknown;
+            };
+            /** Quantity */
+            quantity: number | string;
+        };
+        /** UsageBatchResult */
+        UsageBatchResult: {
+            /**
+             * Results
+             * @description In the order of the entries
+             */
+            results: components["schemas"]["RecordResult"][];
+        };
         /** UsageEvent */
         UsageEvent: {
             /** Id */
@@ -4878,6 +5034,11 @@ export interface components {
             created_at: string;
             /** Email */
             email: string | null;
+            /**
+             * Email Verified
+             * @default false
+             */
+            email_verified?: boolean;
             /**
              * Has Password
              * @default false
@@ -4974,6 +5135,14 @@ export interface components {
             platform_role?: ("platform_admin" | "platform_viewer" | "none") | null;
             /** Status */
             status?: ("active" | "disabled") | null;
+        };
+        /** VerificationRequest */
+        VerificationRequest: {
+            /**
+             * Product Id
+             * @description The product whose notification settings send the email, when the user belongs to it.
+             */
+            product_id?: string | null;
         };
         /** WebhookCreate */
         WebhookCreate: {
@@ -5191,6 +5360,46 @@ export interface operations {
             };
         };
     };
+    confirm_email_verification_v1_auth_email_verification_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     login_password_v1_auth_login_password_post: {
         parameters: {
             query?: never;
@@ -5365,6 +5574,88 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OidcStartAnswer"];
                 };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    request_password_reset_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    confirm_password_reset_v1_auth_password_reset_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
             422: {
@@ -5771,6 +6062,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["User"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    request_email_verification_v1_me_email_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
@@ -10402,6 +10735,8 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description Page size (1-200, default 50) */
                 limit?: number | null;
+                /** @description `words`: web search syntax. `prefix` (search as you type): every term must match, and terms of two or more characters also match words that start with them */
+                match?: "words" | "prefix";
                 /** @description Web search syntax: words (all must match), "quoted phrase", or, -excluded */
                 q: string;
             };
@@ -10794,6 +11129,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordResult"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A hard quota would be exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    record_usage_batch_v1_products__product_id__tenants__tenant_id__usage_events_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBatchResult"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

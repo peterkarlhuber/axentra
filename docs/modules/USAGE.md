@@ -29,6 +29,14 @@ ax.usage.create_meter(principal, pid, key="api_calls", unit="calls", default_lim
 result = ax.usage.check_and_record(principal, pid, tid, "api_calls", 1, idempotency_key=request_id)
 result.replayed, result.quota.remaining
 
+# Several entries of one tenant in one transaction, all or nothing (at most 100); the permission
+# check, meters and limits are read once per batch. Each entry has its own idempotency key.
+from axentra.usage import UsageEntry
+ax.usage.record_batch(principal, pid, tid, [
+    UsageEntry(meter="api_calls", quantity=1, idempotency_key=f"{request_id}:calls"),
+    UsageEntry(meter="tokens", quantity=812, idempotency_key=f"{request_id}:tokens"),
+], enforce=True)          # tx=... joins the caller's transaction, like record_in
+
 # Usage that already happened (never refused; result.quota.over_limit tells):
 ax.usage.record(principal, pid, tid, "storage_bytes", 52_428_800, "snapshot-2026-11-01",
                 occurred_at=measured_at, properties={"bucket": "media"})
@@ -76,6 +84,7 @@ without a tenant, so only product roles, platform roles and product-wide API key
 | GET | `/usage/summary?since&until&meter&limit&cursor` | `usage:read` (product level) | `Page[{tenant_id, meter, value, event_count}]` |
 | GET | `/usage/timeseries?meter&since&until` | `usage:read` (product level) | `TimeSeries` (all tenants summed) |
 | POST | `/tenants/{tid}/usage/events` (header `Idempotency-Key` required) | `usage:record`. `enforce=false`, and an `occurred_at` before the current billing period, also need product-level `usage:manage` | `201` new / `200` replayed: `{event, replayed, quota}`. `429` on a hard limit, `403 backdating_not_permitted` |
+| POST | `/tenants/{tid}/usage/events/batch` `{entries: [{meter, quantity, idempotency_key, occurred_at?, properties?}], enforce?}` | as above, per batch | `200` `{results: [{event, replayed, quota}]}` in entry order. 1..100 entries, keys unique in the batch (`422` names the entry). All or nothing: one entry over a hard limit (`429`), a reused key with another body (`409`) or an unknown/inactive meter refuses the whole batch |
 | GET | `/tenants/{tid}/usage/events?meter&since&until&limit&cursor` | `usage:read` | `Page[UsageEvent]` (newest first) |
 | GET | `/tenants/{tid}/usage/summary?at` | `usage:read` | `MeterUsage[]` |
 | GET | `/tenants/{tid}/usage/timeseries?meter&since&until` | `usage:read` | `TimeSeries` |

@@ -12,7 +12,7 @@ time (:meth:`UsageService.set_policy`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -49,6 +49,7 @@ from axentra.usage.models import (
     TenantMeterTotal,
     TimePoint,
     TimeSeries,
+    UsageEntry,
     UsageEvent,
 )
 from axentra.usage.periods import day_period, period_for
@@ -56,6 +57,8 @@ from axentra.usage.periods import day_period, period_for
 _METER_KEY = re.compile(r"^[a-z][a-z0-9_.]{0,62}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,200}$")
 MAX_QUANTITY = Decimal(10) ** 15
+#: Most entries in one :meth:`UsageService.record_batch` call.
+MAX_BATCH = 100
 MAX_PROPERTIES_BYTES = 4096
 MAX_FUTURE_SKEW = timedelta(minutes=5)
 MAX_BACKDATE = timedelta(days=400)
@@ -529,6 +532,7 @@ class UsageService:
         enforce: bool,
         reservation_id: str | None = None,
         check_backdate: bool = False,
+        limit_ctx: _LimitContext | None = None,
     ) -> RecordResult:
         existing = tx.one(
             _EVENT_SQL + " WHERE e.product_id = %s AND e.tenant_id = %s AND e.idempotency_key = %s",
@@ -547,7 +551,7 @@ class UsageService:
             self._check_backdate(tx, principal, product_id, tenant_id, occurred_at)
         start, end = self._period(tx, product_id, tenant_id, meter["reset_period"], occurred_at)
         counter = self._lock_counter(tx, product_id, tenant_id, meter["id"], start, end)
-        limit = self._resolve_limit(meter, self._limit_context(tx, product_id, tenant_id))
+        limit = self._resolve_limit(meter, limit_ctx or self._limit_context(tx, product_id, tenant_id))
         reserved = self._reserved(tx, product_id, tenant_id, meter["id"], start)
         used = Decimal(counter["value"])
         agg = meter["aggregation"]
@@ -712,6 +716,118 @@ class UsageService:
             enforce=enforce,
             tx=tx,
         )
+
+    def record_batch(
+        self,
+        principal: Principal,
+        product_id: str,
+        tenant_id: str,
+        entries: Sequence[UsageEntry],
+        *,
+        enforce: bool = False,
+        tx: Tx | None = None,
+    ) -> list[RecordResult]:
+        """Record several usage entries of one tenant in one transaction, all or nothing.
+
+        Each entry behaves like :meth:`record` (``enforce=True``: like :meth:`check_and_record`)
+        with its own idempotency key: a replayed key returns the stored event. The permission
+        check, the meters, the quota and plan limits and the billing-period check for backdated
+        entries are read once per batch instead of once per entry. With ``enforce=True`` a hard
+        limit that one entry would exceed refuses the whole batch (:class:`QuotaExceeded`); the
+        entries are checked in the given order, so an earlier entry counts toward a later one's
+        limit. Counter rows are locked in meter order, so concurrent batches cannot deadlock.
+        With ``tx`` (like :meth:`record_in`) the batch joins the caller's transaction. At most
+        :data:`MAX_BATCH` entries; idempotency keys must be unique within the batch."""
+        self.authz.require(principal, "usage:record", product_id, tenant_id)
+        if tx is not None:
+            tx.require_scope(product_id, tenant_id)
+        if not entries:
+            raise ValidationFailed("the batch is empty")
+        if len(entries) > MAX_BATCH:
+            raise ValidationFailed(f"at most {MAX_BATCH} entries per batch")
+        prepared: list[tuple[str, Decimal, str, datetime, str, dict[str, Any], bool]] = []
+        keys: set[str] = set()
+        for i, entry in enumerate(entries):
+            try:
+                _check_key(entry.meter)
+                q = _quantity(entry.quantity)
+                if not entry.idempotency_key or not _IDEMPOTENCY_KEY.match(entry.idempotency_key):
+                    raise ValidationFailed("the idempotency key must be 1-200 printable ASCII characters")
+                if entry.idempotency_key in keys:
+                    raise ValidationFailed("the idempotency key is used twice in the batch")
+                props = _check_properties(entry.properties)
+                at = self._occurred_at(entry.occurred_at)
+            except ValidationFailed as exc:
+                raise ValidationFailed(f"entry {i}: {exc.detail}") from None
+            keys.add(entry.idempotency_key)
+            request_hash = _hash(
+                {
+                    "meter": entry.meter,
+                    "quantity": _canon(q),
+                    "occurred_at": entry.occurred_at.astimezone(UTC).isoformat()
+                    if entry.occurred_at
+                    else None,
+                    "properties": props,
+                }
+            )
+            prepared.append(
+                (
+                    entry.meter,
+                    q,
+                    entry.idempotency_key,
+                    at,
+                    request_hash,
+                    props,
+                    entry.occurred_at is not None,
+                )
+            )
+
+        def run(t: Tx) -> list[RecordResult]:
+            names = sorted({p[0] for p in prepared})
+            rows = {
+                r["key"]: r
+                for r in t.all(
+                    "SELECT * FROM axentra_usage_meters WHERE product_id = %s AND key = ANY(%s)",
+                    (product_id, names),
+                )
+            }
+            for name in names:
+                if name not in rows:
+                    raise NotFound(f"meter not found: {name}")
+                if not rows[name]["active"]:
+                    raise Conflict(f"the meter is inactive: {name}")
+            # Lock every counter of the batch up front, in meter order (no deadlock between batches).
+            for name in names:
+                m = rows[name]
+                for at in sorted({p[3] for p in prepared if p[0] == name}):
+                    start, end = self._period(t, product_id, tenant_id, m["reset_period"], at)
+                    self._lock_counter(t, product_id, tenant_id, m["id"], start, end)
+            ctx = self._limit_context(t, product_id, tenant_id)
+            results: list[RecordResult] = []
+            for name, q, key, at, request_hash, props, dated in prepared:
+                results.append(
+                    self._record_tx(
+                        t,
+                        principal,
+                        product_id,
+                        tenant_id,
+                        rows[name],
+                        q,
+                        key,
+                        at,
+                        request_hash,
+                        props,
+                        enforce=enforce,
+                        check_backdate=dated,
+                        limit_ctx=ctx,
+                    )
+                )
+            return results
+
+        if tx is not None:
+            return run(tx)
+        with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as own:
+            return run(own)
 
     def _record(
         self,

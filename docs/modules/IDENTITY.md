@@ -55,6 +55,54 @@ except for users who have none. Those may set one only within `security.fresh_lo
 through the provider and retry), and never with `security.first_password = "disabled"`. This keeps
 a stolen session from becoming a permanent password login that bypasses the identity provider.
 
+## Password reset and email verification
+
+Both send a single-use link by email (migration 0013, table `axentra_account_tokens`). Only the
+SHA-256 of a token is stored; a token is bound to its purpose and to the address it was sent to,
+expires (`security.password_reset_minutes`, default 30; `security.email_verification_hours`, default
+48), and a new link spends the older open one. The link is
+`<notify.account_url>/reset-password?token=axpwr_...` or `.../verify-email?token=axemv_...`
+(`notify.account_url` defaults to the origin of `notify.invitation_accept_url`, then to
+`security.public_url`; Studio serves both pages).
+
+**Reset.** `POST /v1/auth/password-reset {email, product_id?}` (public, Origin checked) always
+answers `202` with an empty body and does the work after the response: whether the address has an
+account is never revealed, neither by the answer nor by its timing. An email goes out only to an
+active user who has a password and no reset link from the last minute; users without a password
+(OIDC-only) never get one, so a reset cannot create a password that bypasses the identity
+provider. `POST /v1/auth/password-reset/confirm {token, new_password}` sets the password (the
+policy above; a refused password answers `422` and keeps the link usable), spends every open reset
+link of the user, marks the address verified (the link arrived there) and **ends all sessions** of
+the user. Changing the password with `POST /v1/me/password` also spends open reset links.
+
+**Verification.** `POST /v1/me/email-verification {product_id?}` (signed in) sends a link: `202`,
+`409` when the address is already verified or no product of the user can send email, `429` with
+`Retry-After` within a minute of the last link. `POST /v1/auth/email-verification/confirm {token}`
+(public, no session needed: the link may be opened in another browser) marks the address verified.
+`User.email_verified` reports the state. Addresses confirmed by an identity provider
+(`email_verified` claim) at sign-up are verified from the start.
+
+**Delivery.** The emails use the built-in sensitive templates `password_reset` and
+`email_verification` (see NOTIFY.md; `ax.on_account_email`), sent with the notification settings
+of one product: `product_id` from the request when the user belongs to that product (otherwise it
+is ignored, so a product's admins learn nothing about other accounts), else the configured product
+in single mode, else the oldest active product the user belongs to (as an operator, or as a member of an active
+tenant). A user with no such product gets no
+reset email (the request is still `202`) and a `409` for verification. Sensitive templates keep
+the link out of the message log, so product admins cannot read it.
+
+**Refusals.** Every refused token (unknown, malformed, spent, expired, other purpose, disabled
+user, changed address, password removed since) answers the same `400 invalid_token` "the link is
+invalid, expired or was already used". Reset requests count per client IP (three times
+`security.login_rate_per_minute`, the same budget for known and unknown addresses); the confirm
+endpoints count per IP (`login_rate_per_minute`) and give successful attempts back. Both answer
+`403` when `security.password_login` is off (verification works without it).
+
+**Audit.** `identity.password.reset_request` (success with the delivering product; `denied` with
+`reason` `unknown_email`, `user_disabled`, `no_password`, `cooldown` or `no_delivery_product`,
+never with the address), `identity.password.reset` (with `sessions_ended`),
+`identity.email.verification_request` and `identity.email.verify`. All are platform-level events.
+
 ## Sessions
 
 - Absolute lifetime `security.session_ttl_hours` (default 12), idle timeout
@@ -197,6 +245,8 @@ Refused callbacks (after a state was found) are audited as `identity.login` with
 **MFA** is delegated to the identity provider: enforce it there (Keycloak authentication flows,
 Entra ID Conditional Access, Google Workspace 2SV, Auth0 MFA). Axentra does not read `amr`/`acr`
 yet.
+Password logins have no second factor yet; the planned TOTP design (enrollment, recovery codes,
+step-up, admin reset) is in [architecture/MFA_TOTP_DESIGN.md](../architecture/MFA_TOTP_DESIGN.md).
 
 ### Configuration
 
@@ -313,6 +363,10 @@ ax.identity.list_identities(user.id)
 | --- | --- | --- | --- |
 | POST | `/v1/auth/setup` | public (setup token) | `SessionInfo` + cookie |
 | POST | `/v1/auth/login/password` | public (Origin checked) | `SessionInfo` + cookie |
+| POST | `/v1/auth/password-reset` | public (Origin checked) | `202` always (no account oracle) |
+| POST | `/v1/auth/password-reset/confirm` | public (Origin checked, token) | `204`; `400 invalid_token`, `422` policy |
+| POST | `/v1/auth/email-verification/confirm` | public (Origin checked, token) | `204`; `400 invalid_token` |
+| POST | `/v1/me/email-verification` | session | `202`; `409` verified or no product, `429` cooldown |
 | GET | `/v1/auth/oidc/{provider}/start` | public | `302` to provider + login cookie; `404` unknown provider |
 | POST | `/v1/auth/oidc/{provider}/start` | public (Origin checked) | `{redirect_url}` + login cookie; `404` unknown provider, `403` foreign Origin |
 | GET | `/v1/auth/oidc/{provider}/callback` | public (state + login cookie) | `302` to `return_to` + session cookie, or `302` to login page `?login_error=` |
@@ -325,7 +379,8 @@ Users endpoints (`/v1/me`, `/v1/users`) are described in the OpenAPI document.
 
 ## Guarantees
 
-- Session tokens, setup tokens and OIDC `state` are stored only as SHA-256 hashes; OIDC nonce,
+- Session tokens, setup tokens, password reset and email verification tokens and OIDC `state` are
+  stored only as SHA-256 hashes; OIDC nonce,
   PKCE verifier and invitation token are encrypted at rest and deleted on use or after expiry
   (expired rows are removed on the next login start and by `purge_expired`).
 - A login state is usable once, by the browser that started it, within ten minutes.
@@ -352,5 +407,6 @@ Users endpoints (`/v1/me`, `/v1/users`) are described in the OpenAPI document.
 - No `private_key_jwt` client authentication, no `prompt`/`login_hint`/`acr_values` parameters.
 - No per-tenant providers: providers are configured per installation.
 - `amr`/`acr` (MFA evidence) are not evaluated.
+- No built-in second factor for password logins (design: architecture/MFA_TOTP_DESIGN.md).
 - No UI or HTTP API for linking several identities to one user or for unlinking (library only:
   `create_external_user`, `link_identity`).

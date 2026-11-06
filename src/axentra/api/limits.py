@@ -7,14 +7,20 @@ reads it and aborted with 413 as soon as it exceeds the limit. Routes marked wit
 themselves while streaming.
 
 Rate limiting (``security.rate_limit_per_minute`` / ``rate_limit_ip_per_minute``, both off by
-default): token buckets kept **in memory, per process**. A request is charged to its credential
-(a hash of the bearer token, API key or session cookie; the client IP for anonymous requests)
-and, independently, to its client IP. An empty bucket answers 429 with ``Retry-After``.
-Trade-off: no database round trip per request and no shared state, but every API process has its
-own budget (N replicas allow N times the rate) and a restart refills the buckets. Use a reverse
-proxy or gateway limit when a hard global limit is needed; the database-backed fixed-window
-limiter (``axentra_rate_limits``) stays reserved for logins, where a shared budget matters more
-than the write per request. Health and metrics endpoints are never limited.
+default). A request is charged to its credential (a hash of the bearer token, API key or session
+cookie; the client IP for anonymous requests) and, independently, to its client IP. An exhausted
+budget answers 429 with ``Retry-After``. Health and metrics endpoints are never limited.
+
+``security.rate_limit_store`` picks where the budgets live:
+
+- ``"memory"`` (default): token buckets **per process** (:class:`TokenBuckets`). No database round
+  trip per request, but every API process has its own budget (N replicas allow N times the rate)
+  and a restart refills the buckets.
+- ``"database"``: fixed one-minute windows in ``axentra_rate_limits``, **shared by all API
+  processes** (:class:`DatabaseWindows`). Costs one upsert per limited budget and request, and a
+  fixed window allows up to twice the budget across a window boundary (``rate_limit_burst`` does
+  not apply). When the database cannot be reached the request is let through (the limiter must
+  not turn a database problem into 429 or 500 answers for requests that need no database).
 """
 
 from __future__ import annotations
@@ -22,17 +28,24 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Callable
 import hashlib
+import logging
 import math
+import random
 import re
 import threading
 import time
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from axentra.api.problems import problem
+
+if TYPE_CHECKING:
+    from axentra.data.database import Database
+
+logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 _OWN_LIMIT_ATTR = "__axentra_own_body_limit__"
@@ -88,8 +101,19 @@ class BodyLimitMiddleware:
         await self.app(scope, limited_receive, send)
 
 
+class Budgets(Protocol):
+    #: True when :meth:`take` blocks on I/O (it then runs in the thread pool).
+    blocking: bool
+
+    def take(self, key: str) -> float:
+        """Count one request; 0 when allowed, else the seconds until the next one is."""
+        ...
+
+
 class TokenBuckets:
     """Thread-safe token buckets with a bounded number of keys (least recently used evicted)."""
+
+    blocking = False
 
     def __init__(self, per_minute: int, burst: int | None = None, max_keys: int = 100_000) -> None:
         self.rate = per_minute / 60.0
@@ -115,6 +139,41 @@ class TokenBuckets:
             return wait
 
 
+class DatabaseWindows:
+    """Fixed one-minute windows in ``axentra_rate_limits``, shared by every process that uses
+    the database. Keys are prefixed (``req:``) so they never collide with the login buckets."""
+
+    blocking = True
+
+    def __init__(self, db: Database, per_minute: int, *, prefix: str = "req:") -> None:
+        self.db = db
+        self.limit = per_minute
+        self.prefix = prefix
+
+    def take(self, key: str) -> float:
+        from axentra.data.database import DbScope
+
+        try:
+            with self.db.transaction(DbScope.platform()) as tx:
+                row = tx.one(
+                    "INSERT INTO axentra_rate_limits (bucket, window_start, hits)"
+                    " VALUES (%s, date_trunc('minute', now()), 1)"
+                    " ON CONFLICT (bucket, window_start) DO UPDATE SET hits = axentra_rate_limits.hits + 1"
+                    " RETURNING hits, 60 - extract(epoch FROM now() - window_start)::float8 AS left_s",
+                    (self.prefix + key,),
+                )
+                if random.random() < 0.01:  # noqa: S311 - housekeeping, not security  # nosec B311
+                    tx.execute(
+                        "DELETE FROM axentra_rate_limits WHERE window_start < now() - interval '10 minutes'"
+                    )
+        except Exception as exc:
+            logger.warning("rate limit store unavailable, request let through (%s)", type(exc).__name__)
+            return 0.0
+        if row is None or int(row["hits"]) <= self.limit:
+            return 0.0
+        return max(1.0, float(row["left_s"]))
+
+
 def credential_key(request: Request, session_cookie: str) -> str | None:
     auth = request.headers.get("authorization", "")
     token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
@@ -131,8 +190,8 @@ class RateLimitMiddleware:
         self,
         app: ASGIApp,
         *,
-        per_credential: TokenBuckets | None,
-        per_ip: TokenBuckets | None,
+        per_credential: Budgets | None,
+        per_ip: Budgets | None,
         client_ip: Callable[[Request], str | None],
         session_cookie: Callable[[], str],
     ) -> None:
@@ -154,10 +213,10 @@ class RateLimitMiddleware:
         ip = self.client_ip(request) or "unknown"
         wait = 0.0
         if self.per_ip is not None:
-            wait = max(wait, self.per_ip.take("ip:" + ip))
+            wait = max(wait, await _take(self.per_ip, "ip:" + ip))
         if self.per_credential is not None and wait == 0.0:
             key = credential_key(request, self.session_cookie()) or "anon:" + ip
-            wait = max(wait, self.per_credential.take(key))
+            wait = max(wait, await _take(self.per_credential, key))
         if wait > 0:
             retry = max(1, math.ceil(wait))
             response = problem(
@@ -167,3 +226,11 @@ class RateLimitMiddleware:
             await response(scope, receive, send)
             return
         await self.app(scope, receive, send)
+
+
+async def _take(budgets: Budgets, key: str) -> float:
+    if not budgets.blocking:
+        return budgets.take(key)
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(budgets.take, key)

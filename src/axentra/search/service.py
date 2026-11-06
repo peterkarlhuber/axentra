@@ -14,6 +14,7 @@ from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cur
 from axentra.data.database import Database, Tx
 from axentra.search.adapters import PostgresSearchAdapter, SearchAdapter, WriteHook
 from axentra.search.models import (
+    MATCH_MODES,
     MAX_KINDS,
     MAX_LISTED_KINDS,
     MAX_QUERY_CHARS,
@@ -135,6 +136,7 @@ class SearchService:
         kinds: Sequence[str] | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        match: str = "words",
     ) -> Page[SearchHit]:
         """Ranked hits (``ts_rank`` desc, then newest first). The cursor encodes the result
         position; results can shift between pages when the index changes in between."""
@@ -144,6 +146,8 @@ class SearchService:
             raise ValidationFailed("q must not be empty")
         if len(text) > MAX_QUERY_CHARS or "\x00" in text:
             raise ValidationFailed(f"q may have at most {MAX_QUERY_CHARS} characters")
+        if match not in MATCH_MODES:
+            raise ValidationFailed(f"match must be one of: {', '.join(MATCH_MODES)}")
         unique_kinds = tuple(dict.fromkeys(kinds or ()))
         if len(unique_kinds) > MAX_KINDS:
             raise ValidationFailed(f"at most {MAX_KINDS} kinds per query")
@@ -154,7 +158,9 @@ class SearchService:
         if offset > self.settings.max_offset:
             raise ValidationFailed(f"results beyond position {self.settings.max_offset} are not available")
         hits, more = self.adapter.query(
-            product_id, tenant_id, SearchQuery(text=text, kinds=unique_kinds, limit=size, offset=offset)
+            product_id,
+            tenant_id,
+            SearchQuery(text=text, kinds=unique_kinds, limit=size, offset=offset, match=match),
         )
         nxt = offset + size
         next_cursor = encode_cursor(["o", nxt]) if more and nxt <= self.settings.max_offset else None

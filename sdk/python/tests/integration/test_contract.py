@@ -238,6 +238,15 @@ def test_usage_idempotency_quotas_and_summary(
     summary = {m.meter: m for m in c.usage.summary(product, tenant)}
     assert summary["api_calls"].value == Decimal(3) and summary["api_calls"].remaining == Decimal(7)
     assert [e.id for e in c.usage.iter_events(product, tenant, meter="api_calls")] == [first.event.id]
+    batch = c.usage.record_batch(
+        product,
+        tenant,
+        [
+            {"meter": "api_calls", "quantity": 3, "idempotency_key": "req-1"},
+            {"meter": "api_calls", "quantity": Decimal(2), "idempotency_key": "req-3"},
+        ],
+    )
+    assert [r.replayed for r in batch] == [True, False] and batch[1].quota.used == Decimal(5)
     assert c.usage.quotas(product, tenant)[0].source == "meter"
     q = admin.usage.set_quota(product, tenant, "api_calls", Decimal(100), enforcement="soft")
     assert q.limit == Decimal(100) and q.source == "quota"
@@ -390,6 +399,7 @@ def test_search_index_query_kinds_and_remove(
     c.search.index(product, tenant, "task", "t-1", title="Plan the offsite", metadata={"due": "2026-12-01"})
     hits = c.search.query(product, tenant, "plan")
     assert {h.ref_id for h in hits.items} == {"n-1", "t-1"}
+    assert [h.ref_id for h in c.search.query(product, tenant, "quart", match="prefix").items] == ["n-1"]
     only_tasks = [h.ref_id for h in c.search.iter(product, tenant, "plan", kinds=["task"], page_size=1)]
     assert only_tasks == ["t-1"]
     assert {(k.kind, k.count) for k in c.search.kinds(product, tenant)} == {("note", 1), ("task", 1)}

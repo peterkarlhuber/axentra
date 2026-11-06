@@ -257,3 +257,58 @@ def test_cli_setup_token_closes_the_pool(pg_urls, tmp_path, capsys, monkeypatch)
     assert main(["--config", str(cfg), "admin", "setup-token", "--force"]) == 0
     assert capsys.readouterr().out.strip().startswith("axsetup_")
     assert closed == [1]
+
+
+def test_parallel_runners_on_a_fresh_database_apply_each_migration_once(pg_urls):
+    """Several processes running ``axentra migrate`` at the same time (for example replicas that
+    migrate on start) serialize on the advisory lock: on an empty database every migration is
+    applied exactly once, the others wait and find nothing pending, and nobody fails."""
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import uuid
+
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+    fresh = f"{pg_urls['dbname']}_par_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                sql.Identifier(fresh), sql.Identifier(pg_urls["owner_role"])
+            )
+        )
+    try:
+        url = make_conninfo(**{**conninfo_to_dict(pg_urls["owner"]), "dbname": fresh})
+        extra = [
+            Migration("par_ns", 1, "init", "CREATE TABLE par_ns_items (id int PRIMARY KEY);"),
+            Migration("par_ns", 2, "seed", "INSERT INTO par_ns_items VALUES (1);"),
+        ]
+        runners = 5
+        start = threading.Barrier(runners)
+
+        def run(_: int) -> list[str]:
+            runner = MigrationRunner(url)
+            runner.register(extra)
+            start.wait()
+            return runner.migrate()
+
+        with ThreadPoolExecutor(runners) as ex:
+            results = list(ex.map(run, range(runners)))
+        expected = [m.label for m in MigrationRunner(url).migrations] + [m.label for m in extra]
+        applied = [label for r in results for label in r]
+        # Exactly one runner did the work, in order; the others found nothing pending.
+        assert sorted(applied) == sorted(expected)
+        assert sorted(len(r) for r in results) == [0] * (runners - 1) + [len(expected)]
+        with psycopg.connect(url) as conn:
+            assert conn.execute("SELECT count(*) FROM par_ns_items").fetchone() == (1,)
+            rows = conn.execute(
+                "SELECT count(*), count(DISTINCT (namespace, version)) FROM axentra_schema_migrations"
+            ).fetchone()
+            assert rows == (len(expected), len(expected))
+        checker = MigrationRunner(url)
+        checker.register(extra)
+        assert all(s["applied"] and s["checksum_ok"] for s in checker.status())
+    finally:
+        with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(fresh)))

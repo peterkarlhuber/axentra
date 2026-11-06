@@ -13,7 +13,10 @@ development mailbox and delivery statistics. Package `axentra.notify`, HTTP rout
   `sample_data` (for previews), `variants` per locale (`subject`, `text`, optional `html`),
   `sensitive` flag, `version` (optimistic concurrency with `If-Match`). Every template needs an
   `en` variant. **Built-in defaults** live in code (`axentra.notify.builtin`, version 0): currently
-  `invitation` and `product_invitation` (de/en). Creating a template with the same key overrides the default; deleting the
+  `invitation`, `product_invitation`, `password_reset` and `email_verification` (de/en, all
+  sensitive and system-only: only Axentra itself sends them). `password_reset` and
+  `email_verification` cannot be overridden by a product (`403`: an override could carry the link
+  to another host), and the local mailbox shows them only to callers with `users:manage`. Creating a template with the same key overrides the default; deleting the
   override restores it.
 - **Rendering** (`axentra.notify.render`): only `{{ name }}` placeholders. No expressions,
   filters, attribute access or code execution; anything else starting with `{{` is rejected when
@@ -105,6 +108,14 @@ updated_at, sent_at, subject, content_state (available|redacted|purged|none), co
 Errors: 404 for foreign product/tenant/message (no existence oracle); a user id recipient must be a
 member of the tenant or a product operator (else 404, so global users cannot be probed); 409 when an
 `Idempotency-Key` is reused with a different request.
+
+## Account email hook
+
+`ax.on_account_email = ax.notify.on_account_email` enqueues the `password_reset` (variables
+`product_name`, `reset_url`, `expires_at`) and `email_verification` (`product_name`, `verify_url`,
+`expires_at`) emails in the user's locale (idempotency key `account:<token id>`), as product-level
+messages of the product the identity service chose (see modules/IDENTITY.md, "Password reset and
+email verification"). It never raises and never logs the token or the link.
 
 ## Invitation hook
 

@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 import tomllib
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -120,15 +120,24 @@ class SecuritySettings(_Section):
     master_keys: str | None = None
     """Inline keyring; allowed only outside production."""
     setup_token_ttl_minutes: int = Field(60, ge=5)
+    password_reset_minutes: int = Field(30, ge=5, le=24 * 60)
+    """How long a password reset link works (single use). Reset needs ``password_login``."""
+    email_verification_hours: int = Field(48, ge=1, le=24 * 14)
+    """How long an email verification link works (single use)."""
     max_body_bytes: int = Field(10 * 1024 * 1024, ge=1024)
     """Largest request body accepted (413 above it). File uploads use ``storage.max_file_bytes`` instead."""
     rate_limit_per_minute: int | None = Field(None, ge=1)
     """Requests per minute per credential (API key or session; per IP for anonymous requests).
-    ``None`` (default): off. In-memory token bucket per process; see SECURITY_MODEL.md."""
+    ``None`` (default): off. Counted per process or in the database (``rate_limit_store``); see
+    SECURITY_MODEL.md."""
     rate_limit_ip_per_minute: int | None = Field(None, ge=1)
     """Requests per minute per client IP regardless of credentials (``None``: off)."""
     rate_limit_burst: int | None = Field(None, ge=1)
-    """Bucket size (burst); defaults to the per-minute budget."""
+    """Bucket size (burst); defaults to the per-minute budget. Only for ``rate_limit_store = "memory"``."""
+    rate_limit_store: Literal["memory", "database"] = "memory"
+    """Where the general rate limits are counted: ``memory`` (per process, no database write) or
+    ``database`` (one-minute windows in PostgreSQL shared by all API processes; one write per
+    request and limit)."""
     api_docs: Literal["public", "authenticated", "disabled"] | None = None
     """``/v1/docs`` and ``/v1/openapi.json``: ``None`` (default) means ``disabled`` in production and
     ``public`` otherwise; ``authenticated`` requires a session or API key."""
@@ -198,6 +207,12 @@ class StorageSettings(_Section):
     default_quota_files: int | None = Field(None, ge=0)
     pending_upload_timeout_seconds: int = Field(3600, ge=60)
     """Uploads still pending after this time are treated as abandoned by the purge."""
+    deleted_object_retention_hours: int = Field(0, ge=0, le=24 * 90)
+    """Keep the stored object of a deleted or expired file this long before the purge removes it
+    (0, default: delete it at once). Set it to at least the time between a database backup and
+    the file storage copy that follows it, so a restored database finds the objects of files
+    deleted in between (see docs/operations/BACKUP_RESTORE.md). Deleted files stay invisible
+    either way; retained objects count as personal data until they are removed."""
     store_blocked_as_inert: bool = False
     """Accept executable/HTML/SVG/script uploads and store them as inert ``application/octet-stream``
     attachments instead of refusing them (415). Downloads are always attachments with ``nosniff``."""
@@ -230,6 +245,30 @@ class NotifySettings(_Section):
     ``?token=``/``&token=`` is appended. ``None`` (default): ``<security.public_url>/accept-invitation``.
     Set it when the frontend that accepts invitations (e.g. Studio) is not served on the API origin.
     ``http``/``https`` only; ``https`` in production."""
+
+    account_url: str | None = None
+    """Base URL of the frontend that serves ``/reset-password`` and ``/verify-email`` (for example
+    Studio), used in password reset and email verification emails. ``None`` (default): the origin of
+    ``invitation_accept_url`` when set, else ``security.public_url``. ``http``/``https`` only;
+    ``https`` in production. A path is kept (``https://example.com/app`` gives
+    ``https://example.com/app/reset-password?token=...``)."""
+
+    @field_validator("account_url")
+    @classmethod
+    def _account_url(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = v.strip().rstrip("/")
+        parts = urlsplit(v)
+        if (
+            parts.scheme not in ("http", "https")
+            or not parts.hostname
+            or parts.query
+            or parts.fragment
+            or any(c.isspace() for c in v)
+        ):
+            raise ValueError("notify.account_url must be an absolute http(s) URL without query or fragment")
+        return v
 
     @field_validator("invitation_accept_url")
     @classmethod
@@ -381,6 +420,15 @@ class Settings(_Section):
             self.security.public_url.rstrip("/") + "/accept-invitation"
         )
 
+    def account_link(self, path: str, token: str) -> str:
+        """The link of a password reset (``/reset-password``) or verification (``/verify-email``) email."""
+        base = self.notify.account_url
+        if base is None and self.notify.invitation_accept_url:
+            parts = urlsplit(self.notify.invitation_accept_url)
+            base = f"{parts.scheme}://{parts.netloc}"
+        base = (base or self.security.public_url).rstrip("/")
+        return f"{base}{path}?token={quote(token, safe='')}"
+
     @property
     def secure_cookies(self) -> bool:
         return self.security.public_url.startswith("https://")
@@ -419,6 +467,9 @@ class Settings(_Section):
             accept_url = self.notify.invitation_accept_url
             if accept_url is not None and not accept_url.startswith("https://"):
                 problems.append("notify.invitation_accept_url must use https in production")
+            account_url = self.notify.account_url
+            if account_url is not None and not account_url.startswith("https://"):
+                problems.append("notify.account_url must use https in production")
             if self.billing.provider == "fake":
                 problems.append("billing.provider 'fake' is not allowed in production")
         if self.billing.live_payments and self.billing.provider != "stripe":

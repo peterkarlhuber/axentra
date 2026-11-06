@@ -611,3 +611,72 @@ def test_module_can_be_disabled(ax_factory):
     assert ax.storage is None
     app = create_app(axentra=ax, start=False)
     assert not [r for r in app.routes if "/files" in getattr(r, "path", "")]
+
+
+def test_deleted_object_retention_and_verify(ax_factory):
+    ax = ax_factory(storage={"deleted_object_retention_hours": 24})
+    app = create_app(axentra=ax, start=False)
+    world = World(ax=ax, app=app, admin=bootstrap_admin(ax, app))
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    svc = world.ax.storage
+    gone = _upload(world.admin, pid, tid, b"deleted later").json()
+    soon = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    temp = _upload(world.admin, pid, tid, b"expires", expires_at=soon).json()
+    keep = _upload(world.admin, pid, tid, b"kept").json()
+    # A deleted file disappears at once, but its object stays for the retention time.
+    assert world.admin.delete(f"{_files(pid, tid)}/{gone['id']}").status_code == 204
+    assert world.admin.get(f"{_files(pid, tid)}/{gone['id']}/content").status_code == 404
+    assert f"{pid}/{tid}/{gone['id']}" in _objects(world)
+    with world.ax.db.transaction(DbScope.tenant(pid, tid)) as tx:
+        tx.execute(
+            "UPDATE axentra_files SET expires_at = now() - interval '1 second' WHERE id = %s", (temp["id"],)
+        )
+    report = svc.purge()
+    assert report.expired == 1 and report.objects_deleted == 0 and report.orphans_deleted == 0
+    assert len(_objects(world)) == 3
+    v = svc.verify(checksums=True)
+    assert v.ok and v.files_checked == 1 and v.retained_objects == 2 and v.orphans == 0
+    # After the retention the purge removes both objects.
+    later = svc.purge(now=datetime.now(UTC) + timedelta(hours=25))
+    assert later.objects_deleted == 2 and later.errors == 0
+    assert _objects(world) == [f"{pid}/{tid}/{keep['id']}"]
+    assert svc.verify().retained_objects == 0
+
+
+def test_verify_reports_missing_corrupt_and_orphaned_objects(world, capsys, monkeypatch):
+    from axentra import cli
+
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    svc = world.ax.storage
+    a = _upload(world.admin, pid, tid, b"alpha").json()
+    b = _upload(world.admin, pid, tid, b"bravo").json()
+    _upload(world.admin, pid, tid, b"charlie")
+    assert svc.verify(checksums=True).ok
+    (_root(world) / pid / tid / a["id"]).unlink()
+    (_root(world) / pid / tid / b["id"]).write_bytes(b"BRAVO")
+    svc.backend.put(f"{pid}/{tid}/fil_{'0' * 26}", [b"orphan"], content_type="text/plain")
+    quick = svc.verify()
+    assert quick.missing == [a["id"]] and quick.corrupt == [] and quick.orphans == 1 and not quick.ok
+    full = svc.verify(checksums=True)
+    assert full.missing == [a["id"]] and full.corrupt == [b["id"]] and full.files_checked == 3
+    capped = svc.verify(limit=1)
+    assert capped.files_checked == 1 and capped.truncated
+    # The CLI exits 1 and prints ids only (no names or contents).
+    monkeypatch.setattr(cli, "_ax", lambda args: _CliAx(world.ax))
+    code = cli.main(["storage", "verify", "--checksums"])
+    out = capsys.readouterr().out
+    assert code == 1 and a["id"] in out and b["id"] in out and "bravo" not in out.lower()
+
+
+class _CliAx:
+    """The test's Axentra for the CLI: opening and closing must not close the shared pool."""
+
+    def __init__(self, ax):  # type: ignore[no-untyped-def]
+        self._ax = ax
+        self.storage = ax.storage
+        self.db = type("Db", (), {"open": staticmethod(lambda: None)})()
+
+    def close(self) -> None:
+        return None

@@ -18,7 +18,7 @@ Full guide: [docs/sdk/PYTHON.md](../../docs/sdk/PYTHON.md).
 from axentra_client import AxentraClient, AxentraApiError
 
 with AxentraClient("https://api.example.com", api_key="axk_...") as ax:
-    ax.check_compatibility()                     # refuses an incompatible server clearly
+    ax.check_compatibility()  # refuses an incompatible server clearly
 
     tenant = ax.tenants.create("prd_...", slug="acme", name="Acme")
     note = ax.records.create("prd_...", tenant.id, "notes", {"title": "Hello"})
@@ -33,7 +33,7 @@ with AxentraClient("https://api.example.com", api_key="axk_...") as ax:
     try:
         ax.tenants.get("prd_...", "ten_unknown")
     except AxentraApiError as e:
-        print(e.status, e.code, e.request_id)    # 404 not_found req_...
+        print(e.status, e.code, e.request_id)  # 404 not_found req_...
 ```
 
 Async:
@@ -42,7 +42,7 @@ Async:
 from axentra_client import AsyncAxentraClient
 
 async with AsyncAxentraClient("https://api.example.com") as ax:
-    await ax.auth.login_password("me@example.com", "secret")   # session token as bearer
+    await ax.auth.login_password("me@example.com", "secret")  # session token as bearer
     me = await ax.me.get()
     async for event in ax.audit.iter(product_id="prd_..."):
         ...
@@ -51,9 +51,10 @@ async with AsyncAxentraClient("https://api.example.com") as ax:
 
 ## Coverage
 
-meta + compatibility check, auth (password login, setup, session, logout), me, products,
+meta + compatibility check, auth (password login, setup, session, logout, password reset,
+email verification), me, products,
 tenants, operators (product members), members (tenant members), invitations, roles, API keys,
-records (CRUD + iterator), files (multipart upload, streamed download), usage (record with
+records (CRUD + iterator), files (multipart upload, streamed download), usage (record and batch record with
 idempotency key, events, summary, quotas, meters), billing (plans, subscription, entitlements),
 notify (send, messages), audit, events (publish with idempotency key, list, iterator), jobs
 (enqueue, list, retry, cancel, stats, the kinds the caller may enqueue), schedules (interval or

@@ -199,3 +199,43 @@ def test_notify_invitation_accept_url_validation():
         notify={"invitation_accept_url": "https://studio.example/invitations/accept"},
         **prod,
     ).validate_security()
+
+
+def test_account_url_setting_and_links():
+    from axentra.config.settings import load_settings
+    from axentra.core.errors import ConfigurationError
+
+    s = load_settings(None, environ={})
+    assert s.account_link("/reset-password", "axpwr_a/b") == (
+        "http://127.0.0.1:8080/reset-password?token=axpwr_a%2Fb"
+    )
+    # Falls back to the origin of the invitation link (split origins), then to its own setting.
+    s = load_settings(None, environ={}, notify={"invitation_accept_url": "https://studio.example/inv/accept"})
+    assert s.account_link("/verify-email", "t") == "https://studio.example/verify-email?token=t"
+    s = load_settings(
+        None,
+        environ={},
+        notify={
+            "invitation_accept_url": "https://studio.example/x",
+            "account_url": "https://acc.example/app/",
+        },
+    )
+    assert s.account_link("/verify-email", "t") == "https://acc.example/app/verify-email?token=t"
+    for bad in ("acc.example", "javascript:alert(1)", "https://acc.example/?a=1", "https://acc.example/#x"):
+        with pytest.raises(ConfigurationError):
+            load_settings(None, environ={}, notify={"account_url": bad})
+    prod = {
+        "environment": "production",
+        "security": {
+            "public_url": "https://api.example",
+            "master_keys_ref": "env:K",
+            "allowed_origins": ["https://studio.example"],
+        },
+    }
+    with pytest.raises(ConfigurationError, match=r"notify\.account_url must use https"):
+        load_settings(
+            None, environ={}, notify={"account_url": "http://studio.example"}, **prod
+        ).validate_security()
+    load_settings(
+        None, environ={}, notify={"account_url": "https://studio.example"}, **prod
+    ).validate_security()

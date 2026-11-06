@@ -196,6 +196,21 @@ def cmd_storage_purge(args: argparse.Namespace) -> int:
     return 0 if report.errors == 0 else 2
 
 
+def cmd_storage_verify(args: argparse.Namespace) -> int:
+    """Check that every active file has its object (exit 1 when one is missing or corrupt)."""
+    ax = _ax(args)
+    if ax.storage is None:
+        print("the storage module is not enabled", file=sys.stderr)
+        return 1
+    ax.db.open()
+    try:
+        report = ax.storage.verify(checksums=args.checksums, limit=args.limit)
+    finally:
+        ax.close()
+    print(report.model_dump_json())
+    return 0 if report.ok else 1
+
+
 def cmd_worker(args: argparse.Namespace) -> int:
     """Run a job worker (also fires schedules and purges old jobs while it is the leader)."""
     import signal
@@ -372,6 +387,12 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--no-orphans", action="store_true", help="skip the backend scan for orphaned objects")
     pu.add_argument("--retain-deleted-days", type=int, default=30)
     pu.set_defaults(func=cmd_storage_purge)
+    ve = spsub.add_parser(
+        "verify", help="check that every active file has its object (after a restore); exit 1 if not"
+    )
+    ve.add_argument("--checksums", action="store_true", help="also compare SHA-256 (reads every object)")
+    ve.add_argument("--limit", type=int, default=None, help="check at most this many files")
+    ve.set_defaults(func=cmd_storage_verify)
     nd = sub.add_parser("notify-dispatch", help="deliver queued notifications")
     mode = nd.add_mutually_exclusive_group()
     mode.add_argument("--once", action="store_true", help="one batch, then exit (default)")

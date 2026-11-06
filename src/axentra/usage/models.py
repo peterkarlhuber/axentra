@@ -76,6 +76,16 @@ class RecordResult(BaseModel):
     quota: QuotaStatus
 
 
+class UsageEntry(BaseModel):
+    """One entry of :meth:`axentra.usage.UsageService.record_batch`."""
+
+    meter: str
+    quantity: Any
+    idempotency_key: str
+    occurred_at: datetime | None = None
+    properties: dict[str, Any] | None = None
+
+
 class Reservation(BaseModel):
     id: str
     product_id: str

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Path, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Path, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -17,7 +17,7 @@ from axentra.api.context import (
     session_cookie_name,
 )
 from axentra.core.errors import NotFound, Unauthenticated
-from axentra.identity.models import NewSession, Session, SessionInfo
+from axentra.identity.models import AccountEmail, NewSession, Session, SessionInfo
 from axentra.platform import Axentra
 
 if TYPE_CHECKING:
@@ -113,6 +113,86 @@ def revoke_my_session(session_id: str, principal: CurrentPrincipal, ax: Ax) -> R
     if principal.user_id is None:
         raise Unauthenticated("this endpoint needs a user session")
     ax.identity.revoke_session(principal, principal.user_id, session_id)
+    return Response(status_code=204)
+
+
+# -- password reset and email verification ----------------------------------------------------------
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(max_length=320)
+    product_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The product whose notification settings send the email, when the user belongs to it.",
+    )
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(max_length=200)
+    new_password: str = Field(max_length=1024)
+
+
+class TokenConfirm(BaseModel):
+    token: str = Field(max_length=200)
+
+
+def send_account_email(ax: Axentra, mail: AccountEmail | None) -> None:
+    """Hand a reset or verification token to the notification hook (``ax.on_account_email``)."""
+    hook = getattr(ax, "on_account_email", None)
+    if mail is not None and hook is not None:
+        hook(mail)
+
+
+def _reset_in_background(ax: Axentra, email: str, ip: str | None, rid: str | None, hint: str | None) -> None:
+    try:
+        mail = ax.identity.request_password_reset(email, ip=ip, request_id=rid, product_hint=hint)
+        send_account_email(ax, mail)
+    except Exception as exc:  # the request was answered already; never log the address
+        logger.warning("password reset request failed (%s)", type(exc).__name__)
+
+
+@router.post(
+    "/password-reset",
+    status_code=202,
+    summary="Request a password reset link by email",
+    description=(
+        "Always answers `202` (unless rate limited or password login is off): whether an account"
+        " exists for the address is never revealed. An active user with a password gets a"
+        " single-use link that expires after `security.password_reset_minutes`."
+    ),
+)
+def request_password_reset(
+    body: PasswordResetRequest, request: Request, background: BackgroundTasks, ax: Ax
+) -> Response:
+    check_origin(request)
+    ip = client_ip(request)
+    ax.identity.throttle_password_reset(body.email, ip)
+    background.add_task(_reset_in_background, ax, body.email, ip, request_id(request), body.product_id)
+    return Response(status_code=202)
+
+
+@router.post(
+    "/password-reset/confirm",
+    status_code=204,
+    summary="Set a new password with a reset link (ends all sessions)",
+)
+def confirm_password_reset(body: PasswordResetConfirm, request: Request, ax: Ax) -> Response:
+    check_origin(request)
+    ax.identity.confirm_password_reset(
+        body.token, body.new_password, ip=client_ip(request), request_id=request_id(request)
+    )
+    return Response(status_code=204)
+
+
+@router.post(
+    "/email-verification/confirm",
+    status_code=204,
+    summary="Confirm an email address with a verification link",
+)
+def confirm_email_verification(body: TokenConfirm, request: Request, ax: Ax) -> Response:
+    check_origin(request)
+    ax.identity.confirm_email_verification(body.token, ip=client_ip(request), request_id=request_id(request))
     return Response(status_code=204)
 
 

@@ -38,7 +38,7 @@ library). In `environment = "production"` it refuses to start when:
 - `events.webhook_allow_private_targets` is set (it switches the webhook SSRF guard off) without the
   explicit override `events.webhook_allow_private_targets_in_production = true`;
 - `billing.provider = "fake"`;
-- `notify.invitation_accept_url` is set and not `https://`.
+- `notify.invitation_accept_url` or `notify.account_url` is set and not `https://`.
 
 In every environment: `allowed_origins` must not contain `*`, and `billing.live_payments`
 requires `billing.provider = "stripe"`. At `Axentra.start()`, the database role is checked: a
@@ -95,15 +95,18 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `password_login` | `AXENTRA__SECURITY__PASSWORD_LOGIN` | `true` | Enable email/password login |
 | `password_min_length` | `AXENTRA__SECURITY__PASSWORD_MIN_LENGTH` | `12` | Minimum password length (>= 8) |
 | `login_rate_per_minute` | `AXENTRA__SECURITY__LOGIN_RATE_PER_MINUTE` | `10` | Failed logins per account per minute; per IP three times this |
+| `password_reset_minutes` | `AXENTRA__SECURITY__PASSWORD_RESET_MINUTES` | `30` | Lifetime of a password reset link (5-1440) |
+| `email_verification_hours` | `AXENTRA__SECURITY__EMAIL_VERIFICATION_HOURS` | `48` | Lifetime of an email verification link (1-336) |
 | `fresh_login_minutes` | `AXENTRA__SECURITY__FRESH_LOGIN_MINUTES` | `5` | How recent the login must be for a user without a password (OIDC-only) to set one |
 | `first_password` | `AXENTRA__SECURITY__FIRST_PASSWORD` | `fresh_login` | `fresh_login` or `disabled` (OIDC-only users can never set a password) |
 | `master_keys_ref` | `AXENTRA__SECURITY__MASTER_KEYS_REF` | none | Secret reference to the keyring `kid:base64key[,...]` (first key active). Required in production |
 | `master_keys` | `AXENTRA__SECURITY__MASTER_KEYS` | none | Inline keyring; refused in production. Without either, development uses `./var/dev-keyring`, test an ephemeral key |
 | `setup_token_ttl_minutes` | `AXENTRA__SECURITY__SETUP_TOKEN_TTL_MINUTES` | `60` | Lifetime of first-run setup tokens (>= 5) |
 | `max_body_bytes` | `AXENTRA__SECURITY__MAX_BODY_BYTES` | `10485760` (10 MiB) | Largest request body (413 above it); file uploads use `storage.max_file_bytes` instead |
-| `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); in-memory, per process |
+| `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); see `rate_limit_store` |
 | `rate_limit_ip_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_IP_PER_MINUTE` | none (off) | Requests per minute per client IP, whatever the credential |
-| `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size |
+| `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size (memory store only) |
+| `rate_limit_store` | `AXENTRA__SECURITY__RATE_LIMIT_STORE` | `memory` | `memory` (per process) or `database` (one-minute windows in PostgreSQL shared by all API processes; one write per request and limit) |
 | `api_docs` | `AXENTRA__SECURITY__API_DOCS` | `disabled` in production, else `public` | `/v1/docs` and `/v1/openapi.json`: `public`, `authenticated` or `disabled` |
 
 Generate keyring entries with `axentra keys generate --kid k1`. Rotation (with
@@ -147,6 +150,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `allowed_content_types` | `[]` (all except always-blocked executable/HTML types) |
 | `store_blocked_as_inert` | `false` (`true`: store executable/HTML/SVG/script uploads as inert `application/octet-stream` attachments instead of refusing them with 415; the installation default, products override it in `settings.storage.blocked_types`, see modules/STORAGE.md) |
 | `signed_url_ttl_seconds` | `300` (10-86400) |
+| `deleted_object_retention_hours` | `0` (0-2160; keep objects of deleted or expired files this long before the purge removes them, for consistent database + file backups; see operations/BACKUP_RESTORE.md) |
 
 `[notify]`
 
@@ -160,6 +164,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `smtp_password_ref` | none |
 | `smtp_starttls` | `true` |
 | `invitation_accept_url` | none: `<security.public_url>/accept-invitation`. Link in invitation emails and in `accept_url` of `POST .../invitations`, used when the product sets no own `settings.invitation_accept_url`. Absolute `http(s)` URL (`https` in production); `{token}` is replaced by the token, otherwise `?token=` is appended; a `#fragment` only together with `{token}`. Set it when the frontend that accepts invitations is not on the API origin, e.g. `https://studio.example.com/invitations/accept` (env `AXENTRA__NOTIFY__INVITATION_ACCEPT_URL`; see modules/NOTIFY.md "Invitation hook") |
+| `account_url` | none: the origin of `invitation_accept_url`, else `security.public_url`. Base URL of the frontend serving `/reset-password` and `/verify-email` (Studio does), used in password reset and email verification emails. Absolute `http(s)` URL without query or fragment (`https` in production); a path is kept (env `AXENTRA__NOTIFY__ACCOUNT_URL`; see modules/IDENTITY.md) |
 
 `[billing]`
 

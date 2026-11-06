@@ -348,6 +348,24 @@ class AsyncAuth(_Resource):
         await self._c.request("POST", "/v1/auth/logout")
         self._c.set_token(None)
 
+    async def request_password_reset(self, email: str, *, product_id: str | None = None) -> None:
+        """Ask for a reset link by email. The server answers the same whether or not the address
+        has an account; ``product_id`` picks the product that sends it (when the user belongs to it)."""
+        await self._c.request(
+            "POST", "/v1/auth/password-reset", json=_body(email=email, product_id=product_id)
+        )
+
+    async def confirm_password_reset(self, token: str, new_password: str) -> None:
+        """Set a new password with the token from a reset link (ends all sessions of the user;
+        ``InvalidToken`` problem, code ``invalid_token``, for a bad link)."""
+        await self._c.request(
+            "POST", "/v1/auth/password-reset/confirm", json={"token": token, "new_password": new_password}
+        )
+
+    async def confirm_email_verification(self, token: str) -> None:
+        """Confirm an email address with the token from a verification link (no session needed)."""
+        await self._c.request("POST", "/v1/auth/email-verification/confirm", json={"token": token})
+
 
 class AsyncMeResource(_Resource):
     async def get(self) -> Me:
@@ -362,6 +380,11 @@ class AsyncMeResource(_Resource):
             "PATCH", "/v1/me", User, _body(name=name, locale=locale, preferences=preferences)
         )
         return result
+
+    async def request_email_verification(self, *, product_id: str | None = None) -> None:
+        """Send the signed-in user a link that confirms their address (``409`` when already
+        verified, ``429`` within a minute of the last link)."""
+        await self._c.request("POST", "/v1/me/email-verification", json=_body(product_id=product_id))
 
 
 class AsyncProducts(_Resource):
@@ -911,6 +934,34 @@ class AsyncUsage(_Resource):
             {"Idempotency-Key": key},
         )
         return result
+
+    async def record_batch(
+        self,
+        product_id: str,
+        tenant_id: str,
+        entries: Sequence[Mapping[str, Any]],
+        *,
+        enforce: bool | None = None,
+    ) -> list[UsageRecordResult]:
+        """Record up to 100 entries in one transaction (all or nothing). Each entry is a mapping
+        with ``meter``, ``quantity``, ``idempotency_key`` and optionally ``occurred_at`` and
+        ``properties``; results come in the same order (``replayed`` per entry)."""
+        body_entries = []
+        for entry in entries:
+            item = dict(entry)
+            item["idempotency_key"] = check_idempotency_key(str(item.get("idempotency_key") or ""))
+            if isinstance(item.get("quantity"), Decimal):
+                item["quantity"] = str(item["quantity"])
+            if isinstance(item.get("occurred_at"), datetime):
+                item["occurred_at"] = item["occurred_at"].isoformat()
+            body_entries.append(item)
+        data = await self._c.request_json(
+            "POST",
+            _tenant(product_id, tenant_id, "usage", "events", "batch"),
+            json=_body(entries=body_entries, enforce=enforce),
+        )
+        results: list[UsageRecordResult] = _parse(list[UsageRecordResult], data["results"])
+        return results
 
     async def events(
         self,
@@ -1636,9 +1687,17 @@ class AsyncSearch(_Resource):
         kinds: Sequence[str] | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        match: str | None = None,
     ) -> Page[SearchHit]:
-        """Best matches first. ``q`` takes words, "phrases" and -exclusions."""
-        params = {"q": q, "kind": list(kinds) if kinds else None, "limit": limit, "cursor": cursor}
+        """Best matches first. ``q`` takes words, "phrases" and -exclusions; with
+        ``match="prefix"`` (search as you type) terms also match words that start with them."""
+        params = {
+            "q": q,
+            "kind": list(kinds) if kinds else None,
+            "limit": limit,
+            "cursor": cursor,
+            "match": match,
+        }
         result: Page[SearchHit] = await self._c._get(
             _tenant(product_id, tenant_id, "search"), Page[SearchHit], params
         )
@@ -1652,11 +1711,12 @@ class AsyncSearch(_Resource):
         *,
         kinds: Sequence[str] | None = None,
         page_size: int | None = None,
+        match: str | None = None,
     ) -> AsyncIterator[SearchHit]:
         return self._c._iterate(
             _tenant(product_id, tenant_id, "search"),
             SearchHit,
-            {"q": q, "kind": list(kinds) if kinds else None},
+            {"q": q, "kind": list(kinds) if kinds else None, "match": match},
             page_size,
         )
 

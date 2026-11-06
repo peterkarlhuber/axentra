@@ -19,6 +19,9 @@ _REF_ID = re.compile(REF_ID_PATTERN)
 MAX_TITLE_CHARS = 1000
 MAX_METADATA_BYTES = 16 * 1024
 MAX_QUERY_CHARS = 500
+#: Prefix queries use at most this many terms (the rest of the text is ignored).
+MAX_PREFIX_TERMS = 8
+MATCH_MODES = ("words", "prefix")
 MAX_KINDS = 20
 
 #: Private-use characters that delimit highlighted words between PostgreSQL and Python. They are
@@ -114,12 +117,16 @@ class IndexDocument:
 
 @dataclass(frozen=True, slots=True)
 class SearchQuery:
-    """A full-text query in web search syntax: words, ``"quoted phrases"``, ``or``, ``-excluded``."""
+    """A full-text query. ``match="words"`` (default): web search syntax, i.e. words,
+    ``"quoted phrases"``, ``or``, ``-excluded``. ``match="prefix"`` (search as you type): the
+    letters and digits of the text, split into terms; every term must match, and terms of two or
+    more characters also match longer words that start with them (``inv`` finds ``invoice``)."""
 
     text: str
     kinds: tuple[str, ...] = ()
     limit: int = 20
     offset: int = 0
+    match: str = "words"
 
 
 @dataclass(frozen=True, slots=True)
