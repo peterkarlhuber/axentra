@@ -1781,6 +1781,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/tenants/{tenant_id}/usage/events/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record several usage entries in one transaction (all or nothing, idempotent per entry)
+         * @description Up to 100 entries, each with its own `idempotency_key` (a replayed key returns the stored event with `replayed: true`). With `enforce` (default) a hard limit that one entry would exceed refuses the whole batch with `429 quota_exceeded`; entries count in order.
+         */
+        post: operations["record_usage_batch_v1_products__product_id__tenants__tenant_id__usage_events_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/tenants/{tenant_id}/usage/quotas": {
         parameters: {
             query?: never;
@@ -4906,6 +4926,46 @@ export interface components {
         TokenConfirm: {
             /** Token */
             token: string;
+        };
+        /** UsageBatch */
+        UsageBatch: {
+            /**
+             * Enforce
+             * @description false records without the hard-limit check; needs usage:manage on the product
+             * @default true
+             */
+            enforce?: boolean;
+            /** Entries */
+            entries: components["schemas"]["UsageBatchEntry"][];
+        };
+        /** UsageBatchEntry */
+        UsageBatchEntry: {
+            /**
+             * Idempotency Key
+             * @description Unique per tenant (and within the batch)
+             */
+            idempotency_key: string;
+            /** Meter */
+            meter: string;
+            /**
+             * Occurred At
+             * @description As for a single record
+             */
+            occurred_at?: string | null;
+            /** Properties */
+            properties?: {
+                [key: string]: unknown;
+            };
+            /** Quantity */
+            quantity: number | string;
+        };
+        /** UsageBatchResult */
+        UsageBatchResult: {
+            /**
+             * Results
+             * @description In the order of the entries
+             */
+            results: components["schemas"]["RecordResult"][];
         };
         /** UsageEvent */
         UsageEvent: {
@@ -11069,6 +11129,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RecordResult"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description A hard quota would be exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    record_usage_batch_v1_products__product_id__tenants__tenant_id__usage_events_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBatchResult"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

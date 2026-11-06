@@ -54,7 +54,7 @@ async with AsyncAxentraClient("https://api.example.com") as ax:
 meta + compatibility check, auth (password login, setup, session, logout, password reset,
 email verification), me, products,
 tenants, operators (product members), members (tenant members), invitations, roles, API keys,
-records (CRUD + iterator), files (multipart upload, streamed download), usage (record with
+records (CRUD + iterator), files (multipart upload, streamed download), usage (record and batch record with
 idempotency key, events, summary, quotas, meters), billing (plans, subscription, entitlements),
 notify (send, messages), audit, events (publish with idempotency key, list, iterator), jobs
 (enqueue, list, retry, cancel, stats, the kinds the caller may enqueue), schedules (interval or

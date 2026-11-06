@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 import io
 import json
@@ -555,6 +556,36 @@ def test_usage_record_sends_the_idempotency_key() -> None:
     assert len(first) == 36 and rec.last.headers["idempotency-key"] != first
     with pytest.raises(ValueError):
         ax.usage.record("p", "t", "m", 1, idempotency_key="x" * 201)
+
+
+def test_usage_record_batch_sends_every_key_in_the_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        one = _usage_result(httpx.Request("POST", "http://x", headers={"Idempotency-Key": "a"})).json()
+        return httpx.Response(200, json={"results": [one, {**one, "replayed": True}]})
+
+    ax, rec = client(handler, api_key="k")
+    results = ax.usage.record_batch(
+        "p",
+        "t",
+        [
+            {"meter": "m", "quantity": Decimal("1.5"), "idempotency_key": "a"},
+            {
+                "meter": "m",
+                "quantity": 2,
+                "idempotency_key": "b",
+                "occurred_at": datetime(2026, 11, 1, tzinfo=UTC),
+            },
+        ],
+        enforce=True,
+    )
+    assert rec.last.url.path == "/v1/products/p/tenants/t/usage/events/batch"
+    body = json.loads(rec.last.content)
+    assert body["enforce"] is True and [e["idempotency_key"] for e in body["entries"]] == ["a", "b"]
+    assert body["entries"][0]["quantity"] == "1.5" and body["entries"][1]["occurred_at"].startswith("2026")
+    assert "idempotency-key" not in rec.last.headers
+    assert [r.replayed for r in results] == [False, True]
+    with pytest.raises(ValueError):
+        ax.usage.record_batch("p", "t", [{"meter": "m", "quantity": 1}])
 
 
 def test_notify_send_validates_the_recipient() -> None:

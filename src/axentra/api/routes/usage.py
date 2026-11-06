@@ -19,6 +19,7 @@ from axentra.usage.models import (
     Reservation,
     TenantMeterTotal,
     TimeSeries,
+    UsageEntry,
     UsageEvent,
 )
 from axentra.usage.service import UNSET
@@ -63,6 +64,26 @@ class UsageRecord(BaseModel):
         default=True,
         description="false records without the hard-limit check; needs usage:manage on the product",
     )
+
+
+class UsageBatchEntry(BaseModel):
+    meter: str = Field(max_length=63)
+    quantity: Number
+    idempotency_key: str = Field(max_length=200, description="Unique per tenant (and within the batch)")
+    occurred_at: datetime | None = Field(default=None, description="As for a single record")
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class UsageBatch(BaseModel):
+    entries: list[UsageBatchEntry] = Field(min_length=1, max_length=100)
+    enforce: bool = Field(
+        default=True,
+        description="false records without the hard-limit check; needs usage:manage on the product",
+    )
+
+
+class UsageBatchResult(BaseModel):
+    results: list[RecordResult] = Field(description="In the order of the entries")
 
 
 class QuotaSet(BaseModel):
@@ -214,6 +235,37 @@ def record_usage(
     if result.replayed:
         response.status_code = 200
     return result
+
+
+@router.post(
+    T + "/events/batch",
+    response_model=UsageBatchResult,
+    summary="Record several usage entries in one transaction (all or nothing, idempotent per entry)",
+    description=(
+        "Up to 100 entries, each with its own `idempotency_key` (a replayed key returns the stored"
+        " event with `replayed: true`). With `enforce` (default) a hard limit that one entry would"
+        " exceed refuses the whole batch with `429 quota_exceeded`; entries count in order."
+    ),
+    responses={429: {"description": "A hard quota would be exceeded"}},
+)
+def record_usage_batch(
+    product_id: str, tenant_id: str, body: UsageBatch, principal: CurrentPrincipal, ax: Ax
+) -> UsageBatchResult:
+    if not body.enforce and not ax.authz.has(principal, "usage:manage", product_id):
+        raise Forbidden("recording without quota enforcement needs usage:manage")
+    entries = [
+        UsageEntry(
+            meter=e.meter,
+            quantity=e.quantity,
+            idempotency_key=e.idempotency_key,
+            occurred_at=e.occurred_at,
+            properties=e.properties,
+        )
+        for e in body.entries
+    ]
+    return UsageBatchResult(
+        results=ax.usage.record_batch(principal, product_id, tenant_id, entries, enforce=body.enforce)
+    )
 
 
 @router.get(T + "/events", response_model=Page[UsageEvent])

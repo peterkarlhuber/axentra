@@ -7280,6 +7280,98 @@
         "title": "TokenConfirm",
         "type": "object"
       },
+      "UsageBatch": {
+        "properties": {
+          "enforce": {
+            "default": true,
+            "description": "false records without the hard-limit check; needs usage:manage on the product",
+            "title": "Enforce",
+            "type": "boolean"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/UsageBatchEntry"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "UsageBatch",
+        "type": "object"
+      },
+      "UsageBatchEntry": {
+        "properties": {
+          "idempotency_key": {
+            "description": "Unique per tenant (and within the batch)",
+            "maxLength": 200,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "meter": {
+            "maxLength": 63,
+            "title": "Meter",
+            "type": "string"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As for a single record",
+            "title": "Occurred At"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Quantity"
+          }
+        },
+        "required": [
+          "meter",
+          "quantity",
+          "idempotency_key"
+        ],
+        "title": "UsageBatchEntry",
+        "type": "object"
+      },
+      "UsageBatchResult": {
+        "properties": {
+          "results": {
+            "description": "In the order of the entries",
+            "items": {
+              "$ref": "#/components/schemas/RecordResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "UsageBatchResult",
+        "type": "object"
+      },
       "UsageEvent": {
         "properties": {
           "id": {
@@ -17993,6 +18085,88 @@
           }
         },
         "summary": "Record usage (idempotent; 200 when the Idempotency-Key was seen before)",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/usage/events/batch": {
+      "post": {
+        "description": "Up to 100 entries, each with its own `idempotency_key` (a replayed key returns the stored event with `replayed: true`). With `enforce` (default) a hard limit that one entry would exceed refuses the whole batch with `429 quota_exceeded`; entries count in order.",
+        "operationId": "record_usage_batch_v1_products__product_id__tenants__tenant_id__usage_events_batch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageBatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A hard quota would be exceeded"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Record several usage entries in one transaction (all or nothing, idempotent per entry)",
         "tags": [
           "usage"
         ]

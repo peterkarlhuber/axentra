@@ -929,6 +929,34 @@ class Usage(_Resource):
         )
         return result
 
+    def record_batch(
+        self,
+        product_id: str,
+        tenant_id: str,
+        entries: Sequence[Mapping[str, Any]],
+        *,
+        enforce: bool | None = None,
+    ) -> list[UsageRecordResult]:
+        """Record up to 100 entries in one transaction (all or nothing). Each entry is a mapping
+        with ``meter``, ``quantity``, ``idempotency_key`` and optionally ``occurred_at`` and
+        ``properties``; results come in the same order (``replayed`` per entry)."""
+        body_entries = []
+        for entry in entries:
+            item = dict(entry)
+            item["idempotency_key"] = check_idempotency_key(str(item.get("idempotency_key") or ""))
+            if isinstance(item.get("quantity"), Decimal):
+                item["quantity"] = str(item["quantity"])
+            if isinstance(item.get("occurred_at"), datetime):
+                item["occurred_at"] = item["occurred_at"].isoformat()
+            body_entries.append(item)
+        data = self._c.request_json(
+            "POST",
+            _tenant(product_id, tenant_id, "usage", "events", "batch"),
+            json=_body(entries=body_entries, enforce=enforce),
+        )
+        results: list[UsageRecordResult] = _parse(list[UsageRecordResult], data["results"])
+        return results
+
     def events(
         self,
         product_id: str,

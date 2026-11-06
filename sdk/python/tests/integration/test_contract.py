@@ -238,6 +238,15 @@ def test_usage_idempotency_quotas_and_summary(
     summary = {m.meter: m for m in c.usage.summary(product, tenant)}
     assert summary["api_calls"].value == Decimal(3) and summary["api_calls"].remaining == Decimal(7)
     assert [e.id for e in c.usage.iter_events(product, tenant, meter="api_calls")] == [first.event.id]
+    batch = c.usage.record_batch(
+        product,
+        tenant,
+        [
+            {"meter": "api_calls", "quantity": 3, "idempotency_key": "req-1"},
+            {"meter": "api_calls", "quantity": Decimal(2), "idempotency_key": "req-3"},
+        ],
+    )
+    assert [r.replayed for r in batch] == [True, False] and batch[1].quota.used == Decimal(5)
     assert c.usage.quotas(product, tenant)[0].source == "meter"
     q = admin.usage.set_quota(product, tenant, "api_calls", Decimal(100), enforcement="soft")
     assert q.limit == Decimal(100) and q.source == "quota"
