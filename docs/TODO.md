@@ -25,7 +25,6 @@ the change that completes its package.
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | events | **AX-MUP-A4** (MP-A4, PS-4): the webhook address check refuses 6to4 (`2002::/16`), Teredo (`2001::/32`) and NAT64 targets with embedded private IPv4 addresses independently of the Python patch level (`ipaddress.is_global` before the CVE-2024-4032 fix treats `2002::/16` as global); CI prints the Python patch versions |
 | P1 | data | **AX-MUP-A6** (MP-A6, PS-6): production refuses to start with a database role that owns the RLS tables unless `database.allow_table_owner = true` is set explicitly; migrations run with a separate owner role |
 | P2 | security | **AX-MUP-A7** (MP-A7, VB-3/VB-4/VB-5): OIDC responses read as a stream with a 1 MiB cap and a maximum `iat` age; more redaction patterns (`whsec_`, `Authorization: Basic`, session cookies, `password=`, `client_secret=`); DNS resolution of webhook targets inside the attempt's time budget |
 | P2 | tests | **AX-MUP-A8** (MP-A8): shared security test vectors vendored as JSON with a checksum (no dependency on orkexa or Nodestro) |

@@ -4,7 +4,9 @@
   credentials in the URL, no fragments.
 - The host name is resolved and **every** address is checked: private, loopback, link-local,
   multicast, reserved, unspecified and other non-global addresses are refused unless
-  ``events.webhook_allow_private_targets`` is set (tests, development).
+  ``events.webhook_allow_private_targets`` is set (tests, development). IPv6 addresses that lead to
+  an IPv4 address (IPv4-mapped, 6to4, Teredo, NAT64) are judged by that address, and the 6to4,
+  Teredo and NAT64 local-use prefixes are refused as a whole, on every Python patch level.
 - The connection goes to the checked address itself (no second DNS lookup, which defeats DNS
   rebinding); TLS still verifies the certificate for the host name (SNI).
 - Redirects are not followed and only the first ``webhook_response_max_bytes`` of the response
@@ -60,9 +62,53 @@ class HttpResult:
     duration_ms: int
 
 
+#: IPv6 prefixes that carry an IPv4 address are checked explicitly, not through ``is_global``: its answer for
+#: them depends on the Python patch level (before the CVE-2024-4032 fix, 3.11.10 / 3.12.4, ``2002::/16`` counted
+#: as global), and it treats NAT64 addresses as global whatever IPv4 address they lead to (MUP-ONA PS-4).
+#: 6to4 (RFC 3056) and Teredo (RFC 4380): deprecated tunnels whose relays forward to the embedded IPv4
+#: address; the embedded addresses are checked and the whole prefix is refused (no webhook receiver needs it).
+SIXTO4_PREFIX = ipaddress.IPv6Network("2002::/16")
+TEREDO_PREFIX = ipaddress.IPv6Network("2001::/32")
+#: NAT64 well-known prefix (RFC 6052): the gateway connects to the IPv4 address in the last 32 bits.
+NAT64_WELL_KNOWN_PREFIX = ipaddress.IPv6Network("64:ff9b::/96")
+#: NAT64 local-use prefix (RFC 8215): the IPv4 address sits where the operator's prefix length puts it, so
+#: every RFC 6052 position is checked; the prefix is not globally reachable and is refused as a whole as well.
+NAT64_LOCAL_USE_PREFIX = ipaddress.IPv6Network("64:ff9b:1::/48")
+#: Prefixes refused whatever IPv4 address they embed.
+REFUSED_IPV6_PREFIXES = (SIXTO4_PREFIX, TEREDO_PREFIX, NAT64_LOCAL_USE_PREFIX)
+
+
+def _embedded_ipv4(addr: ipaddress.IPv6Address) -> list[ipaddress.IPv4Address]:
+    """The IPv4 addresses an IPv6 address leads to: IPv4-mapped, 6to4, Teredo server and client, NAT64."""
+    found: list[ipaddress.IPv4Address] = []
+    if addr.ipv4_mapped is not None:
+        found.append(addr.ipv4_mapped)
+    if addr in SIXTO4_PREFIX:
+        found.append(ipaddress.IPv4Address((int(addr) >> 80) & 0xFFFFFFFF))  # bits 16-47
+    if addr in TEREDO_PREFIX and addr.teredo is not None:
+        found.extend(
+            addr.teredo
+        )  # (server, client); the client address is stored inverted, .teredo undoes it
+    if addr in NAT64_WELL_KNOWN_PREFIX:
+        found.append(ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF))
+    if addr in NAT64_LOCAL_USE_PREFIX:
+        # RFC 6052 section 2.2: prefix length /48 (bits 48-63 and 72-87, bits 64-71 are zero), /56 (56-63 and
+        # 72-95), /64 (72-103) and /96 (96-127).
+        b = addr.packed
+        for octets in (b[6:8] + b[9:11], b[7:8] + b[9:12], b[9:13], b[12:16]):
+            found.append(ipaddress.IPv4Address(octets))
+    return found
+
+
 def _blocked(addr: IPAddress) -> bool:
-    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
-        addr = addr.ipv4_mapped
+    """``True`` when a webhook must not connect to ``addr`` (fail closed)."""
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped is not None:
+            return _blocked(addr.ipv4_mapped)
+        if any(_blocked(v4) for v4 in _embedded_ipv4(addr)):
+            return True
+        if any(addr in prefix for prefix in REFUSED_IPV6_PREFIXES):
+            return True
     return (
         not addr.is_global
         or addr.is_private

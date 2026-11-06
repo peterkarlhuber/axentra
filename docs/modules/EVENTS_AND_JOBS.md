@@ -221,7 +221,10 @@ synchronously (no retries) and returns the recorded delivery.
 which is refused in production). URLs must not contain credentials or fragments. `localhost` and
 `*.local`, `*.localhost`, `*.internal` are refused. Before every delivery the host is resolved and
 **every** address is checked. Private, loopback, link-local, multicast, reserved, unspecified,
-IPv6 site-local (`fec0::/10`) and IPv4-mapped forms of these are refused unless
+IPv6 site-local (`fec0::/10`) and IPv4-mapped forms of these are refused, and so are 6to4
+(`2002::/16`), Teredo (`2001::/32`) and the NAT64 prefixes (`64:ff9b::/96`, `64:ff9b:1::/48`, all
+reserved or deprecated; their embedded IPv4 addresses are checked as well), on every Python patch
+level (the prefixes are module constants of `axentra.events.http_client`), unless
 `webhook_allow_private_targets = true` (tests and development; production refuses to start with it
 unless `webhook_allow_private_targets_in_production = true` is also set, for receivers on a private
 network). The connection goes to the checked address (no second lookup, so DNS rebinding
