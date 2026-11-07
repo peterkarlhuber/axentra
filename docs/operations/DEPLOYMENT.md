@@ -51,7 +51,8 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
 `deploy/compose/docker-compose.single.yml` and `docker-compose.multi.yml` are identical except for
 the configuration file (`deploy/config/single.toml` or `multi.toml`):
 
-- `db`: `postgres:16` with a named volume. On first initialization,
+- `db`: `postgres:16`, pinned by digest (CI checks the pin; Dependabot proposes updates), with a named
+  volume. On first initialization,
   `deploy/compose/initdb/01-roles.sql` creates `axentra_owner` (owns the database and schema,
   runs migrations) and `axentra_app` (no superuser, no BYPASSRLS, no DDL, `SELECT/INSERT/UPDATE/
   DELETE` on the owner's tables through default privileges). The port is not published.

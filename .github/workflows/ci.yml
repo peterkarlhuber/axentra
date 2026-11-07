@@ -226,7 +226,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Base images are pinned by digest
+      - name: Base and service images are pinned by digest
         run: |
           python3 -I - <<'PY'
           import re, sys
@@ -239,6 +239,12 @@ jobs:
                   base = args.get(base.strip("${}"), base)
                   if base not in stages and "@sha256:" not in base:
                       loose.append(f"{path}: {base}")
+          # Service images of the compose stacks too; the ":local" images are built from this repository.
+          for path in ("single", "multi", "taskboard"):
+              path = f"deploy/compose/docker-compose.{path}.yml"
+              for image in re.findall(r"^\s*image:\s*(\S+)", open(path).read(), re.M):
+                  if not image.endswith(":local") and "@sha256:" not in image:
+                      loose.append(f"{path}: {image}")
           sys.exit(f"not pinned by digest: {loose}" if loose else 0)
           PY
       - name: Compose files are valid
