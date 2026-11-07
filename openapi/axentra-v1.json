@@ -378,6 +378,88 @@
         "title": "AuthInfo",
         "type": "object"
       },
+      "BatchDocument": {
+        "properties": {
+          "body": {
+            "default": "",
+            "description": "Plain text; the limit is search.max_body_chars",
+            "title": "Body",
+            "type": "string"
+          },
+          "kind": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Returned with hits (at most 16 KB); not searched",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "ref_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$",
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref_id"
+        ],
+        "title": "BatchDocument",
+        "type": "object"
+      },
+      "BatchResult": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/SearchDocument"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "documents"
+        ],
+        "title": "BatchResult",
+        "type": "object"
+      },
+      "BatchUpsert": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/BatchDocument"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents"
+        ],
+        "title": "BatchUpsert",
+        "type": "object"
+      },
       "CheckoutCreate": {
         "properties": {
           "cancel_url": {
@@ -501,6 +583,19 @@
           "last_updated_at"
         ],
         "title": "CollectionStats",
+        "type": "object"
+      },
+      "DeleteKindResult": {
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "DeleteKindResult",
         "type": "object"
       },
       "Delivery": {
@@ -17391,6 +17486,25 @@
             }
           },
           {
+            "description": "JSON object; only documents whose metadata contains it, e.g. {\"status\":\"open\"}",
+            "in": "query",
+            "name": "metadata",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON object; only documents whose metadata contains it, e.g. {\"status\":\"open\"}",
+              "title": "Metadata"
+            }
+          },
+          {
             "description": "Page size (1-200, default 50)",
             "in": "query",
             "name": "limit",
@@ -17462,6 +17576,152 @@
           }
         },
         "summary": "Full-text search in the tenant's index (ranked, highlighted)",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/batch": {
+      "post": {
+        "description": "Each document is created or replaced by kind and ref_id, as with `PUT .../documents/{kind}/{ref_id}`;\na (kind, ref_id) may appear once. `search:index` in the tenant.",
+        "operationId": "upsert_batch_v1_products__product_id__tenants__tenant_id__search_documents_batch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Index up to 100 documents in one transaction (all or nothing)",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}": {
+      "delete": {
+        "description": "`search:index` in the tenant; one audit event `search.documents.delete_kind` with the count.",
+        "operationId": "delete_kind_v1_products__product_id__tenants__tenant_id__search_documents__kind__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document kind, e.g. `invoice`",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "Document kind, e.g. `invoice`",
+              "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteKindResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Remove every document of a kind from the tenant's index",
         "tags": [
           "search"
         ]

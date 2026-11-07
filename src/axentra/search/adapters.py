@@ -39,6 +39,8 @@ from axentra.search.models import (
 #: Called inside the write transaction (PostgreSQL) or right after the external write (other
 #: adapters) with the stored document, e.g. to write the audit event.
 WriteHook = Callable[[Tx, SearchDocument], None]
+#: Called inside a bulk delete's transaction with the number of removed documents.
+BulkHook = Callable[[Tx, int], None]
 #: ``reason`` of the ``422`` for a search cancelled by ``search.statement_timeout_ms``.
 QUERY_TOO_EXPENSIVE = "query_too_expensive"
 
@@ -66,8 +68,11 @@ class SearchAdapter(Protocol):
         ...
 
     # Optional: ``kinds(product_id, tenant_id, limit) -> list[KindCount]`` (the tenant's indexed
-    # kinds in kind order with their counts). Adapters without it answer ``GET .../search/kinds``
-    # with ``409 conflict``; the PostgreSQL adapter has it.
+    # kinds in kind order with their counts), ``upsert_many(docs, *, actor, hook) -> list[IndexResult]``
+    # (all documents of one tenant, all or nothing) and ``delete_kind(product_id, tenant_id, kind, *,
+    # hook) -> int`` (remove every document of a kind; ``hook`` gets the transaction and the count).
+    # Adapters without them answer the matching endpoints with ``409 conflict``; the PostgreSQL
+    # adapter has all three.
 
 
 _COLUMNS = (
@@ -127,36 +132,66 @@ class PostgresSearchAdapter:
         return SearchDocument(**{k: v for k, v in row.items() if k != "inserted"})
 
     def upsert(self, doc: IndexDocument, *, actor: str | None, hook: WriteHook | None = None) -> IndexResult:
-        lang = self._lang()
+        self._lang()  # checked before the write transaction opens (it reads on its own connection)
         with self.db.transaction(DbScope.tenant(doc.product_id, doc.tenant_id)) as tx:
-            row = tx.one(
-                "INSERT INTO axentra_search_documents AS d"
-                " (id, product_id, tenant_id, kind, ref_id, title, body, metadata, language,"
-                "  created_by, updated_by)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::regconfig, %s, %s)"
-                " ON CONFLICT (product_id, tenant_id, kind, ref_id) DO UPDATE SET"
-                "  title = EXCLUDED.title, body = EXCLUDED.body, metadata = EXCLUDED.metadata,"
-                "  language = EXCLUDED.language, updated_by = EXCLUDED.updated_by,"
-                "  version = d.version + 1, updated_at = now()"
-                f" RETURNING {_COLUMNS}, (xmax = 0) AS inserted",
-                (
-                    new_id("sdoc"),
-                    doc.product_id,
-                    doc.tenant_id,
-                    doc.kind,
-                    doc.ref_id,
-                    doc.title,
-                    doc.body,
-                    Jsonb(doc.metadata),
-                    lang,
-                    actor,
-                    actor,
-                ),
+            return self._upsert(tx, doc, actor=actor, hook=hook)
+
+    def upsert_many(
+        self, docs: list[IndexDocument], *, actor: str | None, hook: WriteHook | None = None
+    ) -> list[IndexResult]:
+        """Index documents of ONE tenant in one transaction (all or nothing)."""
+        if not docs:
+            return []
+        first = docs[0]
+        if any((d.product_id, d.tenant_id) != (first.product_id, first.tenant_id) for d in docs):
+            raise ValidationFailed("a batch indexes documents of one tenant")
+        self._lang()
+        with self.db.transaction(DbScope.tenant(first.product_id, first.tenant_id)) as tx:
+            return [self._upsert(tx, d, actor=actor, hook=hook) for d in docs]
+
+    def delete_kind(self, product_id: str, tenant_id: str, kind: str, *, hook: BulkHook | None = None) -> int:
+        """Remove every document of ``kind`` in the tenant; returns how many were removed."""
+        with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
+            n = tx.execute(
+                "DELETE FROM axentra_search_documents WHERE product_id = %s AND tenant_id = %s AND kind = %s",
+                (product_id, tenant_id, kind),
             )
-            assert row is not None
-            stored = self._doc(row)
             if hook is not None:
-                hook(tx, stored)
+                hook(tx, n)
+        return n
+
+    def _upsert(
+        self, tx: Tx, doc: IndexDocument, *, actor: str | None, hook: WriteHook | None
+    ) -> IndexResult:
+        lang = self._lang()
+        row = tx.one(
+            "INSERT INTO axentra_search_documents AS d"
+            " (id, product_id, tenant_id, kind, ref_id, title, body, metadata, language,"
+            "  created_by, updated_by)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::regconfig, %s, %s)"
+            " ON CONFLICT (product_id, tenant_id, kind, ref_id) DO UPDATE SET"
+            "  title = EXCLUDED.title, body = EXCLUDED.body, metadata = EXCLUDED.metadata,"
+            "  language = EXCLUDED.language, updated_by = EXCLUDED.updated_by,"
+            "  version = d.version + 1, updated_at = now()"
+            f" RETURNING {_COLUMNS}, (xmax = 0) AS inserted",
+            (
+                new_id("sdoc"),
+                doc.product_id,
+                doc.tenant_id,
+                doc.kind,
+                doc.ref_id,
+                doc.title,
+                doc.body,
+                Jsonb(doc.metadata),
+                lang,
+                actor,
+                actor,
+            ),
+        )
+        assert row is not None
+        stored = self._doc(row)
+        if hook is not None:
+            hook(tx, stored)
         return IndexResult(document=stored, created=bool(row["inserted"]))
 
     def get(self, product_id: str, tenant_id: str, kind: str, ref_id: str) -> SearchDocument:
@@ -210,6 +245,9 @@ class PostgresSearchAdapter:
             "max_candidates": self.max_candidates,
         }
         kind_filter = " AND d.kind = ANY(%(kinds)s)" if query.kinds else ""
+        if query.metadata:
+            params["metadata"] = Jsonb(query.metadata)
+            kind_filter += " AND d.metadata @> %(metadata)s"
         if query.match == "prefix":
             # Terms are only letters and digits (split on everything else), so quoting them in the
             # tsquery syntax is safe; the configuration still normalizes each one (case, stemming).

@@ -1690,6 +1690,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove every document of a kind from the tenant's index
+         * @description `search:index` in the tenant; one audit event `search.documents.delete_kind` with the count.
+         */
+        delete: operations["delete_kind_v1_products__product_id__tenants__tenant_id__search_documents__kind__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}/{ref_id}": {
         parameters: {
             query?: never;
@@ -1704,6 +1724,27 @@ export interface paths {
         post?: never;
         /** Remove a document from the index */
         delete: operations["delete_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Index up to 100 documents in one transaction (all or nothing)
+         * @description Each document is created or replaced by kind and ref_id, as with `PUT .../documents/{kind}/{ref_id}`;
+         *     a (kind, ref_id) may appear once. `search:index` in the tenant.
+         */
+        post: operations["upsert_batch_v1_products__product_id__tenants__tenant_id__search_documents_batch_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2440,6 +2481,45 @@ export interface components {
              */
             limit: number | string | null;
         };
+        /** BatchDocument */
+        BatchDocument: {
+            /**
+             * Body
+             * @description Plain text; the limit is search.max_body_chars
+             * @default
+             */
+            body?: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Metadata
+             * @description Returned with hits (at most 16 KB); not searched
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Ref Id */
+            ref_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title?: string;
+        };
+        /** BatchResult */
+        BatchResult: {
+            /** Created */
+            created: number;
+            /** Documents */
+            documents: components["schemas"]["SearchDocument"][];
+            /** Updated */
+            updated: number;
+        };
+        /** BatchUpsert */
+        BatchUpsert: {
+            /** Documents */
+            documents: components["schemas"]["BatchDocument"][];
+        };
         /** CheckoutCreate */
         CheckoutCreate: {
             /** Cancel Url */
@@ -2476,6 +2556,11 @@ export interface components {
             records: number;
             /** Tenants */
             tenants: number;
+        };
+        /** DeleteKindResult */
+        DeleteKindResult: {
+            /** Deleted */
+            deleted: number;
         };
         /** Delivery */
         Delivery: {
@@ -10836,6 +10921,8 @@ export interface operations {
                 limit?: number | null;
                 /** @description `words`: web search syntax. `prefix` (search as you type): every term must match, and terms of two or more characters also match words that start with them */
                 match?: "words" | "prefix";
+                /** @description JSON object; only documents whose metadata contains it, e.g. {"status":"open"} */
+                metadata?: string | null;
                 /** @description Web search syntax: words (all must match), "quoted phrase", or, -excluded */
                 q: string;
             };
@@ -10855,6 +10942,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_SearchHit_"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_kind_v1_products__product_id__tenants__tenant_id__search_documents__kind__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Document kind, e.g. `invoice` */
+                kind: string;
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteKindResult"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
@@ -11002,6 +11132,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    upsert_batch_v1_products__product_id__tenants__tenant_id__search_documents_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchResult"];
+                };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
             422: {

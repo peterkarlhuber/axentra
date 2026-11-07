@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Path, Query, Response
@@ -9,11 +10,12 @@ from pydantic import BaseModel, Field
 
 from axentra.api.context import Ax, CurrentPrincipal
 from axentra.api.routes.common import Cursor, Limit
-from axentra.core.errors import ModuleDisabled
+from axentra.core.errors import ModuleDisabled, ValidationFailed
 from axentra.core.pagination import Page
 from axentra.platform import Axentra
 from axentra.search.models import (
     KIND_PATTERN,
+    MAX_BATCH_DOCUMENTS,
     MAX_KINDS,
     MAX_QUERY_CHARS,
     MAX_TITLE_CHARS,
@@ -45,6 +47,25 @@ class DocumentUpsert(BaseModel):
     )
 
 
+class BatchDocument(DocumentUpsert):
+    kind: str = Field(pattern=KIND_PATTERN)
+    ref_id: str = Field(pattern=REF_ID_PATTERN)
+
+
+class BatchUpsert(BaseModel):
+    documents: list[BatchDocument] = Field(min_length=1, max_length=MAX_BATCH_DOCUMENTS)
+
+
+class BatchResult(BaseModel):
+    created: int
+    updated: int
+    documents: list[SearchDocument]
+
+
+class DeleteKindResult(BaseModel):
+    deleted: int
+
+
 @router.get(
     "",
     response_model=Page[SearchHit],
@@ -71,12 +92,62 @@ def search(
             " terms of two or more characters also match words that start with them"
         ),
     ),
+    metadata: str | None = Query(
+        None,
+        max_length=2000,
+        description='JSON object; only documents whose metadata contains it, e.g. {"status":"open"}',
+    ),
     limit: Limit = None,
     cursor: Cursor = None,
 ) -> Page[SearchHit]:
+    filt: dict[str, Any] | None = None
+    if metadata:
+        try:
+            filt = json.loads(metadata)
+        except json.JSONDecodeError:
+            raise ValidationFailed("metadata must be a JSON object") from None
+        if not isinstance(filt, dict):
+            raise ValidationFailed("metadata must be a JSON object")
     return _svc(ax).query(
-        principal, product_id, tenant_id, q, kinds=kind, limit=limit, cursor=cursor, match=match
+        principal,
+        product_id,
+        tenant_id,
+        q,
+        kinds=kind,
+        limit=limit,
+        cursor=cursor,
+        match=match,
+        metadata=filt,
     )
+
+
+@router.post(
+    "/documents/batch",
+    response_model=BatchResult,
+    summary=f"Index up to {MAX_BATCH_DOCUMENTS} documents in one transaction (all or nothing)",
+)
+def upsert_batch(
+    product_id: str, tenant_id: str, body: BatchUpsert, principal: CurrentPrincipal, ax: Ax
+) -> BatchResult:
+    """Each document is created or replaced by kind and ref_id, as with `PUT .../documents/{kind}/{ref_id}`;
+    a (kind, ref_id) may appear once. `search:index` in the tenant."""
+    results = _svc(ax).upsert_many(principal, product_id, tenant_id, [d.model_dump() for d in body.documents])
+    created = sum(1 for r in results if r.created)
+    return BatchResult(
+        created=created, updated=len(results) - created, documents=[r.document for r in results]
+    )
+
+
+@router.delete(
+    "/documents/{kind}",
+    response_model=DeleteKindResult,
+    summary="Remove every document of a kind from the tenant's index",
+)
+def delete_kind(
+    product_id: str, tenant_id: str, kind: Kind, principal: CurrentPrincipal, ax: Ax
+) -> DeleteKindResult:
+    """`search:index` in the tenant; one audit event `search.documents.delete_kind` with the count."""
+    return DeleteKindResult(deleted=_svc(ax).delete_kind(principal, product_id, tenant_id, kind))
 
 
 @router.get(
