@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_call:
 
 # Every action is pinned by commit SHA (the version is the trailing comment); Dependabot keeps the pins current.
 # Checkouts do not keep the token in the Git configuration (persist-credentials: false).
@@ -11,7 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # github.workflow differs when the nightly calls this workflow, so a nightly and a master push never cancel each other.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

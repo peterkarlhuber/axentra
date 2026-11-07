@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "comment": "Mandatory checks (S2) per CI-FAST. A PR is ok only if every listed check ran on the PR head SHA and succeeded. Changing this list needs a reason in the PR.",
+  "pull_request": {
+    "ci.yml": [
+      "Lint, types, architecture, contract",
+      "Tests (Python 3.11, PostgreSQL 15)",
+      "Tests (Python 3.12, PostgreSQL 16)",
+      "Tests (Python 3.13, PostgreSQL 17)",
+      "TypeScript SDK (generated types, unit tests, build)",
+      "Python SDK (Python 3.11)",
+      "Python SDK (Python 3.13)",
+      "SDK contract tests against axentra serve",
+      "Package builds and installs headless",
+      "Container image and compose files",
+      "Security scans"
+    ]
+  },
+  "nightly": {
+    "nightly.yml": [
+      "report"
+    ]
+  }
+}
