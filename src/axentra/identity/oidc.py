@@ -393,7 +393,9 @@ class OidcClient:
                 leeway=LEEWAY_SECONDS,
                 options={"require": ["exp", "iat", "iss", "aud", "sub"]},
             )
-        except jwt.PyJWTError as exc:
+        except (jwt.PyJWTError, TypeError, ValueError) as exc:
+            # TypeError/ValueError: the key named by ``kid`` does not fit the header's algorithm (an RSA key
+            # for ES256); a refused login, not an unhandled error.
             raise OidcLoginError("login_failed", f"invalid ID token: {exc}") from exc
         if claims.get("iss") != self.provider.issuer:
             raise OidcLoginError("login_failed", "the ID token has another issuer")

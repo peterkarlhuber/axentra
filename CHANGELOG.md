@@ -55,6 +55,9 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Webhooks (MUP-ONA A7, VB-5): the DNS lookup of the target counts against `events.webhook_timeout_seconds`;
   a resolver that does not answer in time ends the attempt with a timeout instead of holding the worker
   (the lookup runs in a daemon thread that is abandoned at the deadline). `duration_ms` now includes the lookup.
+- OIDC (MUP-ONA A8, VB-7): an ID token whose `kid` names a key that does not fit the header's algorithm (an RSA
+  key for `ES256`, possible when the provider's key set names no `alg`) ends the login with `login_failed`
+  instead of an unhandled `TypeError` (found by the shared security test vectors).
 
 ### Changed (breaking for production)
 - Database roles (MUP-ONA A6, PS-6): `database.allow_table_owner` is now `bool | None` with default `None`
