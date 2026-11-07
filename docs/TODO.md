@@ -5,7 +5,8 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last full review: 2026-11-06 against master at fea2fd0 (TODO abatement round).
+Last full review: 2026-11-06 against master at 6f73952 (TODO abatement round).
+Before that: 2026-11-06 against `fea2fd0` (TODO abatement round 2).
 Before that: 2026-11-05 against `b7ddac0` (quality round 3 close-out; TODO consolidated).
 Release blockers: none. No item is P0, and none blocks the next planned preview (the Nodestro desktop candidate,
 nodestro-desktop DSK-001); the P1 items are needed for a production-ready 1.0, not for a scheduled release.
@@ -42,7 +43,7 @@ review, no penetration test).
 |---|---|---|
 | P1 | operations | No production deployment has been carried out; no production-like environment exists |
 | P1 | tests | No load or performance tests; no capacity figures for the API, workers, SSE or the job queue |
-| P2 | build | Docker images and compose files are built/validated only in CI (no local Docker in the development environment); the compose stacks are never started (see the deployment-test item below) |
+| P2 | build | The Taskboard demo stack (`docker-compose.taskboard.yml`) is built in CI but never started; the single- and multi-product stacks are started and smoke-tested by `scripts/compose_smoke.sh` in CI (TODO abatement round 4) |
 | P2 | platform | Only Linux is tested (CI `ubuntu-latest`); macOS and Windows are untested for the library, CLI and SDKs |
 | P3 | build | **Decided (owner, 2026-11-05), not implemented.** Dependency updates are merged by hand: weekly grouped Dependabot pull requests (Actions; pip and npm minor/patch; Docker digests), cooldown 3 days (7 for pip and npm majors; security updates not delayed), ignored majors listed with reasons in `.github/dependabot.yml`. Owner decision: protect `master` with required CI checks (only jobs of `ci.yml` that run on every pull request) and block force pushes and deletion, with no required approvals and "up to date" off so agent pull requests keep working; auto-merge stays off. Node.js 24 LTS is the next common Node.js version for the TypeScript SDK and its CI (today `engines >=20`, CI 22), coordinated in Q1 2027 after a compatibility check. Both are separate work orders (nodestro-studio ST-052, ST-054). Dependency round 2026-11-05 |
 
@@ -52,45 +53,36 @@ review, no penetration test).
 |---|---|---|
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
-| P2 | identity | MFA for password logins: TOTP (design ready in `architecture/MFA_TOTP_DESIGN.md`: enrollment, recovery codes, two-step login, step-up, admin reset, Studio screens, tests; not implemented) and WebAuthn/passkeys later |
+| P2 | identity | MFA for password logins: TOTP (design ready in `architecture/MFA_TOTP_DESIGN.md`: enrollment, recovery codes, two-step login, step-up, admin reset, Studio screens, tests; not implemented) and WebAuthn/passkeys later. An implementation is new authentication code and needs an independent security review before it ships |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
 | P2 | search | Optional vector/semantic search through an adapter (e.g. pgvector with an embedding step; order section 4 L) |
 | P2 | search | External search adapters (OpenSearch, Meilisearch, ...) implementing `SearchAdapter`; only `PostgresSearchAdapter` exists, and an external engine's audit event cannot be atomic with its write |
 | P2 | search | Fuzzy matching (`pg_trgm`), accent folding (`unaccent`), per-tenant or per-document language. Both extensions must be created by a superuser, so they need an installation decision (optional extension with a fallback, or a documented prerequisite). Prefix matching (`match=prefix`) exists since the TODO abatement round |
-| P3 | search | Bulk index/delete API (e.g. delete all documents of a kind), a reindex job, product-wide search across tenants, filters on `metadata` |
+| P3 | search | Product-wide search across tenants: needs a permission design (who may search every tenant at once, how hits name their tenant). Batch indexing, delete by kind and `metadata` filters exist since TODO abatement round 4. A reindex job does not apply to `PostgresSearchAdapter` (products push their documents; a kind is replaced with delete by kind plus batches); an external adapter would need one |
 | P2 | identity | Identity providers are managed only through configuration (`[[oidc]]`); no API (and therefore no Studio view) to list, add or disable providers |
-| P3 | migrations | Runner follow-ups (plan G-2; the backup hook, newer-schema refusal, serving gate and `-- axentra:no-transaction` steps exist): a declared forward-compatible range per namespace (today any unknown applied version fails the gate), Python (data backfill) migrations, a per-migration lock/statement timeout, dry-run SQL output |
+| P3 | migrations | Runner follow-ups (plan G-2; the backup hook, newer-schema refusal, serving gate, `-- axentra:no-transaction` steps, per-migration lock/statement timeouts and `axentra migrate --dry-run` exist): a declared forward-compatible range per namespace (today any unknown applied version fails the gate) and Python (data backfill) migrations |
 | P3 | notify | SMS and push adapters (email is the only channel) |
 | P3 | usage | `UsageService.record_batch` (`POST .../usage/events/batch`, up to 100 entries under one authorization, meters in one query) lowers 4 meters from 68 to 55 statements; the rest is per entry (idempotency key, counter upserts, quota check, audit). A set-based write of counters and events would cut it further |
-| P2 | notify | Per-tenant send rate limits for `POST .../notify/send` (review 2026-11-01, F6 follow-up; the relay itself is closed by `notify:send_external` and system-only templates) |
 | P2 | identity | Optional stricter OIDC auto-linking: require `allowed_email_domains` for linking existing accounts, or skip it for platform admins (review 2026-11-01, I5; documented as a design decision in SECURITY_MODEL.md). Linking can now be turned off per provider (`link_by_verified_email = false`) |
-| P2 | identity | Users without an email address: no HTTP API or Studio view to create them or to link/unlink external identities (library only: `create_external_user`, `link_identity`); OIDC login states and login throttling windows still use the host clock |
+| P2 | identity | Users without an email address: the HTTP API exists since TODO abatement round 4 (`POST /v1/users/external`, `GET/POST/DELETE /v1/users/{uid}/identities`), but Studio has no view for it yet. OIDC login states still use the host clock (login throttling windows use the database clock since round 4) |
 | P2 | identity | First password for OIDC-only users through a fresh IdP re-authentication (`prompt=login`/`max_age`) or an emailed link instead of the session-age window (review 2026-11-01, F3 follow-up). The emailed password-reset link exists now but is sent only to users who already have a password |
-| P2 | search | Expensive requests reachable with read permissions: search ranks every match before the limit (common terms take seconds on large tenants) and records sorted by time have no composite index per product/tenant/collection. Bounded candidate set or rank cutoff, a shorter statement timeout for search, time-sort indexes, a default per-credential limit for heavy endpoints (AX2-06) |
-| P2 | events | Webhook deliveries share the job queue and worker slots with all other kinds; attempts are now time-bounded, but a separate concurrency pool or a per-product cap for deliveries is still missing (AX2-02 follow-up) |
+| P2 | events | Webhook deliveries share the job queue and worker slots with all other kinds; attempts are now time-bounded, but a separate concurrency pool or a per-product cap for deliveries is still missing (AX2-02 follow-up; in progress in a parallel order) |
 | P3 | events | Webhook URLs accept any port; decide whether to restrict them (for example 443 and >= 1024). Legacy IPv4 notations are refused at creation since audit round 3 (AX2-07) |
 | P3 | events | Schedules whose creator lost access keep firing (their jobs now run without permissions); optionally disable a user's schedules when the user loses product access. API keys of such a creator are refused and listed with `creator_has_access = false` since the TODO abatement round (AX2-01 follow-up) |
-| P2 | identity | `GET /v1/me` lists every readable tenant (no cap since AX2-03), so for product operators and platform roles the response grows with the number of tenants (measured in audit round 3, AX3-03: about 1 KB per tenant, 10,000 tenants = 10 MB, p50 0.4 s). Consider an opt-in parameter (for example memberships only, or paging) at the next `/v1` cleanup, coordinated with Studio, which needs only memberships and product-level permissions |
 
 ## Developer experience (Phase 4)
 
 | Pri | Area | Item |
 |---|---|---|
-| P2 | api | `/v1` gained additive fields and endpoints in the TODO abatement round (product invitations, `GET /v1/users/{uid}/memberships`, `GET .../jobs/kinds`, `GET .../search/kinds`, `sort=name` for tenants, key states, problem `reason` members, `auth.password_policy` in `/v1/meta`), but `API_VERSION` is still `1.0`, so a client cannot require them through the compatibility rule. Bump the minor to `1.1` with the next release (owner decision; the SDKs' `API_VERSION` follows) |
+| P2 | api | `/v1` gained additive fields and endpoints in the TODO abatement round (product invitations, `GET /v1/users/{uid}/memberships`, `GET .../jobs/kinds`, `GET .../search/kinds`, `sort=name` for tenants, key states, problem `reason` members, `auth.password_policy` in `/v1/meta`; in round 4 `POST /v1/users/external` and identities, search batches, delete by kind and `metadata`, `GET /v1/me?tenants=`, the caller's inbox routes and the `query_too_expensive` reason), but `API_VERSION` is still `1.0`, so a client cannot require them through the compatibility rule. Bump the minor to `1.1` with the next release (owner decision; the SDKs' `API_VERSION` follows) |
 | P2 | sdk | Publish `@axentra/sdk` (npm) and `axentra-client` (PyPI); release process and provenance |
-| P2 | sdk | Python SDK: remaining operations (templates, preferences, reservations, checkout, users admin, product invitations, user memberships, permission declarations, job/event stream parsing); events, jobs, schedules, webhooks and search are typed since the TODO abatement round |
-| P2 | cli | CLI for administration over HTTP (products, tenants, keys) and `axentra admin` tasks without database access |
 | P3 | branding | The product name collides with an unrelated company that owns `axentra.dev` (problem type URIs no longer use that domain, DX-41); decide on naming/branding before a public release |
-| P3 | sdk | `npm audit` reports moderate advisories for the TypeScript SDK's development dependency `minimatch` (none in the production tree); update when a fixed release is in range (AX2-09) |
 
 ## Hardening (Phase 5)
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | build | Reproducible container builds: build hatchling from pinned versions and compare digests of two builds (the `python:3.13-slim` base is digest-pinned with a CI check since audit round 2, OPS2-12) |
-| P3 | build | The compose stacks still use `postgres:16` (and other service images) by tag; pin by digest like the application image (OPS2-12 rest) |
-| P2 | build | Hash-pinned constraints (`--require-hashes`) and SBOM generation for the image |
-| P2 | tests | Deployment tests that start the compose stacks in CI and run smoke tests (the single-/multi-product scenarios run in-process today: `tests/integration/test_deployment_models.py`) |
+| P1 | build | Reproducible container builds: compare the digests of two independent builds and remove what differs (timestamps, file order). The build tools, hatchling included, come from hash-pinned locks since TODO abatement round 4 (`deploy/locks/build.txt`), and the `python:3.13-slim` base is digest-pinned with a CI check since audit round 2 (OPS2-12) |
 | P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs (multi- and single-product mode) run only for the commit pinned in Studio's `api/BACKEND_REF` and only on Studio pull requests; nothing on the Axentra side triggers them for a new Axentra commit (Studio's pin must be moved to a pushed commit that contains this round's changes) |
 
 ## Nodestro (Phase 6)
@@ -101,7 +93,7 @@ review, no penetration test).
 | Rejected | integration | G-5 (claim token for ownerless tenants): rejected for now. Nodestro's setup links must keep working in every identity mode and across a rollback, so they stay in Nodestro's table and travel through Axentra's OIDC login as host context (`start(context=...)`); a generic claim token is worth adding only for a product without its own store |
 | Rejected | jobs | G-8 "jobs module with Nodestro's semantics" (configurable at-most-once delivery, unique active key per `(tenant, kind, ref)`, interrupt-on-lease-loss callbacks, product capacity gates): rejected by architecture decision 2026-11-02. Nodestro's no-duplicate guarantee lives in its run fence, interrupted state, tool journal and approval checkpoints, not in the queue, so these options would be Nodestro semantics in a generic module that no other product needs; Nodestro keeps its run queue permanently (M11 closed; nodestro-runtime `docs/AXENTRA.md`). Axentra jobs stay at least once (`max_attempts=1` for no retry); evidence: `tests/integration/test_job_delivery_semantics.py` |
 | Rejected | identity | Endpoint that revokes all of the caller's sessions except the current one (Studio's "Sign out all other sessions"): not needed for now. A user has a handful of sessions; Studio sends `DELETE /v1/auth/sessions/{id}` per session (bounded concurrency, never the session marked `current`, `404` counted as done, partial failures reported), which also keeps one `identity.session.revoke` audit event per session. Worth adding only for atomicity or users with very many sessions |
-| P3 | notify | Inbox channel: HTTP routes and an Axentra Studio page (today a host serves it through its own API, as Nodestro does) |
+| P3 | notify | Inbox channel: an Axentra Studio page. The HTTP routes `.../notify/inbox/me` exist since TODO abatement round 4 (a host such as Nodestro can also serve it through its own API) |
 
 ## Known limitations
 
