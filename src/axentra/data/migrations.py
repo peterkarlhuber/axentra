@@ -43,6 +43,7 @@ from importlib import metadata, resources
 import logging
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 import psycopg
@@ -272,6 +273,17 @@ def discover_migrations(
     return out
 
 
+def _wait_for_lock(conn: psycopg.Connection[Any], poll_seconds: float = 0.2) -> None:
+    """Take the migration lock, polling instead of blocking in ``pg_advisory_lock``.
+
+    A blocking ``pg_advisory_lock`` keeps a statement (and its snapshot) open while it waits, and
+    ``CREATE INDEX CONCURRENTLY`` in a ``-- axentra:no-transaction`` migration of the runner that
+    holds the lock waits for every open snapshot: the two runners would deadlock. Between tries no
+    statement is open here."""
+    while not conn.execute("SELECT pg_try_advisory_lock(%s)", (MIGRATION_LOCK,)).fetchone()[0]:  # type: ignore[index]
+        time.sleep(poll_seconds)
+
+
 class MigrationRunner:
     def __init__(self, url: str) -> None:
         self.url = url
@@ -415,7 +427,7 @@ class MigrationRunner:
         raises, nothing is applied."""
         done: list[str] = []
         with psycopg.connect(self.url, autocommit=True) as conn:
-            conn.execute("SELECT pg_advisory_lock(%s)", (MIGRATION_LOCK,))
+            _wait_for_lock(conn)
             try:
                 self._ensure_table(conn)
                 applied = self._applied(conn)
