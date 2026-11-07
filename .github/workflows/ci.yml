@@ -12,14 +12,17 @@ permissions:
   contents: read
 
 concurrency:
-  # github.workflow differs when the nightly calls this workflow, so a nightly and a master push never cancel each other.
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # CI-FAST AP1: a new push to a pull request cancels the older run of that pull request. Every other run (master
+  # push, schedule, dispatch, and the nightly's workflow_call, where github.workflow is "Nightly") gets its own group
+  # from github.run_id, so it is never cancelled and never waits behind another run.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
     name: Lint, types, architecture, contract
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 1.6 min (successful runs 2026-11-01..07)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,6 +30,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
+          cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -e ".[dev]"
       - run: ruff check src tests examples
@@ -45,6 +49,7 @@ jobs:
   test:
     name: Tests (Python ${{ matrix.python }}, PostgreSQL ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # CI-FAST AP1: p99 7.8 min, slowest entry 3.12 (successful runs 2026-11-01..07)
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +74,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
       # The exact patch level matters for the address checks (MUP-ONA T-AX-NET-2): setup-python installs the
       # current 3.11.x / 3.12.x / 3.13.x, and tests/unit/test_http_client_addresses.py runs on each of them.
       - name: Python version
@@ -97,6 +103,7 @@ jobs:
   sdk-typescript:
     name: TypeScript SDK (generated types, unit tests, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 0.6 min (successful runs 2026-11-01..07)
     defaults:
       run:
         working-directory: sdk/typescript
@@ -122,6 +129,7 @@ jobs:
   sdk-python:
     name: Python SDK (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 2.6 min, slowest entry 3.11 (successful runs 2026-11-01..07)
     strategy:
       fail-fast: false
       matrix:
@@ -143,6 +151,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
+          cache: pip
       - run: python -m pip install --upgrade pip
       - name: The client installs and its unit tests pass WITHOUT the server package
         run: |
@@ -166,6 +175,7 @@ jobs:
   sdk-e2e:
     name: SDK contract tests against axentra serve
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 1.4 min (successful runs 2026-11-01..07)
     services:
       postgres:
         image: postgres:16
@@ -183,6 +193,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+          cache: pip
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
@@ -200,6 +211,7 @@ jobs:
   package:
     name: Package builds and installs headless
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 0.7 min (successful runs 2026-11-01..07)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,6 +236,7 @@ jobs:
   container:
     name: Container image and compose files
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 1.8 min (successful runs 2026-11-01..07)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -294,6 +307,7 @@ jobs:
   security:
     name: Security scans
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # CI-FAST AP1: p99 0.8 min (successful runs 2026-11-01..07)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -301,6 +315,7 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
+          cache: pip
       - run: pip install -e ".[server,oidc,s3]" pip-audit==2.10.1 bandit
       - run: bandit -q -r src -c pyproject.toml
       # Known vulnerabilities in the installed dependencies (the pattern of nodestro-runtime's CI). Blocking: an
