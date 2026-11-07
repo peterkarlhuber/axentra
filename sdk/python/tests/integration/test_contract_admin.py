@@ -67,6 +67,42 @@ def test_notify_templates_and_preferences(
     assert gone.value.status == 404
 
 
+def test_inbox_and_me_tenant_filter(server: Server, admin: AxentraClient, product: str, tenant: str) -> None:
+    other = admin.tenants.create(product, unique("t"), "Tenant B").id
+    admin.notify.create_template(
+        product, "run.failed", {"en": EN}, channel="inbox", category="runs", variables=["name"]
+    )
+    email = f"{unique('inbox')}@example.com"
+    uid = server.user(email)
+    admin.members.add(product, tenant, "member", email=email)
+    for name in ("R1", "R2"):
+        server.ax.notify.enqueue_system(
+            product, tenant, template_key="run.failed", to_user_id=uid, variables={"name": name}
+        )
+    with server.login(email) as user:
+        page = user.notify.inbox(product, tenant_id=tenant)
+        assert [m.subject for m in page.items] == ["Hi R2", "Hi R1"] and page.items[0].read_at is None
+        assert user.notify.unread_count(product) == 2
+        assert user.notify.mark_read(product, [page.items[0].id]) == 1
+        assert [m.subject for m in user.notify.inbox(product, unread_only=True).items] == ["Hi R1"]
+        assert user.notify.mark_read(product, tenant_id=tenant) == 1
+        assert user.notify.unread_count(product, tenant_id=tenant) == 0
+        with pytest.raises(AxentraApiError) as foreign:
+            user.notify.inbox(product, tenant_id=other)
+        assert foreign.value.status == 404
+        # /v1/me: only the tenants the user belongs to, or none.
+        mine = user.me.get(tenants="memberships")
+        access = next(p for p in mine.products if p.product.id == product)
+        assert [t.tenant.id for t in access.tenants] == [tenant]
+        bare = next(p for p in user.me.get(tenants="none").products if p.product.id == product)
+        assert bare.tenants == []
+    key = admin.api_keys.create(product, "k", ["notify:preferences"], tenant_id=tenant)
+    with server.client(api_key=key.secret) as by_key:  # an API key has no inbox
+        with pytest.raises(AxentraApiError) as no_inbox:
+            by_key.notify.inbox(product, tenant_id=tenant)
+        assert no_inbox.value.status == 403
+
+
 def test_usage_reservations(admin: AxentraClient, product: str, tenant: str) -> None:
     admin.usage.create_meter(product, "tokens", unit="tokens", default_limit=100, default_enforcement="hard")
     r = admin.usage.reserve(product, tenant, "tokens", 60, ttl_seconds=120, idempotency_key="res-1")

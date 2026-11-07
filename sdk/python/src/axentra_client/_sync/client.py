@@ -45,6 +45,7 @@ from axentra_client.models import (
     Event,
     ExternalIdentity,
     FileInfo,
+    InboxEntry,
     Invitation,
     Job,
     JobStats,
@@ -401,9 +402,12 @@ class Auth(_Resource):
 
 
 class MeResource(_Resource):
-    def get(self) -> Me:
-        """The caller: user (or ``None`` for API keys), platform role and accessible products."""
-        result: Me = self._c._get("/v1/me", Me)
+    def get(self, *, tenants: str | None = None) -> Me:
+        """The caller: user (or ``None`` for API keys), platform role and accessible products.
+
+        ``tenants``: ``"all"`` (the server's default), ``"memberships"`` (only tenants the caller
+        belongs to) or ``"none"`` (products without their tenant lists)."""
+        result: Me = self._c._get("/v1/me", Me, {"tenants": tenants})
         return result
 
     def update(
@@ -1533,6 +1537,54 @@ class Notify(_Resource):
             {"tenant_id": tenant_id},
         )
         return result
+
+    # the caller's own inbox (channel "inbox"; users only)
+
+    def inbox(
+        self,
+        product_id: str,
+        *,
+        tenant_id: str | None = None,
+        unread_only: bool = False,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[InboxEntry]:
+        """The caller's in-app notifications, newest first (one tenant or the whole product)."""
+        params = {
+            "tenant_id": tenant_id,
+            "unread_only": "true" if unread_only else None,
+            "limit": limit,
+            "cursor": cursor,
+        }
+        result: Page[InboxEntry] = self._c._get(
+            _product(product_id, "notify", "inbox", "me"), Page[InboxEntry], params
+        )
+        return result
+
+    def unread_count(self, product_id: str, *, tenant_id: str | None = None) -> int:
+        """How many of the caller's in-app notifications are unread."""
+        result: Json = self._c.request_json(
+            "GET", _product(product_id, "notify", "inbox", "me", "unread"), params={"tenant_id": tenant_id}
+        )
+        return int(result["unread"])
+
+    def mark_read(
+        self,
+        product_id: str,
+        message_ids: Sequence[str] | None = None,
+        *,
+        tenant_id: str | None = None,
+    ) -> int:
+        """Mark the given notifications (``None``: all unread ones in the scope) as read; returns
+        how many changed. Ids of other users' messages change nothing."""
+        body = _body(message_ids=list(message_ids) if message_ids is not None else None)
+        result: Json = self._c.request_json(
+            "POST",
+            _product(product_id, "notify", "inbox", "me", "read"),
+            json=body,
+            params={"tenant_id": tenant_id},
+        )
+        return int(result["marked"])
 
 
 class Audit(_Resource):

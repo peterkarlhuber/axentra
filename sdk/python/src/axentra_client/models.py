@@ -696,6 +696,22 @@ class Preferences(AxentraModel):
     version: int
 
 
+class InboxEntry(AxentraModel):
+    """One in-app notification of the caller (channel ``inbox``); ``subject``/``text`` are
+    ``None`` once the content was purged."""
+
+    id: str
+    product_id: str
+    tenant_id: str | None = None
+    template_key: str
+    category: str
+    created_at: datetime
+    read_at: datetime | None = None
+    subject: str | None = None
+    text: str | None = None
+    content_state: str
+
+
 # -- usage reservations and billing checkout ---------------------------------------------------
 
 
@@ -813,6 +829,7 @@ __all__ = [
     "Event",
     "ExternalIdentity",
     "FileInfo",
+    "InboxEntry",
     "Invitation",
     "Job",
     "JobStats",

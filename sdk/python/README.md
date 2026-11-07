@@ -56,7 +56,7 @@ email verification), me, products,
 tenants, operators (product members), members (tenant members), invitations, roles, API keys,
 records (CRUD + iterator), files (multipart upload, streamed download), usage (record and batch record with
 idempotency key, events, summary, quotas, meters), billing (plans, subscription, entitlements),
-notify (send, messages, templates and previews, the caller's preferences), audit, events (publish
+notify (send, messages, templates and previews, the caller's preferences and inbox), audit, events (publish
 with idempotency key, list, iterator, live stream), jobs (enqueue, list, retry, cancel, stats, the
 kinds the caller may enqueue, live stream), schedules (interval or cron), webhooks (endpoints, secret
 rotation, test, deliveries, redeliver), search (index, batch index, query with kind and metadata

@@ -86,7 +86,7 @@ the credentials. Every request carries
 |---|---|
 | (client) | `meta()`, `check_compatibility()`, `request()`, `request_json()`, `stream()` |
 | `auth` | `login_password`, `setup`, `session`, `sessions`, `logout` |
-| `me` | `get`, `update` |
+| `me` | `get(tenants=)` (`all`, `memberships` or `none`), `update` |
 | `products` | `list`, `get`, `create`, `update(version=)` |
 | `tenants` | `list` (page), `iter`, `get`, `create`, `update(version=)`, `delete` |
 | `operators` (product members) | `list`, `add`, `change`, `remove` |
@@ -98,7 +98,7 @@ the credentials. Every request carries
 | `files` | `upload` (bytes, file object or path), `get`, `list`, `iter`, `update`, `delete`, `download`, `download_to`, `stream`, `download_url` |
 | `usage` | `record(idempotency_key=)`, `record_batch`, `reserve(idempotency_key=)`, `reservation`, `commit`, `release`, `events`, `iter_events`, `summary`, `quotas`, `set_quota`, `delete_quota`, `meters`, `create_meter` |
 | `billing` | `plans`, `tenant_plans`, `create_plan`, `subscriptions`, `subscription`, `checkout`, `subscribe`, `change_plan`, `cancel`, `resume`, `entitlements` |
-| `notify` | `send(idempotency_key=)`, `messages`, `iter_messages`, `message`, `templates`, `template`, `create_template`, `update_template(version=)`, `delete_template(version=)`, `preview_template`, `preview_draft`, `preferences`, `set_preferences(version=)` (the caller's own) |
+| `notify` | `send(idempotency_key=)`, `messages`, `iter_messages`, `message`, `templates`, `template`, `create_template`, `update_template(version=)`, `delete_template(version=)`, `preview_template`, `preview_draft`, `preferences`, `set_preferences(version=)`, `inbox(unread_only=)`, `unread_count`, `mark_read(message_ids=None)` (the caller's own) |
 | `audit` | `list`, `iter`, `get` |
 | `events` | `publish(idempotency_key=)`, `list` (page; `type` exact or `prefix.*`), `iter`, `get`, `stream(types=, last_event_id=)` (server-sent events as `StreamMessage {id, event, data}`) |
 | `jobs` | `enqueue(idempotency_key=)`, `list` (page), `iter`, `get`, `retry`, `cancel`, `stats`, `kinds` (what the caller may enqueue), `stream(last_event_id=)` (job status changes) |
