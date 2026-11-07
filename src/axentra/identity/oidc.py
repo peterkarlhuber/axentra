@@ -60,8 +60,12 @@ ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES
 LOGIN_TTL = timedelta(minutes=10)
 #: Allowed clock difference to the provider, in seconds.
 LEEWAY_SECONDS = 60
-#: Largest accepted answer of a provider endpoint.
+#: Largest accepted answer of a provider endpoint. Answers are read as a stream and cut off once they exceed
+#: it, so a provider that sends more never makes Axentra read (or buffer) more than this plus one chunk.
 MAX_RESPONSE_BYTES = 1024 * 1024
+#: Allowed clock difference for the age check of an ID token's ``iat`` (on top of
+#: ``OidcProviderSettings.id_token_max_age_seconds``), in seconds.
+IAT_CLOCK_SKEW_SECONDS = 120
 #: Error codes a login can end with (shown to the user as ``?login_error=<code>``).
 ERROR_CODES = frozenset(
     {
@@ -238,21 +242,40 @@ class OidcClient:
                 raise OidcLoginError("provider_unavailable", f"the provider's {key} is not https")
         return data
 
-    def _get_json(self, url: str) -> dict[str, Any]:
+    def _request(self, method: str, url: str, code: str, **kwargs: Any) -> tuple[int, bytes]:
+        """Send a request and read the answer as a stream: at most :data:`MAX_RESPONSE_BYTES` (plus the last
+        chunk) are read; a larger answer, announced or not, ends the request with ``code``."""
+        # Uncompressed answers: the limit then applies to what the provider sends, not only to what it inflates to.
+        kwargs["headers"] = {**kwargs.get("headers", {}), "Accept-Encoding": "identity"}
         try:
-            answer = self.http.get(url, headers={"Accept": "application/json"})
+            with self.http.stream(method, url, **kwargs) as answer:
+                announced = answer.headers.get("content-length", "")
+                if announced.isdigit() and int(announced) > MAX_RESPONSE_BYTES:
+                    raise OidcLoginError(code, f"{url} answered with too much data")
+                body = bytearray()
+                for chunk in answer.iter_bytes():
+                    body += chunk
+                    if len(body) > MAX_RESPONSE_BYTES:
+                        raise OidcLoginError(code, f"{url} answered with too much data")
+                return answer.status_code, bytes(body)
         except httpx.HTTPError as exc:
             raise OidcLoginError("provider_unavailable", f"reading {url} failed: {exc}") from exc
-        return self._json(answer, url, "provider_unavailable")
+
+    def _get_json(self, url: str) -> dict[str, Any]:
+        status, body = self._request(
+            "GET", url, "provider_unavailable", headers={"Accept": "application/json"}
+        )
+        return self._json(status, body, url, "provider_unavailable")
 
     @staticmethod
-    def _json(answer: httpx.Response, url: str, code: str) -> dict[str, Any]:
-        if len(answer.content) > MAX_RESPONSE_BYTES:
+    def _json(status: int, body: bytes, url: str, code: str) -> dict[str, Any]:
+        if len(body) > MAX_RESPONSE_BYTES:
             raise OidcLoginError(code, f"{url} answered with too much data")
-        if answer.status_code != 200:
-            raise OidcLoginError(code, f"{url} answered {answer.status_code}: {answer.text[:200]}")
+        if status != 200:
+            text = body[:200].decode("utf-8", errors="replace")
+            raise OidcLoginError(code, f"{url} answered {status}: {text}")
         try:
-            data = answer.json()
+            data = json.loads(body)
         except ValueError as exc:
             raise OidcLoginError(code, f"{url} did not answer with JSON") from exc
         if not isinstance(data, dict):
@@ -339,13 +362,11 @@ class OidcClient:
         else:
             form["client_id"] = self.provider.client_id
         url = str(self.metadata()["token_endpoint"])
-        try:
-            answer = self.http.post(url, data=form, headers=headers)
-        except httpx.HTTPError as exc:
-            raise OidcLoginError("provider_unavailable", f"the token request failed: {exc}") from exc
-        if answer.status_code in (400, 401):
-            raise OidcLoginError("login_failed", f"the token endpoint refused the code: {answer.text[:200]}")
-        tokens = self._json(answer, url, "provider_unavailable")
+        status, body = self._request("POST", url, "provider_unavailable", data=form, headers=headers)
+        if status in (400, 401):
+            text = body[:200].decode("utf-8", errors="replace")
+            raise OidcLoginError("login_failed", f"the token endpoint refused the code: {text}")
+        tokens = self._json(status, body, url, "provider_unavailable")
         id_token = tokens.get("id_token")
         if not isinstance(id_token, str) or not id_token:
             raise OidcLoginError("login_failed", "the provider sent no ID token")
@@ -376,6 +397,11 @@ class OidcClient:
             raise OidcLoginError("login_failed", f"invalid ID token: {exc}") from exc
         if claims.get("iss") != self.provider.issuer:
             raise OidcLoginError("login_failed", "the ID token has another issuer")
+        # PyJWT refuses an iat in the future (beyond the leeway) but accepts any age: a token issued long ago
+        # (replayed or from a provider with a broken clock) is refused here.
+        max_age = self.provider.id_token_max_age_seconds
+        if time.time() - float(claims["iat"]) > max_age + IAT_CLOCK_SKEW_SECONDS:
+            raise OidcLoginError("login_failed", f"the ID token was issued more than {max_age} s ago (iat)")
         token_nonce = claims.get("nonce")
         if not isinstance(token_nonce, str) or not hmac.compare_digest(token_nonce.encode(), nonce.encode()):
             raise OidcLoginError("login_failed", "the ID token belongs to another login (nonce)")

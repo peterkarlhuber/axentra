@@ -164,7 +164,9 @@ Authorization code flow with PKCE (`S256`), `state` and `nonce`.
 **ID token checks:** signature with a key from the provider's JWKS; only asymmetric algorithms
 (`RS*`, `PS*`, `ES*`, `EdDSA`; never `none` or `HS*`); a JWK's `alg`, when present, must match;
 `iss` equals the configured issuer exactly; `aud` contains `client_id`; `exp`, `iat`, `iss`, `aud`,
-`sub` required; 60 s leeway; `nonce` equals the login's nonce (constant-time); `azp`, when present
+`sub` required; 60 s leeway; `iat` at most `id_token_max_age_seconds` (default 600) in the past,
+plus 2 minutes of clock skew (an old or replayed token is refused; MUP-ONA VB-3); `nonce` equals the
+login's nonce (constant-time); `azp`, when present
 or when `aud` has several entries, must equal `client_id`. Only the ID token is used (no userinfo
 call).
 
@@ -173,7 +175,9 @@ equal the configured issuer exactly; `authorization_endpoint`, `token_endpoint` 
 be https. Plain http is accepted only for loopback hosts (`localhost`, `127.0.0.1`, `::1`) outside
 production. The JWKS is cached for one hour and read again when a token names an unknown `kid`
 (key rotation), at most once every 10 seconds. Provider requests use a 10 s timeout, follow no
-redirects and accept at most 1 MiB.
+redirects, ask for an uncompressed answer and accept at most 1 MiB: the answer is read as a stream and
+the request ends as soon as more arrives (or a larger `Content-Length` is announced), so a provider
+cannot make Axentra read or buffer more (MUP-ONA VB-3).
 
 **Accounts:**
 
@@ -304,7 +308,8 @@ page via `GET /v1/meta`), `issuer`, `client_id`, `client_secret_ref` / `client_s
 outside production), `scopes` (default `openid email profile`), `allow_signup` (default false),
 `allowed_email_domains`, `link_by_verified_email` (default true), `allow_signup_without_email`
 (default false, needs `allow_signup`), `token_endpoint_auth_method` (`client_secret_basic` default,
-`client_secret_post`, or `none` for a public client using PKCE only).
+`client_secret_post`, or `none` for a public client using PKCE only), `id_token_max_age_seconds`
+(default 600, 60 to 86400: the oldest accepted ID token `iat`, plus 2 minutes of clock skew).
 
 Provider notes: Entra ID v2 ID tokens usually carry no `email_verified` claim. Axentra then
 neither links nor creates a user by email, so a first Entra login is refused with

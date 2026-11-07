@@ -22,6 +22,18 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   whole (on current Python versions they already were; webhooks to such addresses have no practical use).
   The prefixes are module constants of `axentra.events.http_client`. CI prints the Python version of every
   test matrix entry (3.11, 3.12, 3.13).
+- OIDC (MUP-ONA A7, VB-3): provider answers (discovery, JWKS, token endpoint) are read as a stream and the
+  request ends as soon as more than 1 MiB arrives or a larger `Content-Length` is announced (before, the whole
+  answer was read and then checked); requests ask for `Accept-Encoding: identity`. ID tokens whose `iat` lies
+  more than `id_token_max_age_seconds` (new per-provider setting, default 600) plus 2 minutes of clock skew in
+  the past are refused with `login_failed`.
+- Redaction (MUP-ONA A7, VB-4): free text also loses webhook signing secrets (`whsec_...`), the credentials of
+  `Authorization: Basic`, `Cookie:` / `Set-Cookie:` header values, Axentra's session and login cookie values,
+  and the values of `password=` (also `new_password=`, `passwd=`) and `client_secret=`, literal or
+  percent-encoded; ordinary text is unchanged.
+- Webhooks (MUP-ONA A7, VB-5): the DNS lookup of the target counts against `events.webhook_timeout_seconds`;
+  a resolver that does not answer in time ends the attempt with a timeout instead of holding the worker
+  (the lookup runs in a daemon thread that is abandoned at the deadline). `duration_ms` now includes the lookup.
 
 ### Changed (breaking for production)
 - Database roles (MUP-ONA A6, PS-6): `database.allow_table_owner` is now `bool | None` with default `None`

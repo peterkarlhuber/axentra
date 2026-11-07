@@ -11,8 +11,9 @@
   rebinding); TLS still verifies the certificate for the host name (SNI).
 - Redirects are not followed and only the first ``webhook_response_max_bytes`` of the response
   body are read. ``webhook_timeout_seconds`` is the **total** budget of one attempt (connect, TLS
-  handshake, sending, response headers and body): a receiver that answers slowly byte by byte is
-  cut off at the deadline, so one delivery never holds a worker longer than the timeout.
+  handshake, sending, response headers and body) and includes the DNS lookup: a slow resolver or a
+  receiver that answers slowly byte by byte is cut off at the deadline, so one delivery never holds
+  a worker longer than the timeout.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import socket
 import ssl
 import threading
 import time
+from typing import Any
 from urllib.parse import urlsplit
 
 from axentra.config.settings import EventsSettings
@@ -164,10 +166,38 @@ def parse_target(url: str, settings: EventsSettings, *, production: bool) -> Tar
     return Target(scheme, host, port or (443 if scheme == "https" else 80), path)
 
 
-def resolve_target(target: Target, settings: EventsSettings) -> list[str]:
-    """Resolve the host and check every address; returns the allowed addresses."""
+def _getaddrinfo(host: str, port: int, timeout: float | None) -> list[Any]:
+    """``socket.getaddrinfo`` that gives up after ``timeout`` seconds (``None``: no limit).
+
+    The system resolver has no timeout parameter, so the lookup runs in a daemon thread and the caller stops
+    waiting at the limit (MUP-ONA VB-5). An abandoned lookup ends when the resolver's own timeout does; its
+    result is dropped."""
+    if timeout is None:
+        return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    outcome: dict[str, Any] = {}
+
+    def lookup() -> None:
+        try:
+            outcome["infos"] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except BaseException as exc:  # handed to the caller below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=lookup, name="axentra-webhook-dns", daemon=True)
+    worker.start()
+    worker.join(max(timeout, 0.0))
+    if worker.is_alive():
+        raise TimeoutError(f"resolving {host} took longer than {timeout:g} s")
+    if "error" in outcome:
+        raise outcome["error"]
+    infos: list[Any] = outcome["infos"]
+    return infos
+
+
+def resolve_target(target: Target, settings: EventsSettings, *, timeout: float | None = None) -> list[str]:
+    """Resolve the host and check every address; returns the allowed addresses. With ``timeout`` the
+    lookup raises :class:`TimeoutError` when it takes longer."""
     try:
-        infos = socket.getaddrinfo(target.host, target.port, type=socket.SOCK_STREAM)
+        infos = _getaddrinfo(target.host, target.port, timeout)
     except socket.gaierror as exc:
         raise TargetUnresolvable(f"cannot resolve {target.host}") from exc
     addrs: list[str] = []
@@ -271,9 +301,14 @@ def post_json(
 ) -> HttpResult:
     """POST ``body`` to ``url`` after the SSRF checks. Raises :class:`TargetRefused` or ``OSError``."""
     target = parse_target(url, settings, production=production)
-    addrs = resolve_target(target, settings)
     timeout = settings.webhook_timeout_seconds
-    deadline = _Deadline(timeout)
+    # The budget covers the DNS lookup too (MUP-ONA VB-5): a slow resolver cannot hold the worker longer.
+    started = time.perf_counter()
+    addrs = resolve_target(target, settings, timeout=timeout)
+    remaining = timeout - (time.perf_counter() - started)
+    if remaining <= 0:
+        raise TimeoutError(f"no complete response within {timeout:g} s")
+    deadline = _Deadline(remaining)
     conn: http.client.HTTPConnection
     if target.scheme == "https":
         conn = _PinnedHTTPSConnection(
@@ -286,7 +321,6 @@ def post_json(
         )
     else:
         conn = _PinnedHTTPConnection(target.host, target.port, addrs[0], timeout, deadline)
-    started = time.perf_counter()
     deadline.start()
     try:
         try:
