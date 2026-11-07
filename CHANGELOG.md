@@ -31,6 +31,12 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   (`scripts/check_skips.py`, one line per expected skip with its reason; none today), replacing the inline
   "no skips" checks; the dependency audit pins `pip-audit` and takes reviewed exceptions from
   `PIP_AUDIT_IGNORE` (empty). `docs/TODO.md` lists the open MUP-ONA packages for Axentra.
+- Tests (MUP-ONA A8, VB-7): shared security test vectors. `tests/vectors/security-vectors.json` is a vendored,
+  unchanged copy of a corpus maintained outside this repository (`tests/vectors/SOURCE.md`: origin, version 1,
+  SHA-256); `tests/test_security_vectors.py` checks the copy against the recorded checksum and runs its egress
+  vectors against the webhook target check, its ID token vectors against `OidcClient.verify` (keys generated in
+  the test) and its redaction vectors against `redact` (T-VEC-2). Axentra's documented deviations are in the
+  file's `known_differences`. No code or test dependency on Nodestro; import-linter unchanged.
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 

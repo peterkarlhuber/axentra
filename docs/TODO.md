@@ -24,9 +24,7 @@ Open packages of the cross-repository security and database-backend plan MUP-ONA
 Axentra. Axentra stays independent (no runtime or test dependency on orkexa or Nodestro). Each item is removed in
 the change that completes its package.
 
-| Pri | Area | Item |
-|---|---|---|
-| P2 | tests | **AX-MUP-A8** (MP-A8): shared security test vectors vendored as JSON with a checksum (no dependency on orkexa or Nodestro) |
+No package is open.
 
 ## Security and external review
 
