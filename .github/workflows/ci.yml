@@ -247,8 +247,19 @@ jobs:
           docker compose -f deploy/compose/docker-compose.single.yml config -q
           docker compose -f deploy/compose/docker-compose.multi.yml config -q
           docker compose -f deploy/compose/docker-compose.taskboard.yml config -q
+      - name: Hash-pinned locks match deploy/constraints.txt
+        run: python3 scripts/check_locks.py
       - name: Build the image
         run: docker build -t axentra:ci .
+      # The image carries a CycloneDX SBOM of what it contains (deploy/sbom.py); keep it with the run.
+      - name: Extract the SBOM
+        run: |
+          docker run --rm --entrypoint cat axentra:ci /opt/axentra/sbom.cdx.json > sbom-axentra.cdx.json
+          python3 -c "import json; b = json.load(open('sbom-axentra.cdx.json')); assert b['bomFormat'] == 'CycloneDX' and b['metadata']['component']['name'] == 'axentra' and b['components'], b"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-axentra
+          path: sbom-axentra.cdx.json
       # The documented full image: a constraint bump that breaks an extra (for example python-dateutil
       # 3.0.0 against botocore, AX3-05) fails here, not at the first deployment that needs it.
       - name: Build the full image (server,oidc,s3,otel) and import every extra

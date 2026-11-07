@@ -4,7 +4,10 @@
 #   docker build -t axentra:local .
 #   docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
 #
-# Dependencies are pinned by deploy/constraints.txt (see the header there to regenerate).
+# Every installed distribution is pinned by version AND hash (pip --require-hashes): the runtime
+# dependencies from deploy/locks/server.txt (EXTRAS=server) or deploy/locks/full.txt (any other
+# EXTRAS), the build backend (hatchling) from deploy/locks/build.txt. Regenerate them with
+# scripts/update_locks.sh. The image carries a CycloneDX SBOM at /opt/axentra/sbom.cdx.json.
 # The image runs as an unprivileged user (uid/gid 10001) and contains no compiler or build tools.
 
 # The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
@@ -14,14 +17,24 @@ FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
-RUN python -m venv /opt/axentra
+RUN python -m venv /opt/axentra && python -m venv /opt/build
 WORKDIR /src
-COPY deploy/constraints.txt deploy/constraints.txt
+COPY deploy/locks deploy/locks
+COPY deploy/sbom.py deploy/sbom.py
+# The wheel of Axentra itself is built offline (no build isolation) with the hash-pinned backend,
+# in a separate venv that does not reach the image.
+RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.txt
 COPY pyproject.toml README.md LICENSE CHANGELOG.md NOTICE.md ./
 COPY src ./src
+RUN /opt/build/bin/pip wheel --no-deps --no-build-isolation --no-index -w /tmp/wheels /src
 ARG EXTRAS=server
-RUN /opt/axentra/bin/pip install --constraint deploy/constraints.txt "/src[${EXTRAS}]" \
-    && /opt/axentra/bin/axentra --version
+# pip check fails when the chosen lock lacks a dependency of the requested extras.
+RUN lock=deploy/locks/full.txt; if [ "${EXTRAS}" = "server" ]; then lock=deploy/locks/server.txt; fi \
+    && /opt/axentra/bin/pip install --require-hashes --no-deps -r "${lock}" \
+    && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/axentra-*.whl)[${EXTRAS}]" \
+    && /opt/axentra/bin/pip check \
+    && /opt/axentra/bin/axentra --version \
+    && /opt/axentra/bin/python -I deploy/sbom.py --component axentra > /opt/axentra/sbom.cdx.json
 
 # --- runtime ------------------------------------------------------------------------------------
 FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS runtime

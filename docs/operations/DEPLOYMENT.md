@@ -24,8 +24,21 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
 
 - Multi-stage build on `python:3.13-slim`; the runtime stage contains only a virtual environment
   in `/opt/axentra` and no build tools.
-- Dependencies are pinned with `deploy/constraints.txt` (`pip install --constraint`); regenerate
-  it as described in its header after dependency changes.
+- Every installed distribution is pinned by version and hash (`pip install --require-hashes`):
+  `deploy/locks/server.txt` for `EXTRAS=server`, `deploy/locks/full.txt` for any other `EXTRAS`
+  (it holds the dependencies of all extras), and the build backend (hatchling) from
+  `deploy/locks/build.txt`, which builds Axentra's own wheel offline in a separate venv that does
+  not reach the image. `pip check` in the build fails when a lock lacks a dependency of the
+  requested extras. The versions follow `deploy/constraints.txt` (used for installs without the
+  image); after a change to it or to the dependencies, regenerate the locks with
+  `scripts/update_locks.sh` (needs `uv`); CI's `scripts/check_locks.py` refuses locks that drift
+  from the constraints or lack hashes.
+- SBOM: the build writes a CycloneDX 1.5 SBOM of the image's Python environment to
+  `/opt/axentra/sbom.cdx.json` (`deploy/sbom.py`, deterministic; a timestamp only with
+  `SOURCE_DATE_EPOCH`). Read it with
+  `docker run --rm --entrypoint cat axentra:local /opt/axentra/sbom.cdx.json`; CI keeps it as the
+  artifact `sbom-axentra`. It covers Python distributions, not the Debian packages of the base
+  image (scan the image for those).
 - Runs as `axentra` (uid/gid 10001), working directory `/var/lib/axentra`.
 - `ENTRYPOINT ["axentra"]`, default `CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]`, so
   `docker run axentra:local migrate` or `... admin setup-token` run other commands.
