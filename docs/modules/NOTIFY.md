@@ -54,8 +54,8 @@ development mailbox and delivery statistics. Package `axentra.notify`, HTTP rout
   Preferences (opt-outs) and idempotency keys apply as for e-mail. `read_at` marks it as read.
   Library: `ax.notify.list_inbox(principal, product_id, tenant_id=None, unread_only=False, limit,
   cursor)`, `unread_count(...)`, `mark_read(..., message_ids=None)` (all: the caller's own
-  messages only; `notify:preferences` in the tenant, users only). No HTTP routes yet: a host product
-  serves the inbox through its own API.
+  messages only; `notify:preferences` in the tenant, users only). The same operations are served
+  over HTTP under `/notify/inbox/me` (see the endpoint table).
 
 ## Library usage
 
@@ -99,6 +99,9 @@ All under `/v1/products/{product_id}`; all require authentication.
 | GET | `/notify/stats` | `notify:manage` | `DeliveryStats {provider, total{queued,sending,sent,failed,suppressed}, last_24h{...}, oldest_queued_at, attempts_24h}`; optional `tenant_id` |
 | GET | `/notify/preferences/me` | user related to the product; with `tenant_id`: `notify:preferences` there | `Preferences {opted_out, available_categories, locked_categories, version}` (+ `ETag`) |
 | PUT | `/notify/preferences/me` | as GET | `Preferences`; body `{opted_out: [...]}`, `If-Match` optional (`0` = not yet stored) |
+| GET | `/notify/inbox/me` | signed-in user related to the product; with `tenant_id`: `notify:preferences` there; an API key gets 403 | `Page[InboxEntry]`, newest first; `tenant_id`, `unread_only`, `limit`, `cursor` |
+| GET | `/notify/inbox/me/unread` | as GET `/inbox/me` | `{unread}` |
+| POST | `/notify/inbox/me/read` | as GET `/inbox/me` | `{marked}`; body `{message_ids?: [...]}` (at most 500; omitted: all unread ones in the scope). Ids of other users' messages change nothing |
 
 `Message`: `id, product_id, tenant_id, template_key, template_version, channel, category,
 recipient, recipient_user_id, locale, status, attempts, max_attempts, next_attempt_at (queued
@@ -203,7 +206,7 @@ provider configuration complete, secrets resolvable; no network calls).
 
 ## Limitations / TODO
 
-- Email and the in-app inbox only; the inbox has no Axentra HTTP routes or Studio page yet; SMS/push adapters, implicit TLS (SMTPS/465), attachments and per-product sender
+- Email and the in-app inbox only; the inbox has no Axentra Studio page yet; SMS/push adapters, implicit TLS (SMTPS/465), attachments and per-product sender
   addresses do not exist yet.
 - No unsubscribe links/List-Unsubscribe header; opt-outs only through the preferences API, and only
   for addresses that belong to users.

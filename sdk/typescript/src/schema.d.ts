@@ -918,6 +918,66 @@ export interface paths {
         patch: operations["change_member_v1_products__product_id__members__user_id__patch"];
         trace?: never;
     };
+    "/v1/products/{product_id}/notify/inbox/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My in-app notifications (newest first)
+         * @description Messages of inbox templates addressed to the signed-in user (users only; an API key gets
+         *     `403`). In a tenant this needs `notify:preferences` there; product-wide any relation to the
+         *     product.
+         */
+        get: operations["my_inbox_v1_products__product_id__notify_inbox_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/notify/inbox/me/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark my notifications as read
+         * @description Marks the given messages (or all unread ones) of the signed-in user; ids of other users'
+         *     messages change nothing. Returns how many changed.
+         */
+        post: operations["my_inbox_read_v1_products__product_id__notify_inbox_me_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/notify/inbox/me/unread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many of my notifications are unread */
+        get: operations["my_inbox_unread_v1_products__product_id__notify_inbox_me_unread_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/notify/mailbox": {
         parameters: {
             query?: never;
@@ -2980,6 +3040,56 @@ export interface components {
             /** Subject */
             subject: string;
         };
+        /**
+         * InboxEntry
+         * @description One in-app notification of the current user (channel ``inbox``).
+         */
+        InboxEntry: {
+            /** Category */
+            category: string;
+            /**
+             * Content State
+             * @enum {string}
+             */
+            content_state: "available" | "redacted" | "purged" | "none";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Product Id */
+            product_id: string;
+            /** Read At */
+            read_at: string | null;
+            /** Subject */
+            subject: string | null;
+            /** Template Key */
+            template_key: string;
+            /** Tenant Id */
+            tenant_id: string | null;
+            /** Text */
+            text: string | null;
+        };
+        /** InboxMarked */
+        InboxMarked: {
+            /** Marked */
+            marked: number;
+        };
+        /** InboxRead */
+        InboxRead: {
+            /**
+             * Message Ids
+             * @description Inbox messages to mark as read; omitted: all unread ones
+             */
+            message_ids?: string[] | null;
+        };
+        /** InboxUnread */
+        InboxUnread: {
+            /** Unread */
+            unread: number;
+        };
         /** Invitation */
         Invitation: {
             /** Accepted At */
@@ -3628,6 +3738,13 @@ export interface components {
         Page_FileInfo_: {
             /** Items */
             items: components["schemas"]["FileInfo"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** Page[InboxEntry] */
+        Page_InboxEntry_: {
+            /** Items */
+            items: components["schemas"]["InboxEntry"][];
             /** Next Cursor */
             next_cursor?: string | null;
         };
@@ -7923,6 +8040,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductMember"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    my_inbox_v1_products__product_id__notify_inbox_me_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                /** @description Only this tenant; omitted: the whole product */
+                tenant_id?: string | null;
+                unread_only?: boolean;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_InboxEntry_"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    my_inbox_read_v1_products__product_id__notify_inbox_me_read_post: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxRead"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMarked"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    my_inbox_unread_v1_products__product_id__notify_inbox_me_unread_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxUnread"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

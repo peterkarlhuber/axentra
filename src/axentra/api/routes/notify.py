@@ -12,6 +12,7 @@ from axentra.core.errors import ModuleDisabled
 from axentra.core.pagination import Page
 from axentra.notify.models import (
     DeliveryStats,
+    InboxEntry,
     MailboxEntry,
     Message,
     MessageStatus,
@@ -310,4 +311,70 @@ def put_my_preferences(
 ) -> Preferences:
     return _svc(ax).set_preferences(
         principal, product_id, tenant_id, opted_out=body.opted_out, if_match=parse_if_match(if_match)
+    )
+
+
+# -- the caller's inbox (channel "inbox") ---------------------------------------------------------
+
+
+class InboxRead(BaseModel):
+    message_ids: list[str] | None = Field(
+        default=None, max_length=500, description="Inbox messages to mark as read; omitted: all unread ones"
+    )
+
+
+class InboxUnread(BaseModel):
+    unread: int
+
+
+class InboxMarked(BaseModel):
+    marked: int
+
+
+@router.get(
+    N + "/inbox/me", response_model=Page[InboxEntry], summary="My in-app notifications (newest first)"
+)
+def my_inbox(
+    product_id: str,
+    principal: CurrentPrincipal,
+    ax: Ax,
+    tenant_id: str | None = Query(
+        None, max_length=64, description="Only this tenant; omitted: the whole product"
+    ),
+    unread_only: bool = False,
+    limit: Limit = None,
+    cursor: Cursor = None,
+) -> Page[InboxEntry]:
+    """Messages of inbox templates addressed to the signed-in user (users only; an API key gets
+    `403`). In a tenant this needs `notify:preferences` there; product-wide any relation to the
+    product."""
+    return _svc(ax).list_inbox(
+        principal, product_id, tenant_id, unread_only=unread_only, limit=limit, cursor=cursor
+    )
+
+
+@router.get(
+    N + "/inbox/me/unread", response_model=InboxUnread, summary="How many of my notifications are unread"
+)
+def my_inbox_unread(
+    product_id: str,
+    principal: CurrentPrincipal,
+    ax: Ax,
+    tenant_id: str | None = Query(None, max_length=64),
+) -> InboxUnread:
+    return InboxUnread(unread=_svc(ax).unread_count(principal, product_id, tenant_id))
+
+
+@router.post(N + "/inbox/me/read", response_model=InboxMarked, summary="Mark my notifications as read")
+def my_inbox_read(
+    product_id: str,
+    body: InboxRead,
+    principal: CurrentPrincipal,
+    ax: Ax,
+    tenant_id: str | None = Query(None, max_length=64),
+) -> InboxMarked:
+    """Marks the given messages (or all unread ones) of the signed-in user; ids of other users'
+    messages change nothing. Returns how many changed."""
+    return InboxMarked(
+        marked=_svc(ax).mark_read(principal, product_id, tenant_id, message_ids=body.message_ids)
     )
