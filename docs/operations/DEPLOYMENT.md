@@ -127,3 +127,27 @@ own passwords (the `\getenv` lines are psql-specific), or create the two roles y
 `axentra db grant-runtime-role axentra_app` (as the owner) grant the runtime role; `axentra db
 inspect-role` shows whether row-level security fully applies to the application role (no
 superuser, no `BYPASSRLS`, owns no table).
+
+## Administration over HTTP (`axentra remote`)
+
+The other CLI commands connect to PostgreSQL and need the configuration (database URL, keyring).
+`axentra remote` needs only the API's URL and a credential, uses the API's permission checks and
+audit trail, and works with the core install (standard library HTTP only):
+
+```bash
+export AXENTRA_URL=https://api.example.com
+export AXENTRA_SESSION_TOKEN="$(axentra remote login admin@example.com)"   # password prompted
+axentra remote whoami
+axentra remote products create crm "CRM"                 # platform admins; also list|get|archive|restore
+axentra remote tenants create prd_... acme "Acme"        # also list|get|suspend|activate
+axentra remote keys create prd_... ci --permission tenant:read --tenant-id ten_...   # secret printed once
+axentra remote keys rotate prd_... key_... --grace-seconds 3600                      # also list|revoke
+axentra remote users list --q alice                      # also disable|enable|revoke-sessions
+```
+
+The credential comes from `AXENTRA_API_KEY` or `AXENTRA_SESSION_TOKEN` (or `--api-key-file` /
+`--session-token-file`), never from a command-line argument, so it does not appear in `ps` or the
+shell history; `login` reads the password from a prompt (or `AXENTRA_PASSWORD` for scripts).
+Answers are printed as JSON; an error answer prints `axentra: <code>: <detail>` and exits with 2.
+Revoke a session token you no longer need with `axentra remote users revoke-sessions <your id>`
+or by signing out in Studio.

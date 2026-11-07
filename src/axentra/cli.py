@@ -446,6 +446,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="import a module whose setup(ax) registers encrypted columns",
     )
     re_.set_defaults(func=cmd_secrets_reencrypt)
+
+    from axentra.remote import add_parser as add_remote_parser
+
+    add_remote_parser(sub)
     return p
 
 
@@ -466,7 +470,10 @@ def _operator_error(exc: BaseException) -> tuple[str, str] | None:
 
     from axentra.core.errors import AxentraError
     from axentra.core.redaction import redact_text
+    from axentra.remote import RemoteError
 
+    if isinstance(exc, RemoteError):
+        return exc.code, redact_text(exc.detail)
     if isinstance(exc, AxentraError):
         return exc.code, redact_text(str(exc))
     if isinstance(exc, (psycopg.OperationalError, PoolTimeout)):
