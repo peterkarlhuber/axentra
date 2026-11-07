@@ -83,6 +83,12 @@ curl -fsS http://localhost:8080/v1/health/ready
 
 Then create the first platform admin with `POST /v1/auth/setup` (or through Studio).
 
+`scripts/compose_smoke.sh single|multi [port]` does all of this unattended against the image
+`axentra:local`: throwaway passwords and keyring, `up`, readiness, the mode in `/v1/meta`, a setup
+token, the first admin, a product (multi), a tenant and a record written as the restricted role;
+the stack and its volumes are removed afterwards. CI runs it for both stacks with the image it
+built (the Taskboard stack is built, not started).
+
 Upgrades: pull/build the new image, then `docker compose ... up -d`: the `migrate` job runs
 again (idempotent) before the API restarts. Take a backup first
 ([BACKUP_RESTORE](BACKUP_RESTORE.md)); migrations are forward-only.

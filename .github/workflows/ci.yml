@@ -276,6 +276,13 @@ jobs:
           test "$(docker run --rm --entrypoint id axentra:ci-full -u)" = "10001"
       - name: Build the Taskboard demo image
         run: docker build -f examples/taskboard/Dockerfile -t taskboard:ci .
+      # Start the single- and multi-product compose stacks from the image just built (db, migrate as the owner
+      # role, api as the restricted role) and drive setup, a product, a tenant and a record through the API.
+      - name: Compose stacks start and serve (smoke)
+        run: |
+          docker tag axentra:ci axentra:local
+          scripts/compose_smoke.sh single 18080
+          scripts/compose_smoke.sh multi 18081
       - name: Image runs as non-root and has no forbidden dependencies
         run: |
           docker run --rm axentra:ci --version
