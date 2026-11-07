@@ -31,6 +31,12 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   (`scripts/check_skips.py`, one line per expected skip with its reason; none today), replacing the inline
   "no skips" checks; the dependency audit pins `pip-audit` and takes reviewed exceptions from
   `PIP_AUDIT_IGNORE` (empty). `docs/TODO.md` lists the open MUP-ONA packages for Axentra.
+- Tests (MUP-ONA A8, VB-7): shared security test vectors. `tests/vectors/security-vectors.json` is a vendored,
+  unchanged copy of a corpus maintained outside this repository (`tests/vectors/SOURCE.md`: origin, version 1,
+  SHA-256); `tests/test_security_vectors.py` checks the copy against the recorded checksum and runs its egress
+  vectors against the webhook target check, its ID token vectors against `OidcClient.verify` (keys generated in
+  the test) and its redaction vectors against `redact` (T-VEC-2). Axentra's documented deviations are in the
+  file's `known_differences`. No code or test dependency on Nodestro; import-linter unchanged.
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
@@ -55,6 +61,13 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Webhooks (MUP-ONA A7, VB-5): the DNS lookup of the target counts against `events.webhook_timeout_seconds`;
   a resolver that does not answer in time ends the attempt with a timeout instead of holding the worker
   (the lookup runs in a daemon thread that is abandoned at the deadline). `duration_ms` now includes the lookup.
+- OIDC (MUP-ONA A8, VB-7): an ID token whose `kid` names a key that does not fit the header's algorithm (an RSA
+  key for `ES256`, possible when the provider's key set names no `alg`) ends the login with `login_failed`
+  instead of an unhandled `TypeError` (found by the shared security test vectors).
+- Redaction (MUP-ONA A8, VB-7): free text also loses the value of a password or client secret written as a
+  quoted key with a quoted value (`{"password": "..."}`, `'client_secret': '...'`, as in a request body inside
+  an error message); before, only the `password=...` form was redacted (found by the shared security test
+  vectors).
 
 ### Changed (breaking for production)
 - Database roles (MUP-ONA A6, PS-6): `database.allow_table_owner` is now `bool | None` with default `None`

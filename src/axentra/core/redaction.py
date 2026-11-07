@@ -64,6 +64,12 @@ _PREFIXED = [
     # ``password=...``, ``new_password=...``, ``passwd=...`` and ``client_secret=...`` (form bodies, query strings,
     # command lines; ``=`` and ``_`` also percent-encoded).
     re.compile(f"(?i)((?:pass(?:wor)?d|client{_enc('_')}secret){_EQ})[^&\\s\"']+"),
+    # The same names as a quoted key with a quoted value (JSON or a Python dict in free text, such as a request body
+    # in an error message: ``{"password": "..."}``, ``'client_secret': '...'``), MUP-ONA VB-7.
+    # The value ends at its closing quote (escaped quotes included).
+    re.compile(
+        r"""(?i)((["'])[a-z0-9_-]*(?:pass(?:wor)?d|client[_-]secret)\2\s*:\s*(["']))(?:\\.|(?!\3)[^\\\r\n])+"""
+    ),
 ]
 
 

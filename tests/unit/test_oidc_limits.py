@@ -158,3 +158,27 @@ def test_id_token_max_age_default_and_bounds() -> None:
     assert settings.id_token_max_age_seconds == 600
     with pytest.raises(ValueError, match="id_token_max_age_seconds"):
         OidcProviderSettings(id="idp", name="IdP", issuer=ISSUER, client_id="c", id_token_max_age_seconds=10)
+
+
+# MUP-ONA T-VEC-2
+def test_a_key_that_does_not_fit_the_algorithm_is_a_failed_login(provider: FakeProvider) -> None:
+    """A key set without ``alg`` (as some providers publish it) and a token whose header names ES256 with the kid
+    of the RSA key: a refused login, not an unhandled TypeError (found by the shared vector jwt-alg-key-type-mismatch)."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/jwks":
+            jwk = json.loads(RSAAlgorithm.to_jwk(provider.key.public_key()))
+            return httpx.Response(200, json={"keys": [{**jwk, "kid": "k1", "use": "sig"}]})
+        return original(request)
+
+    original = provider.handle
+    provider.handle = handle  # type: ignore[method-assign]
+    now = int(time.time())
+    claims = {"iss": ISSUER, "aud": "client-1", "sub": "s-1", "nonce": "n-1", "iat": now, "exp": now + 300}
+    token = jwt.encode(
+        claims, ec.generate_private_key(ec.SECP256R1()), algorithm="ES256", headers={"kid": "k1"}
+    )
+    with pytest.raises(OidcLoginError) as err:
+        _client(provider).verify(token, nonce="n-1")
+    assert err.value.code == "login_failed"
