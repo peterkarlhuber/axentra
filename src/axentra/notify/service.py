@@ -1089,7 +1089,8 @@ class NotifyService:
         message_ids: list[str] | None = None,
     ) -> int:
         """Mark the current user's inbox notifications as read (``message_ids=None``: all of them); returns how many
-        changed. Messages of other users are never touched (an unknown or foreign id changes nothing)."""
+        changed. Messages of other users are never touched (an unknown or foreign id changes nothing), and
+        product-wide neither are messages of a tenant that is not active."""
         user_id = self._pref_user(principal, product_id, tenant_id)
         if message_ids is not None and len(message_ids) > 500:
             raise ValidationFailed("at most 500 message ids")
@@ -1098,6 +1099,14 @@ class NotifyService:
         if tenant_id is not None:
             cond += " AND tenant_id = %s"
             params.append(tenant_id)
+        else:
+            # Product-wide: messages of a tenant that is not active (suspended) stay as they are; that
+            # tenant's own scope refuses the caller anyway.
+            cond += (
+                " AND (tenant_id IS NULL OR tenant_id IN"
+                " (SELECT id FROM axentra_tenants WHERE product_id = %s AND status = 'active'))"
+            )
+            params.append(product_id)
         if message_ids is not None:
             cond += " AND id = ANY(%s)"
             params.append(list(message_ids))

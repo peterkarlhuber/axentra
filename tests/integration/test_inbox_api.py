@@ -103,3 +103,20 @@ def test_inbox_refusals(world: World) -> None:
     assert bob.get(f"{base}/unread").json() == {"unread": 4}
     # Signed out: 401.
     assert world.browser().get(base).status_code == 401
+
+
+def test_suspended_tenant_messages_stay_unread(world: World) -> None:
+    pid, tid, other, _bob, _alice = _setup(world)
+    base = f"/v1/products/{pid}/notify/inbox/me"
+    bob = world.login_as("bob@example.com")
+    assert (
+        world.admin.patch(f"/v1/products/{pid}/tenants/{other}", json={"status": "suspended"}).status_code
+        == 200
+    )
+    # In the suspended tenant itself the caller is refused; product-wide its message is left as it is.
+    assert bob.post(f"{base}/read", params={"tenant_id": other}, json={}).status_code == 403
+    assert bob.post(f"{base}/read", json={}).json() == {"marked": 3}
+    assert (
+        world.admin.patch(f"/v1/products/{pid}/tenants/{other}", json={"status": "active"}).status_code == 200
+    )
+    assert bob.get(f"{base}/unread", params={"tenant_id": other}).json() == {"unread": 1}

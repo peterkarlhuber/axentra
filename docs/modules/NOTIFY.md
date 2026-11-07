@@ -101,7 +101,7 @@ All under `/v1/products/{product_id}`; all require authentication.
 | PUT | `/notify/preferences/me` | as GET | `Preferences`; body `{opted_out: [...]}`, `If-Match` optional (`0` = not yet stored) |
 | GET | `/notify/inbox/me` | signed-in user related to the product; with `tenant_id`: `notify:preferences` there; an API key gets 403 | `Page[InboxEntry]`, newest first; `tenant_id`, `unread_only`, `limit`, `cursor` |
 | GET | `/notify/inbox/me/unread` | as GET `/inbox/me` | `{unread}` |
-| POST | `/notify/inbox/me/read` | as GET `/inbox/me` | `{marked}`; body `{message_ids?: [...]}` (at most 500; omitted: all unread ones in the scope). Ids of other users' messages change nothing |
+| POST | `/notify/inbox/me/read` | as GET `/inbox/me` | `{marked}`; body `{message_ids?: [...]}` (at most 500; omitted: all unread ones in the scope). Ids of other users' messages change nothing; product-wide, messages of a suspended tenant are left unchanged |
 
 `Message`: `id, product_id, tenant_id, template_key, template_version, channel, category,
 recipient, recipient_user_id, locale, status, attempts, max_attempts, next_attempt_at (queued
