@@ -74,3 +74,5 @@ Studio is a separate repository and release ([ADR 0012](../adr/0012-studio-separ
 3. All CI jobs green (lint, types, architecture, contract drift, tests on 3.11/3.12/3.13 with
    PostgreSQL 15/16/17, package, container, security).
 4. Update `docs/COMPATIBILITY.md` with the Studio version tested against the release.
+5. Tag `axentra-vX.Y.Z` on the merge commit only after the owner approved the release (rules: "Release rules"
+   in `CHANGELOG.md`); nothing is published to a package index.
