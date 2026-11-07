@@ -33,6 +33,7 @@ SUBS: list[tuple[str, str]] = [
     (r"\baread\b", "read"),
     (r"\baiter_bytes\b", "iter_bytes"),
     (r"\baiter_raw\b", "iter_raw"),
+    (r"\baiter_lines\b", "iter_lines"),
     (r"\bAsync([A-Z]\w*)", r"\1"),
     (r"\b_async\b", "_sync"),
     (r"\bAsyncIterator\b", "Iterator"),

@@ -106,6 +106,44 @@ def api_error(response: httpx.Response) -> AxentraApiError:
     )
 
 
+class SseParser:
+    """Turns the lines of a ``text/event-stream`` body into messages (WHATWG server-sent events):
+    ``feed(line)`` returns ``{"id", "event", "data"}`` when a blank line ends a message that has
+    data, else ``None``. ``data`` is decoded JSON (the raw text when it is not JSON); comments
+    (keep-alives) and ``retry:`` lines are skipped."""
+
+    def __init__(self) -> None:
+        self._id: str | None = None
+        self._event = ""
+        self._data: list[str] = []
+
+    def feed(self, line: str) -> dict[str, Any] | None:
+        line = line.rstrip("\r\n")
+        if not line:
+            if not self._data:
+                self._event = ""
+                return None
+            raw = "\n".join(self._data)
+            try:
+                data: Any = json.loads(raw)
+            except ValueError:
+                data = raw
+            message = {"id": self._id, "event": self._event or "message", "data": data}
+            self._event, self._data = "", []
+            return message
+        if line.startswith(":"):
+            return None
+        name, _, value = line.partition(":")
+        value = value[1:] if value.startswith(" ") else value
+        if name == "data":
+            self._data.append(value)
+        elif name == "event":
+            self._event = value
+        elif name == "id" and "\x00" not in value:
+            self._id = value or None
+        return None
+
+
 def session_token_from(response: httpx.Response) -> str | None:
     """The session token from a login/setup response's ``Set-Cookie`` header."""
     for line in response.headers.get_list("set-cookie"):

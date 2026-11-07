@@ -650,12 +650,160 @@ class SearchKindCount(AxentraModel):
     count: int
 
 
+# -- notify templates and preferences ----------------------------------------------------------
+
+
+class TemplateVariant(AxentraModel):
+    subject: str
+    text: str
+    html: str | None = None
+
+
+class Template(AxentraModel):
+    id: str | None = None
+    product_id: str
+    key: str
+    channel: str
+    category: str
+    name: str
+    description: str
+    variables: list[str] = Field(default_factory=list)
+    sample_data: dict[str, Any] = Field(default_factory=dict)
+    variants: dict[str, TemplateVariant] = Field(default_factory=dict)
+    sensitive: bool
+    version: int
+    #: True for Axentra's built-in templates (``invitation``, ...) that the product has not overridden.
+    builtin: bool
+    system_only: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class RenderedContent(AxentraModel):
+    locale: str
+    subject: str
+    text: str
+    html: str | None = None
+
+
+class Preferences(AxentraModel):
+    product_id: str
+    tenant_id: str | None = None
+    user_id: str
+    opted_out: list[str] = Field(default_factory=list)
+    available_categories: list[str] = Field(default_factory=list)
+    locked_categories: list[str] = Field(default_factory=list)
+    version: int
+
+
+# -- usage reservations and billing checkout ---------------------------------------------------
+
+
+class Reservation(AxentraModel):
+    id: str
+    product_id: str
+    tenant_id: str
+    meter: str
+    quantity: Decimal
+    status: str
+    period_start: datetime
+    expires_at: datetime
+    event_id: str | None = None
+    committed_quantity: Decimal | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class CheckoutSession(AxentraModel):
+    provider: str
+    checkout_id: str | None = None
+    #: Where to send the customer; ``None`` when the provider completed the change directly.
+    url: str | None = None
+    completed: bool
+    subscription: Subscription
+
+
+# -- users admin, product invitations ----------------------------------------------------------
+
+
+class UserProductRole(AxentraModel):
+    product_id: str
+    product_slug: str
+    product_name: str
+    role: str
+    created_at: datetime
+
+
+class UserTenantRole(AxentraModel):
+    product_id: str
+    product_slug: str
+    product_name: str
+    tenant_id: str
+    tenant_slug: str
+    tenant_name: str
+    tenant_status: str
+    role: str
+    created_at: datetime
+
+
+class UserMemberships(AxentraModel):
+    products: list[UserProductRole] = Field(default_factory=list)
+    tenants: list[UserTenantRole] = Field(default_factory=list)
+
+
+class ExternalIdentity(AxentraModel):
+    provider: str
+    subject: str
+    email: str
+    created_at: datetime
+
+
+class ProductInvitation(AxentraModel):
+    id: str
+    product_id: str
+    email: str
+    role: str
+    invited_by: str | None = None
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+    status: str
+
+
+class NewProductInvitation(AxentraModel):
+    invitation: ProductInvitation
+    #: Returned once; the invitee accepts with it (``product_invitations.accept``).
+    token: str
+    accept_url: str | None = None
+
+
+# -- search batches and streams ----------------------------------------------------------------
+
+
+class SearchBatchResult(AxentraModel):
+    created: int
+    updated: int
+    documents: list[SearchDocument] = Field(default_factory=list)
+
+
+class StreamMessage(AxentraModel):
+    """One server-sent event of ``events.stream()`` / ``jobs.stream()``: ``id`` is the stream
+    position (pass it as ``last_event_id`` to resume), ``event`` the event type (an event's type,
+    ``job.<status>`` for job changes, or ``error`` when the server ended the stream), ``data`` the decoded JSON payload."""
+
+    id: str | None = None
+    event: str
+    data: Any = None
+
+
 __all__ = [
     "ApiKey",
     "ApiVersion",
     "AuditEvent",
     "AuthInfo",
     "AxentraModel",
+    "CheckoutSession",
     "Delivery",
     "DownloadUrl",
     "EffectiveLimit",
@@ -663,6 +811,7 @@ __all__ = [
     "EnqueueableKinds",
     "Entitlements",
     "Event",
+    "ExternalIdentity",
     "FileInfo",
     "Invitation",
     "Job",
@@ -677,28 +826,40 @@ __all__ = [
     "MeterUsage",
     "NewApiKey",
     "NewInvitation",
+    "NewProductInvitation",
     "NewWebhookSecret",
     "OidcProviderInfo",
     "Page",
     "Plan",
+    "Preferences",
     "Price",
     "Product",
     "ProductAccess",
+    "ProductInvitation",
     "ProductMember",
     "QuotaStatus",
     "Record",
+    "RenderedContent",
+    "Reservation",
     "Role",
     "Schedule",
+    "SearchBatchResult",
     "SearchDocument",
     "SearchHit",
     "SearchKindCount",
     "Session",
     "SessionInfo",
+    "StreamMessage",
     "Subscription",
+    "Template",
+    "TemplateVariant",
     "Tenant",
     "TenantAccess",
     "UsageEvent",
     "UsageRecordResult",
     "User",
+    "UserMemberships",
+    "UserProductRole",
+    "UserTenantRole",
     "WebhookEndpoint",
 ]
