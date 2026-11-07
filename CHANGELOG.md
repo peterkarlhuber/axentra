@@ -58,6 +58,10 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - OIDC (MUP-ONA A8, VB-7): an ID token whose `kid` names a key that does not fit the header's algorithm (an RSA
   key for `ES256`, possible when the provider's key set names no `alg`) ends the login with `login_failed`
   instead of an unhandled `TypeError` (found by the shared security test vectors).
+- Redaction (MUP-ONA A8, VB-7): free text also loses the value of a password or client secret written as a
+  quoted key with a quoted value (`{"password": "..."}`, `'client_secret': '...'`, as in a request body inside
+  an error message); before, only the `password=...` form was redacted (found by the shared security test
+  vectors).
 
 ### Changed (breaking for production)
 - Database roles (MUP-ONA A6, PS-6): `database.allow_table_owner` is now `bool | None` with default `None`

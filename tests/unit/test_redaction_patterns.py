@@ -59,3 +59,34 @@ def test_nested_payloads_are_redacted() -> None:
     payload = {"detail": ["sent with Authorization: Basic dXNlcjpwYXNz", {"note": "client_secret=abc123"}]}
     out = redact(payload)
     assert "dXNlcjpwYXNz" not in str(out) and "abc123" not in str(out)
+
+
+# MUP-ONA T-VEC-2: a password or client secret as a quoted key with a quoted value (the shared vector
+# redact-password-quoted-json-text found that only the ``name=value`` form was redacted).
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        ('{"password": "Correct-Horse-9"}', "Correct-Horse-9"),
+        ("{'new_password': 'Correct Horse 9'}", "Correct Horse 9"),
+        ('{"client_secret":"c1i3nt-s3cr3t"}', "c1i3nt-s3cr3t"),
+        ('body {"Password": "it\'s \\"quoted\\" 9", "next": 1}', 'quoted\\" 9'),
+    ],
+)
+def test_quoted_password_values_are_redacted(text: str, secret: str) -> None:
+    out = redact_text(text)
+    assert secret not in out
+    assert REDACTED in out
+
+
+# MUP-ONA T-VEC-2
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"password_policy": "strict"}',
+        'password: "see the policy"',
+        '{"password": ""}',
+        "'passwords' are rotated",
+    ],
+)
+def test_quoted_names_without_a_secret_value_are_unchanged(text: str) -> None:
+    assert redact_text(text) == text
