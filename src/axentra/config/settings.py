@@ -67,6 +67,14 @@ class DatabaseSettings(_Section):
     """Optional separate (owner) URL for migrations; defaults to ``url``."""
     migration_url_ref: str | None = None
     """Reference to a secret holding the migration URL (``env:`` / ``file:``); overrides ``migration_url``."""
+    migration_lock_timeout_ms: int = Field(0, ge=0, le=3_600_000)
+    """``lock_timeout`` for every migration (``0``: off, the server's setting). A migration that waits
+    longer for a lock fails without being recorded, instead of queueing every query of the table
+    behind its lock request; run ``axentra migrate`` again later. A file's own
+    ``-- axentra:lock-timeout=<duration>`` header wins."""
+    migration_statement_timeout_ms: int = Field(0, ge=0, le=86_400_000)
+    """``statement_timeout`` for every migration (``0``: off); a file's own
+    ``-- axentra:statement-timeout=<duration>`` header wins."""
     extra_migrations: list[str] = Field(default_factory=list)
     """Product migration sources applied by ``axentra migrate``: ``package.module:attribute``
     (a list of ``Migration`` or a callable returning one)."""

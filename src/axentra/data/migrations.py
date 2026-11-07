@@ -27,6 +27,17 @@ refuses to run while a known namespace has unknown versions (``allow_newer=True`
 database but not registered in this process (another product's schema in a shared database) are
 reported, never refused, unless they are named explicitly.
 
+Timeouts: ``-- axentra:lock-timeout=<duration>`` and ``-- axentra:statement-timeout=<duration>``
+in a file's leading comment lines (a PostgreSQL duration such as ``5s``, ``250ms`` or ``2min``) set
+``lock_timeout`` / ``statement_timeout`` for that migration only, overriding the runner's defaults
+(``database.migration_lock_timeout_ms`` / ``migration_statement_timeout_ms``, both off by default).
+A lock timeout makes a migration that waits behind a long transaction fail fast instead of queueing
+every other query of the table behind its lock request; the migration is not recorded and
+``axentra migrate`` can simply run again.
+
+:meth:`MigrationRunner.plan` lists what :meth:`MigrationRunner.migrate` would apply, after the same
+checks, and :func:`render_plan` turns it into a SQL script for review (``axentra migrate --dry-run``).
+
 A migration whose file starts with the header comment ``-- axentra:no-transaction`` runs outside
 a transaction (for ``CREATE INDEX CONCURRENTLY`` and similar): its statements are executed one by
 one in autocommit mode and the migration is recorded after the last one. Such a migration cannot
@@ -57,6 +68,9 @@ logger = logging.getLogger(__name__)
 MIGRATION_LOCK = 0x617865_6E747261
 _NAME = re.compile(r"^(\d{4})_([a-z0-9_]+)\.sql$")
 NO_TRANSACTION_MARKER = "-- axentra:no-transaction"
+_TIMEOUT_DIRECTIVE = re.compile(r"^--\s*axentra:(lock|statement)-timeout\s*=(.*)$", re.IGNORECASE)
+#: Durations accepted in timeout directives (a number with an optional PostgreSQL unit).
+_DURATION = re.compile(r"^[0-9]{1,9}(us|ms|s|min|h|d)?$")
 _DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
 
 
@@ -75,18 +89,37 @@ class Migration:
     def label(self) -> str:
         return f"{self.namespace}:{self.version:04d}_{self.name}"
 
-    @property
-    def transactional(self) -> bool:
-        """False when the file's leading comment lines contain ``-- axentra:no-transaction``."""
+    def _header(self) -> list[str]:
+        """The file's leading comment lines (stripped), up to the first statement."""
+        out: list[str] = []
         for line in self.sql.splitlines():
             stripped = line.strip()
             if not stripped:
                 continue
             if not stripped.startswith("--"):
-                return True
-            if stripped.lower() == NO_TRANSACTION_MARKER:
-                return False
-        return True
+                break
+            out.append(stripped)
+        return out
+
+    @property
+    def transactional(self) -> bool:
+        """False when the file's leading comment lines contain ``-- axentra:no-transaction``."""
+        return not any(line.lower() == NO_TRANSACTION_MARKER for line in self._header())
+
+    @property
+    def timeouts(self) -> dict[str, str]:
+        """``{"lock_timeout": ..., "statement_timeout": ...}`` from the header directives (only those
+        given). An invalid duration is refused when the migration is registered or applied."""
+        found: dict[str, str] = {}
+        for line in self._header():
+            m = _TIMEOUT_DIRECTIVE.match(line)
+            if m is None:
+                continue
+            value = m.group(2).strip().lower()
+            if not _DURATION.match(value):
+                raise ValueError(f"migration {self.label}: invalid {m.group(1)}-timeout {m.group(2)!r}")
+            found[f"{m.group(1).lower()}_timeout"] = value
+        return found
 
 
 def split_statements(sql: str) -> list[str]:
@@ -284,10 +317,46 @@ def _wait_for_lock(conn: psycopg.Connection[Any], poll_seconds: float = 0.2) -> 
         time.sleep(poll_seconds)
 
 
+def render_plan(pending: Sequence[Migration], timeouts: dict[str, str] | None = None) -> str:
+    """A reviewable SQL script of ``pending`` in apply order (``axentra migrate --dry-run``).
+
+    Transactional migrations are wrapped in ``BEGIN``/``COMMIT``; ``-- axentra:no-transaction`` ones
+    are listed statement by statement. The bookkeeping insert into ``axentra_schema_migrations`` is
+    shown as a comment: the script documents what would run, it is not meant to replace the runner."""
+    if not pending:
+        return "-- No pending migrations.\n"
+    out = [f"-- {len(pending)} pending migration(s), in apply order.\n"]
+    for mig in pending:
+        effective = {**(timeouts or {}), **mig.timeouts}
+        out.append(f"\n-- ==== {mig.label} (checksum {mig.checksum[:12]})")
+        if mig.transactional:
+            out.append("BEGIN;")
+            out += [f"SET LOCAL {k} = '{v}';" for k, v in sorted(effective.items())]
+            out.append(mig.sql.strip())
+            out.append(f"-- recorded as {mig.label}")
+            out.append("COMMIT;")
+        else:
+            out.append("-- runs outside a transaction, one statement at a time")
+            out += [f"SET {k} = '{v}';" for k, v in sorted(effective.items())]
+            out += [statement.strip() + ";" for statement in split_statements(mig.sql)]
+            out.append(f"-- recorded as {mig.label}")
+            out += [f"RESET {k};" for k in sorted(effective)]
+    return "\n".join(out) + "\n"
+
+
 class MigrationRunner:
-    def __init__(self, url: str) -> None:
+    def __init__(
+        self, url: str, *, lock_timeout_ms: int | None = None, statement_timeout_ms: int | None = None
+    ) -> None:
+        """``lock_timeout_ms`` / ``statement_timeout_ms``: defaults for every migration (``None``: the
+        server's); a migration's own ``-- axentra:lock-timeout=`` / ``statement-timeout=`` wins."""
         self.url = url
         self.migrations: list[Migration] = builtin_migrations()
+        self.timeouts: dict[str, str] = {}
+        if lock_timeout_ms:
+            self.timeouts["lock_timeout"] = f"{int(lock_timeout_ms)}ms"
+        if statement_timeout_ms:
+            self.timeouts["statement_timeout"] = f"{int(statement_timeout_ms)}ms"
 
     def register(self, migrations: list[Migration]) -> None:
         """Add product migrations; registering the identical migration twice is a no-op."""
@@ -295,6 +364,7 @@ class MigrationRunner:
         for mig in migrations:
             if mig.namespace == "axentra":
                 raise ValueError("the 'axentra' namespace is reserved")
+            mig.timeouts  # noqa: B018 - refuse an invalid timeout directive at registration
             prev = known.get((mig.namespace, mig.version))
             if prev is not None:
                 if prev.checksum != mig.checksum or prev.name != mig.name:
@@ -430,26 +500,7 @@ class MigrationRunner:
             _wait_for_lock(conn)
             try:
                 self._ensure_table(conn)
-                applied = self._applied(conn)
-                result = self._evaluate(applied, None)
-                for ns in result.namespaces.values():
-                    for version in ns.changed:
-                        mig = next(
-                            m for m in self.migrations if (m.namespace, m.version) == (ns.namespace, version)
-                        )
-                        raise RuntimeError(f"migration {mig.label} changed after it was applied")
-                newer = {
-                    ns.namespace: ns.unknown
-                    for ns in result.namespaces.values()
-                    if ns.registered and ns.unknown
-                }
-                if newer and not allow_newer:
-                    raise ConfigurationError(
-                        "the database schema is newer than this code: applied migrations unknown to the code: "
-                        + "; ".join(f"{ns} {versions}" for ns, versions in newer.items())
-                        + " (deploy the newer code, or pass allow_newer=True if this is intended)"
-                    )
-                pending = result.pending
+                pending = self._checked_pending(conn, allow_newer=allow_newer)
                 if pending and before_apply is not None:
                     before_apply(list(pending))
                 for mig in pending:
@@ -460,6 +511,30 @@ class MigrationRunner:
                 conn.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK,))
         return done
 
+    def plan(self, *, allow_newer: bool = False) -> list[Migration]:
+        """The migrations :meth:`migrate` would apply now, in order, after the same refusals
+        (changed or unknown applied migrations); reads only, takes no lock."""
+        with psycopg.connect(self.url, autocommit=True) as conn:
+            return self._checked_pending(conn, allow_newer=allow_newer)
+
+    def _checked_pending(self, conn: psycopg.Connection[Any], *, allow_newer: bool) -> list[Migration]:
+        applied = self._applied(conn)
+        result = self._evaluate(applied, None)
+        for ns in result.namespaces.values():
+            for version in ns.changed:
+                mig = next(m for m in self.migrations if (m.namespace, m.version) == (ns.namespace, version))
+                raise RuntimeError(f"migration {mig.label} changed after it was applied")
+        newer = {
+            ns.namespace: ns.unknown for ns in result.namespaces.values() if ns.registered and ns.unknown
+        }
+        if newer and not allow_newer:
+            raise ConfigurationError(
+                "the database schema is newer than this code: applied migrations unknown to the code: "
+                + "; ".join(f"{ns} {versions}" for ns, versions in newer.items())
+                + " (deploy the newer code, or pass allow_newer=True if this is intended)"
+            )
+        return list(result.pending)
+
     @staticmethod
     def _record(conn: psycopg.Connection[Any], mig: Migration) -> None:
         conn.execute(
@@ -469,13 +544,22 @@ class MigrationRunner:
         )
 
     def _apply(self, conn: psycopg.Connection[Any], mig: Migration) -> None:
+        timeouts = {**self.timeouts, **mig.timeouts}
         if mig.transactional:
             with conn.transaction():
+                for name, value in timeouts.items():
+                    conn.execute("SELECT set_config(%s, %s, true)", (name, value))
                 conn.execute(mig.sql.encode())
                 self._record(conn, mig)
             return
         # Autocommit, one statement at a time (a multi-statement string would be one implicit
         # transaction block, where e.g. CREATE INDEX CONCURRENTLY is not allowed).
-        for statement in split_statements(mig.sql):
-            conn.execute(statement.encode())
-        self._record(conn, mig)
+        try:
+            for name, value in timeouts.items():
+                conn.execute("SELECT set_config(%s, %s, false)", (name, value))
+            for statement in split_statements(mig.sql):
+                conn.execute(statement.encode())
+            self._record(conn, mig)
+        finally:
+            for name in timeouts:
+                conn.execute(f"RESET {name}")  # name is lock_timeout or statement_timeout

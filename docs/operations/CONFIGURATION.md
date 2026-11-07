@@ -77,6 +77,8 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `migration_url_ref` | `AXENTRA__DATABASE__MIGRATION_URL_REF` | none | Secret reference for the migration URL; overrides `migration_url` |
 | `extra_migrations` | `AXENTRA__DATABASE__EXTRA_MIGRATIONS` | `[]` | Product migration sources for `axentra migrate`: `"package.module:attribute"` (a list of `Migration` or a callable returning one) |
 | `migration_entry_points` | `AXENTRA__DATABASE__MIGRATION_ENTRY_POINTS` | `true` | Also apply migrations that installed packages publish in the `axentra.migrations` entry point group |
+| `migration_lock_timeout_ms` | `AXENTRA__DATABASE__MIGRATION_LOCK_TIMEOUT_MS` | `0` (off) | `lock_timeout` for every migration; a migration that waits longer for a lock fails unrecorded (run `axentra migrate` again). A file's `-- axentra:lock-timeout=<duration>` header wins (see architecture/DATA.md) |
+| `migration_statement_timeout_ms` | `AXENTRA__DATABASE__MIGRATION_STATEMENT_TIMEOUT_MS` | `0` (off) | `statement_timeout` for every migration; a file's `-- axentra:statement-timeout=<duration>` header wins |
 | `pool_min` | `AXENTRA__DATABASE__POOL_MIN` | `1` | Minimum pooled connections per process |
 | `pool_max` | `AXENTRA__DATABASE__POOL_MAX` | `10` | Maximum pooled connections per process |
 | `statement_timeout_ms` | `AXENTRA__DATABASE__STATEMENT_TIMEOUT_MS` | `30000` | `statement_timeout` per connection (0 = none) |

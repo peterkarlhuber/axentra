@@ -65,6 +65,17 @@ def cmd_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_migrate_dry_run(args: argparse.Namespace) -> int:
+    """Print the SQL that ``axentra migrate`` would run now (nothing is applied)."""
+    from axentra.data.migrations import render_plan
+
+    ax = _ax(args)
+    _load_modules(ax, args.load)
+    runner = ax.migration_runner()
+    sys.stdout.write(render_plan(runner.plan(allow_newer=args.allow_newer), runner.timeouts))
+    return 0
+
+
 def cmd_migrate_status(args: argparse.Namespace) -> int:
     ax = _ax(args)
     _load_modules(ax, args.load)
@@ -317,6 +328,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m.add_argument("--namespace", action="append", help="with --check: only these namespaces")
     m.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the SQL of the pending migrations in apply order; apply nothing",
+    )
+    m.add_argument(
         "--allow-newer",
         action="store_true",
         help="apply even when the database has migrations this code does not know",
@@ -334,7 +350,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m.set_defaults(
         func=lambda a: (
-            cmd_migrate_check(a) if a.check else cmd_migrate_status(a) if a.status else cmd_migrate(a)
+            cmd_migrate_check(a)
+            if a.check
+            else cmd_migrate_status(a)
+            if a.status
+            else cmd_migrate_dry_run(a)
+            if a.dry_run
+            else cmd_migrate(a)
         )
     )
 
