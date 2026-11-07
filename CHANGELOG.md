@@ -4,8 +4,29 @@ All notable changes to Axentra are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/architecture/VERSIONING.md.
 
+## Release rules
+
+Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next release on.
+
+- **Tags:** a release is the annotated Git tag `axentra-vX.Y.Z` on a merge commit of `master` (for example
+  `axentra-v0.2.0`). There are no tags yet; until the first one, consumers pin a merge commit SHA, which stands
+  in for the version.
+- **Versions:** [SemVer 2.0](https://semver.org/) from `0.2.0` on (`src/axentra/_version.py`; today
+  `0.1.0.dev0`). Before 1.0 a minor release may break the library API, CLI, configuration or migrations, and
+  every break is listed under "Changed (breaking ...)" or "Removed"; a patch release never breaks.
+- **Aliases:** a deprecated alias (an old name kept next to its replacement) is removed only in a minor release,
+  never in a patch release, with a changelog entry that names the alias and its replacement.
+- **No package index:** Axentra is not published to PyPI or any other index; consumers install it from the Git
+  repository at a tag or commit (`axentra @ git+https://github.com/peterkarlhuber/axentra.git@<tag or SHA>`).
+- **Approval first:** a tag is created only after the owner approved the release. The pull request that prepares
+  a release states the exact command (`git tag -a axentra-vX.Y.Z <merge SHA> -m "Axentra X.Y.Z"` and
+  `git push origin axentra-vX.Y.Z`); no workflow creates tags or publishes anything. The package checklist is in
+  docs/architecture/VERSIONING.md.
+
 ## [Unreleased]
 
+- Docs (MUP-ONA B0): the changelog states the release rules (tag scheme `axentra-vX.Y.Z`, SemVer from 0.2,
+  aliases removed only in a minor release, no PyPI, tags only after approval). No version change.
 - CI (MUP-ONA A0): every pytest job compares its skipped tests with `tests/ci/skipped-<job>.txt`
   (`scripts/check_skips.py`, one line per expected skip with its reason; none today), replacing the inline
   "no skips" checks; the dependency audit pins `pip-audit` and takes reviewed exceptions from
@@ -22,6 +43,18 @@ The HTTP API has its own version (`api_version` in `GET /v1/meta`), see docs/arc
   whole (on current Python versions they already were; webhooks to such addresses have no practical use).
   The prefixes are module constants of `axentra.events.http_client`. CI prints the Python version of every
   test matrix entry (3.11, 3.12, 3.13).
+- OIDC (MUP-ONA A7, VB-3): provider answers (discovery, JWKS, token endpoint) are read as a stream and the
+  request ends as soon as more than 1 MiB arrives or a larger `Content-Length` is announced (before, the whole
+  answer was read and then checked); requests ask for `Accept-Encoding: identity`. ID tokens whose `iat` lies
+  more than `id_token_max_age_seconds` (new per-provider setting, default 600) plus 2 minutes of clock skew in
+  the past are refused with `login_failed`.
+- Redaction (MUP-ONA A7, VB-4): free text also loses webhook signing secrets (`whsec_...`), the credentials of
+  `Authorization: Basic`, `Cookie:` / `Set-Cookie:` header values, Axentra's session and login cookie values,
+  and the values of `password=` (also `new_password=`, `passwd=`) and `client_secret=`, literal or
+  percent-encoded; ordinary text is unchanged.
+- Webhooks (MUP-ONA A7, VB-5): the DNS lookup of the target counts against `events.webhook_timeout_seconds`;
+  a resolver that does not answer in time ends the attempt with a timeout instead of holding the worker
+  (the lookup runs in a daemon thread that is abandoned at the deadline). `duration_ms` now includes the lookup.
 
 ### Changed (breaking for production)
 - Database roles (MUP-ONA A6, PS-6): `database.allow_table_owner` is now `bool | None` with default `None`

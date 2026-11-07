@@ -48,16 +48,31 @@ _URLSAFE_CHAR = r"(?:[A-Za-z0-9_-]|%(?:25)*[0-9A-Fa-f]{2})"
 _PATTERNS = [
     re.compile(f"axk{_enc('_')}[a-z0-9]+{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra API keys
     re.compile(f"axinv{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra invitation tokens
+    re.compile(f"whsec{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra webhook signing secrets
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWTs
 ]
 _DSN = re.compile(r"(?i)(postgres(ql)?://[^:/@\s]+:)[^@\s]+@")
+#: Values kept after a visible prefix (group 1), MUP-ONA VB-4:
+_PREFIXED = [
+    # ``Authorization: Basic <base64>`` (also ``Proxy-Authorization`` and a header dict ``'Authorization': 'Basic ...'``).
+    re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?basic\s+)[A-Za-z0-9+/=._~-]+"),
+    # A cookie header carries session cookies: everything after ``Cookie:`` / ``Set-Cookie:`` up to the line end.
+    re.compile(r"(?i)((?<![a-z0-9_-])(?:set-)?cookie\s*:\s*)[^\r\n]+"),
+    # Axentra's session and login cookies wherever they appear (``name=value``).
+    re.compile(r"(?i)((?:__Host-)?axentra-(?:session|login)=)[^;,\s\"']+"),
+    # ``password=...``, ``new_password=...``, ``passwd=...`` and ``client_secret=...`` (form bodies, query strings,
+    # command lines; ``=`` and ``_`` also percent-encoded).
+    re.compile(f"(?i)((?:pass(?:wor)?d|client{_enc('_')}secret){_EQ})[^&\\s\"']+"),
+]
 
 
 def redact_text(text: str) -> str:
     for pattern in _PATTERNS:
         text = pattern.sub(REDACTED, text)
     text = _DSN.sub(lambda m: m.group(1) + REDACTED + "@", text)
+    for prefixed in _PREFIXED:
+        text = prefixed.sub(lambda m: m.group(1) + REDACTED, text)
     if "=" in text or "%" in text:
         text = _SECRET_QUERY.sub(lambda m: m.group(1) + REDACTED, text)
     return text
