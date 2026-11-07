@@ -6199,7 +6199,10 @@ export interface operations {
     };
     get_me_v1_me_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which tenants each product lists: `all` (default) every tenant the caller may read, which for product operators and platform roles is every tenant of the product; `memberships` only the tenants where the caller holds a tenant role (an API key: its tenant); `none` no tenants (product-level access only). The product entries are the same in every mode. */
+                tenants?: "all" | "memberships" | "none";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6213,6 +6216,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Error: problem details (RFC 9457) */

@@ -9454,6 +9454,25 @@
     "/v1/me": {
       "get": {
         "operationId": "get_me_v1_me_get",
+        "parameters": [
+          {
+            "description": "Which tenants each product lists: `all` (default) every tenant the caller may read, which for product operators and platform roles is every tenant of the product; `memberships` only the tenants where the caller holds a tenant role (an API key: its tenant); `none` no tenants (product-level access only). The product entries are the same in every mode.",
+            "in": "query",
+            "name": "tenants",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Which tenants each product lists: `all` (default) every tenant the caller may read, which for product operators and platform roles is every tenant of the product; `memberships` only the tenants where the caller holds a tenant role (an API key: its tenant); `none` no tenants (product-level access only). The product entries are the same in every mode.",
+              "enum": [
+                "all",
+                "memberships",
+                "none"
+              ],
+              "title": "Tenants",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9464,6 +9483,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
           },
           "default": {
             "content": {

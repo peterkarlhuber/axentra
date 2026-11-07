@@ -73,11 +73,22 @@ class IdentityLink(BaseModel):
 
 
 @router.get("/me", response_model=Me, summary="Who I am and what I may do, per product and tenant")
-def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
-    # Every tenant the caller may read is listed (all of them, ordered by id), including all
-    # tenants of a product for product operators and platform roles. Authorization is computed per
-    # product in one pass (Authorizer.tenant_grants), not per tenant. (A comment, not a docstring:
-    # FastAPI would put a docstring into the OpenAPI contract.)
+def get_me(
+    principal: CurrentPrincipal,
+    ax: Ax,
+    tenants: Literal["all", "memberships", "none"] = Query(
+        "all",
+        description=(
+            "Which tenants each product lists: `all` (default) every tenant the caller may read, which"
+            " for product operators and platform roles is every tenant of the product; `memberships`"
+            " only the tenants where the caller holds a tenant role (an API key: its tenant);"
+            " `none` no tenants (product-level access only). The product entries are the same in"
+            " every mode."
+        ),
+    ),
+) -> Me:
+    # Authorization is computed per product in one pass (Authorizer.tenant_grants), not per
+    # tenant. (A comment, not a docstring: FastAPI would put a docstring into the OpenAPI contract.)
     user = ax.identity.get_user(principal.user_id) if principal.user_id else None
     products = []
     for product in ax.tenancy.list_products(principal):
@@ -87,7 +98,15 @@ def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
         except (NotFound, Forbidden):
             continue
         readable = {tid: g for tid, g in grants.items() if g.permissions & {"tenant:read", "tenants:read"}}
-        tenants = [
+        if tenants == "memberships":
+            readable = {
+                tid: g
+                for tid, g in readable.items()
+                if g.tenant_role is not None or tid == principal.api_key_tenant_id
+            }
+        elif tenants == "none":
+            readable = {}
+        listed = [
             TenantAccess(
                 tenant=tenant,
                 role=readable[tenant.id].tenant_role,
@@ -100,7 +119,7 @@ def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
                 product=product,
                 role=grant.product_role,
                 permissions=sorted(grant.permissions),
-                tenants=tenants,
+                tenants=listed,
             )
         )
     platform = ax.authz.grant(principal)

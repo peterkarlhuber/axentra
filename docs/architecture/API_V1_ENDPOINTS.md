@@ -23,6 +23,10 @@ summary. Permission names in brackets.
   `tenants` lists every tenant of the product the caller may read (`tenant:read` or `tenants:read`
   there), ordered by id and not truncated: the caller's memberships, and every tenant for product
   operators and platform roles (so the list grows with the product's tenant count for them).
+  `?tenants=memberships` lists only the tenants where the caller holds a tenant role (an API key:
+  its tenant), `?tenants=none` no tenants; `all` (default) keeps the full list. The product entries
+  are the same in every mode, so clients that need only memberships and product-level permissions
+  (Studio) can avoid the per-tenant growth.
 - `PATCH /v1/me` `{name?, locale?, preferences?}`; `POST /v1/me/password` `{current_password, new_password}`
   (users without a password: only within `security.fresh_login_minutes` of the login, else `403`
   `reauthentication_required`; never with `security.first_password = "disabled"`)
