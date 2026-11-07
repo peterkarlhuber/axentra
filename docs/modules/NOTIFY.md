@@ -91,7 +91,7 @@ All under `/v1/products/{product_id}`; all require authentication.
 | PATCH | `/notify/templates/{key}` | `notify:manage` | `Template`; `If-Match: <version>` -> 412 on mismatch |
 | DELETE | `/notify/templates/{key}` | `notify:manage` | 204; `If-Match` optional |
 | POST | `/notify/templates/{key}/preview` | `notify:manage` | `RenderedContent {locale, subject, text, html}`; body `{locale?, variables?}` overrides sample data |
-| POST | `/tenants/{tenant_id}/notify/send` | `notify:send` (tenant); `to.email` outside the tenant's members also `notify:send_external` (product) | 202 `Message` (200 + `Idempotent-Replayed: true` on replay); body `{template_key, to: {user_id} \| {email}, variables, locale?}`, header `Idempotency-Key`; `403` for system-only templates (`invitation`) and for external addresses without `notify:send_external` |
+| POST | `/tenants/{tenant_id}/notify/send` | `notify:send` (tenant); `to.email` outside the tenant's members also `notify:send_external` (product) | 202 `Message` (200 + `Idempotent-Replayed: true` on replay); body `{template_key, to: {user_id} \| {email}, variables, locale?}`, header `Idempotency-Key`; `403` for system-only templates (`invitation`) and for external addresses without `notify:send_external`; `429 rate_limited` beyond `notify.tenant_send_limit_per_hour` |
 | GET | `/notify/messages` | `notify:manage`; or `notify:send` with `tenant_id` | `Page[Message]`; filters `tenant_id, status, template_key, recipient, since`, `limit`, `cursor` |
 | GET | `/notify/messages/{id}` | `notify:manage`, or `notify:send` in the message's tenant | `Message` with `content {subject, text, html}` when available |
 | POST | `/notify/messages/{id}/retry` | same as GET | `Message` (only `failed` -> `queued`, attempts reset; else 409) |
@@ -184,7 +184,13 @@ The built-in invitation template is `sensitive`.
   tenant (`to.email` must be a member's address; `to.user_id` a member or product operator).
   Free-form addresses need the product permission `notify:send_external` (product owners and
   admins, API keys that hold it). The `403` is the same whether or not the address has an account.
-  There is no per-tenant send rate limit yet (docs/TODO.md).
+- **Per-tenant send limit.** `POST .../notify/send` (and `NotifyService.send`) accepts at most
+  `notify.tenant_send_limit_per_hour` (default 1000, `0` = off) messages per tenant in any rolling hour;
+  more are refused with `429 rate_limited` (problem members `limit`, `window_seconds`) and a
+  `Retry-After` that says when the oldest counted message leaves the window. The count is read from
+  the outbox under a per-tenant transaction lock, so it holds across API processes and concurrent
+  requests. Suppressed messages count (the caller asked for them); messages Axentra sends itself
+  (invitations, account emails) and idempotent replays do not.
 - Row-level security on all four tables (`axentra_scope_allows(product_id, tenant_id)`).
 
 ## Configuration (`[notify]`)

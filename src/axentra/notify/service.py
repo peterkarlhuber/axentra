@@ -12,6 +12,7 @@ from datetime import datetime
 import hashlib
 import json
 import logging
+import math
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
@@ -31,6 +32,7 @@ from axentra.core.errors import (
     ModeNotSupported,
     NotFound,
     PreconditionFailed,
+    RateLimited,
     ValidationFailed,
 )
 from axentra.core.ids import new_id
@@ -77,6 +79,9 @@ _LOCALE = re.compile(r"^[a-z]{2,3}(-[a-z0-9]{2,8})?$")
 _VAR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[\x21-\x7e]{1,200}$")
 MAX_LOCALES = 20
+#: ``created_by`` of messages that Axentra sends itself (``Principal.system``); they do not count against the
+#: per-tenant send limit.
+_SYSTEM_ACTOR_ID = "system"
 #: Channels a template may use: ``email`` (delivered by the provider) and ``inbox`` (stored for the recipient user
 #: and read in the product's UI; never handed to a provider, so it has no external side effect).
 DELIVERABLE_CHANNELS = ("email", "inbox")
@@ -546,6 +551,7 @@ class NotifyService:
             idempotency_key=idempotency_key,
             restrict_users=True,
             restrict_emails=not self.authz.has(principal, "notify:send_external", product_id),
+            rate_limited=True,
         )
 
     def enqueue_system(
@@ -592,6 +598,7 @@ class NotifyService:
         restrict_users: bool,
         restrict_emails: bool = False,
         fallback_locale: str | None = None,
+        rate_limited: bool = False,
     ) -> SendResult:
         if (to_user_id is None) == (to_email is None):
             raise ValidationFailed("give exactly one recipient: user_id or email")
@@ -626,6 +633,8 @@ class NotifyService:
                 template = self._load_template(tx, product_id, template_key)
                 if template is None:
                     raise NotFound("template not found")
+                if rate_limited and tenant_id is not None:
+                    self._check_send_limit(tx, product_id, tenant_id)
                 if template.channel not in DELIVERABLE_CHANNELS:
                     raise ValidationFailed("only email and inbox templates can be sent")
                 inbox = template.channel == "inbox"
@@ -766,6 +775,36 @@ class NotifyService:
         if self._enqueued is not None:
             self._enqueued.inc(status=status)
         return SendResult(message=self._message(row), replayed=False)
+
+    def _check_send_limit(self, tx: Tx, product_id: str, tenant_id: str) -> None:
+        """Refuse a tenant's send beyond ``notify.tenant_send_limit_per_hour`` in a rolling hour.
+
+        Messages of the tenant that a non-system caller created count (also suppressed ones: the caller
+        asked for them). A transaction-scoped advisory lock per tenant serializes concurrent sends of the
+        same tenant, so parallel requests in several processes cannot overshoot the limit."""
+        limit = self.settings.notify.tenant_send_limit_per_hour
+        if limit <= 0:
+            return
+        tx.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('axentra.notify.send:' || %s || ':' || %s, 0))",
+            (product_id, tenant_id),
+        )
+        row = tx.one(
+            "SELECT count(*) AS n, min(created_at) AS oldest, now() AS now FROM ("
+            " SELECT created_at FROM axentra_notify_messages WHERE product_id = %s AND tenant_id = %s"
+            " AND created_at > now() - interval '1 hour' AND created_by IS DISTINCT FROM %s"
+            " ORDER BY created_at DESC LIMIT %s) recent",
+            (product_id, tenant_id, _SYSTEM_ACTOR_ID, limit),
+        )
+        if row is None or row["n"] < limit:
+            return
+        # The window frees a slot when the oldest counted message turns one hour old.
+        wait = (row["oldest"] - row["now"]).total_seconds() + 3600
+        raise RateLimited(
+            f"the tenant reached its notification send limit ({limit} per hour)",
+            extra={"limit": limit, "window_seconds": 3600},
+            retry_after=max(1, math.ceil(wait)),
+        )
 
     def _replay(
         self, product_id: str, tenant_id: str | None, key: str, request_hash: str

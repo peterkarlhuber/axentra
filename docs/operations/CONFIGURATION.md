@@ -165,6 +165,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `smtp_starttls` | `true` |
 | `invitation_accept_url` | none: `<security.public_url>/accept-invitation`. Link in invitation emails and in `accept_url` of `POST .../invitations`, used when the product sets no own `settings.invitation_accept_url`. Absolute `http(s)` URL (`https` in production); `{token}` is replaced by the token, otherwise `?token=` is appended; a `#fragment` only together with `{token}`. Set it when the frontend that accepts invitations is not on the API origin, e.g. `https://studio.example.com/invitations/accept` (env `AXENTRA__NOTIFY__INVITATION_ACCEPT_URL`; see modules/NOTIFY.md "Invitation hook") |
 | `account_url` | none: the origin of `invitation_accept_url`, else `security.public_url`. Base URL of the frontend serving `/reset-password` and `/verify-email` (Studio does), used in password reset and email verification emails. Absolute `http(s)` URL without query or fragment (`https` in production); a path is kept (env `AXENTRA__NOTIFY__ACCOUNT_URL`; see modules/IDENTITY.md) |
+| `tenant_send_limit_per_hour` | `1000` (0-1000000; messages one tenant may send through `POST .../notify/send` in any rolling hour, `429 rate_limited` with `Retry-After` beyond it; counted in the database, so it holds across processes; system sends such as invitations do not count; `0` = off; see modules/NOTIFY.md) |
 
 `[billing]`
 

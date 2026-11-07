@@ -240,6 +240,11 @@ class NotifySettings(_Section):
     """Rendered subjects/bodies (and local mailbox entries) are erased after this many days."""
     message_retention_days: int = Field(180, ge=1)
     """Finished messages (incl. recipient addresses) are deleted after this many days."""
+    tenant_send_limit_per_hour: int = Field(1000, ge=0, le=1_000_000)
+    """Messages one tenant may send through :meth:`NotifyService.send` (``POST .../notify/send``) in any
+    rolling hour; more are refused with ``429 rate_limited`` and ``Retry-After``. Counted in the database,
+    so the limit holds across API processes. System sends (invitations, account emails) neither count nor
+    are limited. ``0`` turns the limit off."""
     invitation_accept_url: str | None = None
     """Installation-wide link for invitation emails, used when a product has no own
     ``settings.invitation_accept_url``. ``{token}`` is replaced by the token, otherwise
