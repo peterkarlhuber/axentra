@@ -23,6 +23,10 @@ summary. Permission names in brackets.
   `tenants` lists every tenant of the product the caller may read (`tenant:read` or `tenants:read`
   there), ordered by id and not truncated: the caller's memberships, and every tenant for product
   operators and platform roles (so the list grows with the product's tenant count for them).
+  `?tenants=memberships` lists only the tenants where the caller holds a tenant role (an API key:
+  its tenant), `?tenants=none` no tenants; `all` (default) keeps the full list. The product entries
+  are the same in every mode, so clients that need only memberships and product-level permissions
+  (Studio) can avoid the per-tenant growth.
 - `PATCH /v1/me` `{name?, locale?, preferences?}`; `POST /v1/me/password` `{current_password, new_password}`
   (users without a password: only within `security.fresh_login_minutes` of the login, else `403`
   `reauthentication_required`; never with `security.first_password = "disabled"`)
@@ -65,6 +69,15 @@ summary. Permission names in brackets.
 - `GET /v1/users/{uid}`, `PATCH /v1/users/{uid}` `{status: active|disabled}` [users:manage]
 - `GET /v1/users/{uid}/sessions`, `POST /v1/users/{uid}/sessions/revoke` [users:manage]
 - `GET /v1/users/{uid}/memberships` -> `{products: [{product_id, product_slug, product_name, role, created_at}], tenants: [{product_id, product_slug, product_name, tenant_id, tenant_slug, tenant_name, tenant_status, role, created_at}]}`: everything with `users:read`; product operators see the product roles where they hold `product_members:read` and the tenant memberships where they hold `members:read` (`404` for users they cannot see)
+- `POST /v1/users/external` `{provider, subject, email?, email_verified?, name?}` -> `201 User` [platform admin]:
+  a user who signs in through an identity provider, for migrations and imports; the email becomes the
+  user's address only with `email_verified: true`, otherwise the user has no address (`409` when the
+  identity is linked or a verified address is taken)
+- `GET /v1/users/{uid}/identities` -> `[{provider, subject, email, created_at}]` [users:manage];
+  `POST /v1/users/{uid}/identities` `{provider, subject}` -> `201` [platform admin] (`409` when linked);
+  `DELETE /v1/users/{uid}/identities?provider=&subject=` -> `{revoked}` [platform admin]: unlinks and
+  revokes the user's sessions; `409` with `reason` `last_sign_in_method` when the user has no password
+  and no other identity (disable the user instead). Audited as `identity.external.create|link|unlink`
 
 ## Access
 - `GET /v1/permissions` -> built-in permission catalog `{name, scope, description, source, read_like, ...}`

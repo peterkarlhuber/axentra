@@ -86,25 +86,27 @@ the credentials. Every request carries
 |---|---|
 | (client) | `meta()`, `check_compatibility()`, `request()`, `request_json()`, `stream()` |
 | `auth` | `login_password`, `setup`, `session`, `sessions`, `logout` |
-| `me` | `get`, `update` |
+| `me` | `get(tenants=)` (`all`, `memberships` or `none`), `update` |
 | `products` | `list`, `get`, `create`, `update(version=)` |
 | `tenants` | `list` (page), `iter`, `get`, `create`, `update(version=)`, `delete` |
 | `operators` (product members) | `list`, `add`, `change`, `remove` |
 | `members` (tenant members) | `list`, `add`, `change`, `remove` |
 | `invitations` | `list`, `create` (returns the one-time `token`), `revoke`, `accept` |
-| `roles` | `list`, `permissions(include_retired=)` (built-in and product-defined catalog of a product), `create`, `update(version=)`, `delete` |
+| `roles` | `list`, `permissions(include_retired=)` (built-in and product-defined catalog of a product), `all_permissions` (built-in catalog), `declare_permission`, `retire_permission`, `create`, `update(version=)`, `delete` |
 | `api_keys` | `list`, `get`, `create` (returns the `secret` once), `revoke`, `rotate` |
 | `records` | `list` (page), `iter`, `get`, `create`, `replace(version=)`, `delete(version=)` |
 | `files` | `upload` (bytes, file object or path), `get`, `list`, `iter`, `update`, `delete`, `download`, `download_to`, `stream`, `download_url` |
-| `usage` | `record(idempotency_key=)`, `events`, `iter_events`, `summary`, `quotas`, `set_quota`, `delete_quota`, `meters`, `create_meter` |
-| `billing` | `plans`, `tenant_plans`, `create_plan`, `subscriptions`, `subscription`, `subscribe`, `change_plan`, `cancel`, `resume`, `entitlements` |
-| `notify` | `send(idempotency_key=)`, `messages`, `iter_messages`, `message` |
+| `usage` | `record(idempotency_key=)`, `record_batch`, `reserve(idempotency_key=)`, `reservation`, `commit`, `release`, `events`, `iter_events`, `summary`, `quotas`, `set_quota`, `delete_quota`, `meters`, `create_meter` |
+| `billing` | `plans`, `tenant_plans`, `create_plan`, `subscriptions`, `subscription`, `checkout`, `subscribe`, `change_plan`, `cancel`, `resume`, `entitlements` |
+| `notify` | `send(idempotency_key=)`, `messages`, `iter_messages`, `message`, `templates`, `template`, `create_template`, `update_template(version=)`, `delete_template(version=)`, `preview_template`, `preview_draft`, `preferences`, `set_preferences(version=)`, `inbox(unread_only=)`, `unread_count`, `mark_read(message_ids=None)` (the caller's own) |
 | `audit` | `list`, `iter`, `get` |
-| `events` | `publish(idempotency_key=)`, `list` (page; `type` exact or `prefix.*`), `iter`, `get` |
-| `jobs` | `enqueue(idempotency_key=)`, `list` (page), `iter`, `get`, `retry`, `cancel`, `stats`, `kinds` (what the caller may enqueue) |
+| `events` | `publish(idempotency_key=)`, `list` (page; `type` exact or `prefix.*`), `iter`, `get`, `stream(types=, last_event_id=)` (server-sent events as `StreamMessage {id, event, data}`) |
+| `jobs` | `enqueue(idempotency_key=)`, `list` (page), `iter`, `get`, `retry`, `cancel`, `stats`, `kinds` (what the caller may enqueue), `stream(last_event_id=)` (job status changes) |
 | `schedules` | `create` (`interval_seconds` or `cron`), `list` (page), `iter`, `get`, `update(version=)`, `delete(version=)` |
 | `webhooks` | `create` and `rotate_secret` (return the signing `secret` once), `list` (page), `iter`, `get`, `update(version=)`, `delete(version=)`, `test`, `deliveries`, `iter_deliveries`, `delivery`, `redeliver` |
-| `search` | `index` (add or replace a document), `query` (page; `kinds=`), `iter`, `document`, `remove`, `kinds` |
+| `search` | `index` (add or replace a document), `index_batch` (up to 100, all or nothing), `query` (page; `kinds=`, `metadata=`), `iter`, `document`, `remove`, `remove_kind`, `kinds` |
+| `users` | `list` (page; all users or `product_id=`), `iter`, `get`, `update` (status, platform role), `memberships`, `sessions`, `revoke_sessions`, `create_external`, `identities`, `link_identity`, `unlink_identity` |
+| `product_invitations` | `list`, `create` (returns the one-time `token`), `revoke`, `accept` |
 
 Models (`axentra_client.models`) are pydantic v2 models. Following the API conventions they
 **never reject what they do not know**: unknown fields are kept (`model_extra`), enum-like fields
@@ -132,7 +134,7 @@ New endpoints are reachable at once through the generic methods, with the same a
 and error mapping:
 
 ```python
-templates = ax.request_json("GET", f"/v1/products/{pid}/notify/templates")
+stats = ax.request_json("GET", f"/v1/products/{pid}/notify/stats")
 with ax.stream("GET", f"/v1/products/{pid}/exports/{eid}/content") as resp: ...
 ```
 
@@ -166,11 +168,12 @@ AXENTRA_TEST_DATABASE_URL=postgresql://postgres:pg@127.0.0.1:5432/postgres pytes
 
 ## Limitations
 
-- Covers the main resources (table above), not every operation (no OIDC browser flow, templates,
-  preferences, reservations, meters update/delete, plan update/delete, checkout, storage quotas,
-  users admin, product invitations, permission declarations). Use `request_json` for those until
-  typed methods are added. The event and job streams (server-sent events) have no parser; read
-  them with `stream()`.
+- Covers the resources in the table above, not every operation (no OIDC browser flow, meters
+  update/delete, plan update/delete, storage quotas, notify stats and mailbox). Use `request_json`
+  for those until typed methods are added.
+- `events.stream()` / `jobs.stream()` end when the server closes the stream
+  (`events.sse_max_seconds`); reconnect with the last message's `id` as `last_event_id`. Close an
+  unfinished stream (`.close()` / `await .aclose()` on the iterator) to release the connection.
 - No automatic retries or rate-limit backoff (use idempotency keys and `retry_after`).
 - `files.upload` in the async client reads a given file object synchronously while sending.
 - Not yet published to PyPI.

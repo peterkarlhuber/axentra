@@ -265,7 +265,13 @@ def test_offboarded_callers_reach_nothing(world: World) -> None:
                             "body": r.text[:200],
                         }
                     )
-    self_service = ("/v1/me", "/v1/products/{product_id}/notify/preferences/me")
+    # The caller's own state. Marking one's own inbox read product-wide leaves the messages of a tenant that
+    # is not active unchanged (tests/integration/test_inbox_api.py::test_suspended_tenant_messages_stay_unread).
+    self_service = (
+        "/v1/me",
+        "/v1/products/{product_id}/notify/preferences/me",
+        "/v1/products/{product_id}/notify/inbox/me/read",
+    )
     unexpected = [
         h
         for h in hits

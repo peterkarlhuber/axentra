@@ -41,11 +41,19 @@ result.created, result.document.version
 
 ax.search.delete(indexer, pid, tid, "invoice", invoice.id)       # NotFound if not indexed
 
+# Re-index a kind: remove it, then write batches of up to 100 documents (each batch all or nothing).
+ax.search.delete_kind(indexer, pid, tid, "invoice")                # -> number removed
+ax.search.upsert_many(indexer, pid, tid, [
+    {"kind": "invoice", "ref_id": inv.id, "title": inv.title, "metadata": {"status": inv.status}}
+    for inv in batch
+])
+
 # Query as the calling user (needs search:query in that tenant):
 page = ax.search.query(principal, pid, tid, "roadmap -draft", kinds=["invoice", "note"], limit=20)
 for hit in page.items:
     hit.kind, hit.ref_id, hit.rank, hit.title_highlight, hit.body_highlight, hit.metadata
 more = ax.search.query(principal, pid, tid, "roadmap -draft", cursor=page.next_cursor)
+open_only = ax.search.query(principal, pid, tid, "printer", metadata={"status": "open"})
 
 # Another engine: implement axentra.search.SearchAdapter and install it at startup.
 ax.search.set_adapter(MyEngineAdapter(...))
@@ -64,11 +72,13 @@ All paths are under `/v1/products/{product_id}/tenants/{tenant_id}/search`. Erro
 
 | Method | Path | Permission | Response |
 |---|---|---|---|
-| GET | `?q&kind&match&limit&cursor` | `search:query` | `Page[SearchHit]`. `q` 1..500 characters, required. `kind` repeatable (at most 20). `match` `words` (default) or `prefix` (search as you type). `limit` 1..200, default 20 |
+| GET | `?q&kind&match&metadata&limit&cursor` | `search:query` | `Page[SearchHit]`. `q` 1..500 characters, required. `kind` repeatable (at most 20). `match` `words` (default) or `prefix` (search as you type). `metadata` a JSON object (at most 2000 bytes): only documents whose metadata contains it (`{"status":"open"}`; JSON containment, nested values match as in PostgreSQL `@>`). `limit` 1..200, default 20 |
 | GET | `/kinds` | `search:query` | `[{kind, count}]`: the kinds indexed in the tenant with their document counts, in kind order (at most 500), for a kind picker. An adapter without `kinds()` answers `409` |
 | GET | `/documents/{kind}/{ref_id}` | `search:query` | `SearchDocument` |
 | PUT | `/documents/{kind}/{ref_id}` `{title, body, metadata}` | `search:index` | `201 SearchDocument` when created, `200` when replaced. `413` when the body is too long, `422` on invalid input (e.g. neither title nor body) |
 | DELETE | `/documents/{kind}/{ref_id}` | `search:index` | `204`, `404` when not indexed |
+| POST | `/documents/batch` `{documents: [{kind, ref_id, title, body, metadata}]}` | `search:index` | `{created, updated, documents}`: up to 100 documents created or replaced in one transaction, all or nothing (`422` names the first invalid `documents[i]`; a `(kind, ref_id)` may appear once). One `search.document.upsert` audit event per document |
+| DELETE | `/documents/{kind}` | `search:index` | `{deleted}`: removes every document of the kind in the tenant (for example before a full re-index of that kind); one `search.documents.delete_kind` audit event with the count |
 
 Response shapes:
 
@@ -133,6 +143,12 @@ grant `search:index` through a custom role.
 - Input limits: title 1000 characters, body `search.max_body_chars` (default 100 000), metadata
   16 KB, query 500 characters, at most 20 kinds, page size at most 200, paging depth
   `search.max_offset`.
+- Cost bounds (reads need only `search:query`): a query ranks at most `search.max_candidates`
+  matching documents (default 10 000; a very common term in a larger tenant ranks only that many
+  matches, taken in index order, not the best ones), runs with `search.statement_timeout_ms`
+  (default 5 s; a cancelled query answers `422 validation_failed` with `reason`
+  `query_too_expensive`), and `GET .../search` is charged to the per-credential heavy-read budget
+  `security.heavy_rate_limit_per_minute` (default 120, `429 rate_limited` with `Retry-After`).
 
 ## Configuration (`[search]`)
 
@@ -141,6 +157,8 @@ grant `search:index` through a custom role.
 | `language` | `"simple"` | PostgreSQL text search configuration for indexing and queries |
 | `max_body_chars` | `100000` | Longest accepted body (1000..1000000) |
 | `max_offset` | `1000` | Deepest result position reachable by paging (0..100000) |
+| `max_candidates` | `10000` | Most matching documents ranked per query (100..10000000); beyond it, only that many matches in index order are ranked |
+| `statement_timeout_ms` | `5000` | Longest a query may run (100..600000); slower ones are cancelled with `422` (`reason` `query_too_expensive`) |
 | `audit_index_writes` | `true` | Audit every index upsert and delete |
 
 ## Limitations / TODO
@@ -161,9 +179,11 @@ grant `search:index` through a custom role.
   control inside a tenant: everyone with `search:query` sees every document of the tenant. Products
   that need finer visibility must index only what all those users may see, or filter hits
   themselves.
-- **No bulk API and no reindex job.** Documents are written one at a time; there is no "delete all
-  of a kind" endpoint.
+- **No reindex job.** The index is a copy that products push; Axentra cannot rebuild it from the
+  source objects. A product re-indexes with `DELETE .../documents/{kind}` and batches of
+  `POST .../documents/batch` (library: `ax.search.delete_kind` / `ax.search.upsert_many`).
 - **Paging is offset based** (not a snapshot) and bounded by `search.max_offset`.
-- `metadata` is returned but not searchable or filterable.
+- `metadata` is not searched; the `metadata` filter of a query is JSON containment on top of the
+  full-text match (no ranges or text matching inside metadata, no index on it).
 - The Python SDK (`axentra-client`) has typed methods (`client.search`); the TypeScript SDK types
   are generated and include the search endpoints.

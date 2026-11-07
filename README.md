@@ -78,7 +78,7 @@ PostgreSQL integration tests. **planned** means it does not exist in this codeba
 | `access` | Permission catalog, built-in and custom roles, authorizer, API keys | implemented |
 | `audit` | Append-only, redacted audit trail written in the same transaction | implemented |
 | `api` | FastAPI `/v1`, RFC 9457 errors, security headers, CORS, committed OpenAPI | implemented |
-| `cli` | `axentra serve / migrate / worker / admin / openapi / storage / notify-dispatch / maintenance / keys / secrets` | implemented |
+| `cli` | `axentra serve / migrate / worker / admin / openapi / storage / notify-dispatch / maintenance / keys / secrets`, and `axentra remote` (administration over the HTTP API, no database access) | implemented |
 | `storage` | File storage (local, S3-compatible), quotas, signed downloads | implemented (S3 tested against moto only) |
 | `events` | Events, background jobs (at least once), schedules, webhooks | implemented |
 | `usage` | Meters, idempotent usage recording, quotas, reservations | implemented |

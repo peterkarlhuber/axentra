@@ -226,7 +226,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Base images are pinned by digest
+      - name: Base and service images are pinned by digest
         run: |
           python3 -I - <<'PY'
           import re, sys
@@ -239,6 +239,12 @@ jobs:
                   base = args.get(base.strip("${}"), base)
                   if base not in stages and "@sha256:" not in base:
                       loose.append(f"{path}: {base}")
+          # Service images of the compose stacks too; the ":local" images are built from this repository.
+          for path in ("single", "multi", "taskboard"):
+              path = f"deploy/compose/docker-compose.{path}.yml"
+              for image in re.findall(r"^\s*image:\s*(\S+)", open(path).read(), re.M):
+                  if not image.endswith(":local") and "@sha256:" not in image:
+                      loose.append(f"{path}: {image}")
           sys.exit(f"not pinned by digest: {loose}" if loose else 0)
           PY
       - name: Compose files are valid
@@ -247,8 +253,19 @@ jobs:
           docker compose -f deploy/compose/docker-compose.single.yml config -q
           docker compose -f deploy/compose/docker-compose.multi.yml config -q
           docker compose -f deploy/compose/docker-compose.taskboard.yml config -q
+      - name: Hash-pinned locks match deploy/constraints.txt
+        run: python3 scripts/check_locks.py
       - name: Build the image
         run: docker build -t axentra:ci .
+      # The image carries a CycloneDX SBOM of what it contains (deploy/sbom.py); keep it with the run.
+      - name: Extract the SBOM
+        run: |
+          docker run --rm --entrypoint cat axentra:ci /opt/axentra/sbom.cdx.json > sbom-axentra.cdx.json
+          python3 -c "import json; b = json.load(open('sbom-axentra.cdx.json')); assert b['bomFormat'] == 'CycloneDX' and b['metadata']['component']['name'] == 'axentra' and b['components'], b"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-axentra
+          path: sbom-axentra.cdx.json
       # The documented full image: a constraint bump that breaks an extra (for example python-dateutil
       # 3.0.0 against botocore, AX3-05) fails here, not at the first deployment that needs it.
       - name: Build the full image (server,oidc,s3,otel) and import every extra
@@ -259,6 +276,13 @@ jobs:
           test "$(docker run --rm --entrypoint id axentra:ci-full -u)" = "10001"
       - name: Build the Taskboard demo image
         run: docker build -f examples/taskboard/Dockerfile -t taskboard:ci .
+      # Start the single- and multi-product compose stacks from the image just built (db, migrate as the owner
+      # role, api as the restricted role) and drive setup, a product, a tenant and a record through the API.
+      - name: Compose stacks start and serve (smoke)
+        run: |
+          docker tag axentra:ci axentra:local
+          scripts/compose_smoke.sh single 18080
+          scripts/compose_smoke.sh multi 18081
       - name: Image runs as non-root and has no forbidden dependencies
         run: |
           docker run --rm axentra:ci --version

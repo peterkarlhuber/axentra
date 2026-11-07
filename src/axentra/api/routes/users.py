@@ -9,7 +9,7 @@ from axentra.api.context import Ax, CurrentPrincipal, request_id
 from axentra.api.routes.common import Cursor, Limit
 from axentra.core.errors import Forbidden, NotFound
 from axentra.core.pagination import Page
-from axentra.identity.models import Session, User
+from axentra.identity.models import ExternalIdentity, Session, User
 from axentra.tenancy.models import Product, Tenant, UserMemberships
 
 router = APIRouter(prefix="/v1", tags=["users"])
@@ -56,12 +56,39 @@ class RevokeResult(BaseModel):
     revoked: int
 
 
+class ExternalUserCreate(BaseModel):
+    provider: str = Field(min_length=1, max_length=500, description="The issuer (`oidc[].issuer`)")
+    subject: str = Field(min_length=1, max_length=500, description="The provider's `sub` claim")
+    email: str | None = Field(default=None, max_length=320)
+    email_verified: bool = Field(
+        default=False,
+        description="The email becomes the user's address only when true; otherwise the user has none",
+    )
+    name: str = Field(default="", max_length=200)
+
+
+class IdentityLink(BaseModel):
+    provider: str = Field(min_length=1, max_length=500)
+    subject: str = Field(min_length=1, max_length=500)
+
+
 @router.get("/me", response_model=Me, summary="Who I am and what I may do, per product and tenant")
-def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
-    # Every tenant the caller may read is listed (all of them, ordered by id), including all
-    # tenants of a product for product operators and platform roles. Authorization is computed per
-    # product in one pass (Authorizer.tenant_grants), not per tenant. (A comment, not a docstring:
-    # FastAPI would put a docstring into the OpenAPI contract.)
+def get_me(
+    principal: CurrentPrincipal,
+    ax: Ax,
+    tenants: Literal["all", "memberships", "none"] = Query(
+        "all",
+        description=(
+            "Which tenants each product lists: `all` (default) every tenant the caller may read, which"
+            " for product operators and platform roles is every tenant of the product; `memberships`"
+            " only the tenants where the caller holds a tenant role (an API key: its tenant);"
+            " `none` no tenants (product-level access only). The product entries are the same in"
+            " every mode."
+        ),
+    ),
+) -> Me:
+    # Authorization is computed per product in one pass (Authorizer.tenant_grants), not per
+    # tenant. (A comment, not a docstring: FastAPI would put a docstring into the OpenAPI contract.)
     user = ax.identity.get_user(principal.user_id) if principal.user_id else None
     products = []
     for product in ax.tenancy.list_products(principal):
@@ -71,7 +98,15 @@ def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
         except (NotFound, Forbidden):
             continue
         readable = {tid: g for tid, g in grants.items() if g.permissions & {"tenant:read", "tenants:read"}}
-        tenants = [
+        if tenants == "memberships":
+            readable = {
+                tid: g
+                for tid, g in readable.items()
+                if g.tenant_role is not None or tid == principal.api_key_tenant_id
+            }
+        elif tenants == "none":
+            readable = {}
+        listed = [
             TenantAccess(
                 tenant=tenant,
                 role=readable[tenant.id].tenant_role,
@@ -84,7 +119,7 @@ def get_me(principal: CurrentPrincipal, ax: Ax) -> Me:
                 product=product,
                 role=grant.product_role,
                 permissions=sorted(grant.permissions),
-                tenants=tenants,
+                tenants=listed,
             )
         )
     platform = ax.authz.grant(principal)
@@ -213,3 +248,67 @@ def user_sessions(user_id: str, principal: CurrentPrincipal, ax: Ax) -> list[Ses
 def revoke_user_sessions(user_id: str, principal: CurrentPrincipal, ax: Ax) -> RevokeResult:
     ax.authz.require(principal, "users:manage")
     return RevokeResult(revoked=ax.identity.revoke_all_sessions(principal, user_id))
+
+
+@router.post(
+    "/users/external",
+    response_model=User,
+    status_code=201,
+    summary="Create a user with an external identity, with or without an email address (platform admins)",
+)
+def create_external_user(body: ExternalUserCreate, principal: CurrentPrincipal, ax: Ax) -> User:
+    """For migrations and imports: the user signs in through the identity provider. `409` when the
+    identity is already linked or a verified email belongs to another user."""
+    return ax.identity.create_external_user(
+        principal,
+        provider=body.provider,
+        subject=body.subject,
+        email=body.email,
+        email_verified=body.email_verified,
+        name=body.name,
+    )
+
+
+@router.get(
+    "/users/{user_id}/identities",
+    response_model=list[ExternalIdentity],
+    summary="External identities linked to a user (users:manage)",
+)
+def list_identities(user_id: str, principal: CurrentPrincipal, ax: Ax) -> list[ExternalIdentity]:
+    ax.authz.require(principal, "users:manage")
+    ax.identity.get_user(user_id)  # 404 for an unknown id
+    return [ExternalIdentity.model_validate(r) for r in ax.identity.list_identities(user_id)]
+
+
+@router.post(
+    "/users/{user_id}/identities",
+    response_model=ExternalIdentity,
+    status_code=201,
+    summary="Link an external identity to a user (platform admins)",
+)
+def link_identity(user_id: str, body: IdentityLink, principal: CurrentPrincipal, ax: Ax) -> ExternalIdentity:
+    """`409` when the identity is already linked (to this or another user)."""
+    ax.identity.link_identity(principal, user_id, provider=body.provider, subject=body.subject)
+    for row in ax.identity.list_identities(user_id):
+        if row["provider"] == body.provider and row["subject"] == body.subject:
+            return ExternalIdentity.model_validate(row)
+    raise NotFound("external identity not found")  # pragma: no cover - removed concurrently
+
+
+@router.delete(
+    "/users/{user_id}/identities",
+    response_model=RevokeResult,
+    summary="Unlink an external identity from a user and revoke the user's sessions (platform admins)",
+)
+def unlink_identity(
+    user_id: str,
+    principal: CurrentPrincipal,
+    ax: Ax,
+    provider: str = Query(min_length=1, max_length=500),
+    subject: str = Query(min_length=1, max_length=500),
+) -> RevokeResult:
+    """`409` (`reason` `last_sign_in_method`) when it is the user's only way to sign in: disable
+    the user instead. `revoked` counts the user's sessions that were ended."""
+    return RevokeResult(
+        revoked=ax.identity.unlink_identity(principal, user_id, provider=provider, subject=subject)
+    )

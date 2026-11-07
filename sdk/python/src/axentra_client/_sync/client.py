@@ -23,6 +23,7 @@ from pydantic import BaseModel, TypeAdapter
 from axentra_client._base import (
     CSRF_HEADER,
     DEFAULT_TIMEOUT,
+    SseParser,
     api_error,
     assert_compatible,
     base_headers,
@@ -35,13 +36,16 @@ from axentra_client._base import (
 from axentra_client.models import (
     ApiKey,
     AuditEvent,
+    CheckoutSession,
     Delivery,
     DownloadUrl,
     EffectiveLimit,
     EnqueueableKinds,
     Entitlements,
     Event,
+    ExternalIdentity,
     FileInfo,
+    InboxEntry,
     Invitation,
     Job,
     JobStats,
@@ -53,30 +57,41 @@ from axentra_client.models import (
     MeterUsage,
     NewApiKey,
     NewInvitation,
+    NewProductInvitation,
     NewWebhookSecret,
     Page,
     PermissionInfo,
     Plan,
+    Preferences,
     Product,
+    ProductInvitation,
     ProductMember,
     Record,
+    RenderedContent,
+    Reservation,
     Role,
     Schedule,
+    SearchBatchResult,
     SearchDocument,
     SearchHit,
     SearchKindCount,
     Session,
     SessionInfo,
+    StreamMessage,
     Subscription,
+    Template,
     Tenant,
     UsageEvent,
     UsageRecordResult,
     User,
+    UserMemberships,
     WebhookEndpoint,
 )
 
 M = TypeVar("M", bound=BaseModel)
 PermissionList = list[PermissionInfo]
+SessionList = list[Session]
+IdentityList = list[ExternalIdentity]
 Json = dict[str, Any]
 FileContent = bytes | IO[bytes] | str | os.PathLike[str]
 
@@ -159,6 +174,8 @@ class AxentraClient:
         self.schedules = Schedules(self)
         self.webhooks = Webhooks(self)
         self.search = Search(self)
+        self.users = Users(self)
+        self.product_invitations = ProductInvitations(self)
 
     # -- lifecycle and credentials ---------------------------------------------------------------
 
@@ -226,11 +243,17 @@ class AxentraClient:
 
     @contextmanager
     def stream(
-        self, method: str, path: str, *, params: Mapping[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> Iterator[httpx.Response]:
         """A streamed response (body not read); raises ``AxentraApiError`` for non-2xx."""
         hdrs = base_headers(self._token, self._extra_headers)
         hdrs["Accept"] = "*/*"
+        hdrs.update(headers or {})
         with self._http.stream(method, self._url(path), params=query(params or {}), headers=hdrs) as r:
             if r.status_code >= 400:
                 r.read()
@@ -251,6 +274,23 @@ class AxentraClient:
     ) -> Any:
         data = self.request_json(method, path, json=json, headers=headers, params=params)
         return None if model is None else _parse(model, data)
+
+    def _sse(
+        self, path: str, params: Mapping[str, Any], last_event_id: str | None
+    ) -> Iterator[StreamMessage]:
+        """Server-sent events of ``path`` as :class:`StreamMessage` until the server closes the
+        stream (it does after ``events.sse_max_seconds``; resume with the last ``id``)."""
+        headers = (
+            {"Last-Event-ID": last_event_id, "Accept": "text/event-stream"}
+            if last_event_id
+            else {"Accept": "text/event-stream"}
+        )
+        with self.stream("GET", path, params=params, headers=headers) as response:
+            parser = SseParser()
+            for line in response.iter_lines():
+                message = parser.feed(line)
+                if message is not None:
+                    yield StreamMessage.model_validate(message)
 
     def _iterate(
         self, path: str, model: type[M], params: Mapping[str, Any], page_size: int | None
@@ -362,9 +402,12 @@ class Auth(_Resource):
 
 
 class MeResource(_Resource):
-    def get(self) -> Me:
-        """The caller: user (or ``None`` for API keys), platform role and accessible products."""
-        result: Me = self._c._get("/v1/me", Me)
+    def get(self, *, tenants: str | None = None) -> Me:
+        """The caller: user (or ``None`` for API keys), platform role and accessible products.
+
+        ``tenants``: ``"all"`` (the server's default), ``"memberships"`` (only tenants the caller
+        belongs to) or ``"none"`` (products without their tenant lists)."""
+        result: Me = self._c._get("/v1/me", Me, {"tenants": tenants})
         return result
 
     def update(
@@ -587,6 +630,36 @@ class Roles(_Resource):
             {"include_retired": include_retired or None},
         )
         return result
+
+    def all_permissions(self) -> PermissionList:
+        """``GET /v1/permissions``: the built-in permission catalog."""
+        result: PermissionList = self._c._get("/v1/permissions", PermissionList)
+        return result
+
+    def declare_permission(
+        self,
+        product_id: str,
+        name: str,
+        *,
+        scope: str,
+        description: str = "",
+        default_roles: Sequence[str] = (),
+        read_like: bool | None = None,
+    ) -> PermissionInfo:
+        """Create, change or re-activate a product permission (``product:manage``)."""
+        result: PermissionInfo = self._c._send(
+            "PUT",
+            _product(product_id, "permissions", name),
+            PermissionInfo,
+            _body(
+                scope=scope, description=description, default_roles=list(default_roles), read_like=read_like
+            ),
+        )
+        return result
+
+    def retire_permission(self, product_id: str, name: str) -> None:
+        """Retire a product permission declared over the API (it stays listed in roles and keys)."""
+        self._c.request("DELETE", _product(product_id, "permissions", name))
 
     def create(
         self,
@@ -1060,6 +1133,63 @@ class Usage(_Resource):
         result: Meter = self._c._send("POST", _product(product_id, "usage", "meters"), Meter, body)
         return result
 
+    # reservations
+
+    def reserve(
+        self,
+        product_id: str,
+        tenant_id: str,
+        meter: str,
+        quantity: int | float | Decimal | str,
+        *,
+        ttl_seconds: int | None = None,
+        idempotency_key: str | None = None,
+    ) -> Reservation:
+        """Reserve quantity against the limit (429 when a hard quota would be exceeded); commit
+        the actual usage or release it before ``expires_at``."""
+        headers = {"Idempotency-Key": check_idempotency_key(idempotency_key)} if idempotency_key else None
+        result: Reservation = self._c._send(
+            "POST",
+            _tenant(product_id, tenant_id, "usage", "reservations"),
+            Reservation,
+            _body(meter=meter, quantity=str(quantity), ttl_seconds=ttl_seconds),
+            headers,
+        )
+        return result
+
+    def reservation(self, product_id: str, tenant_id: str, reservation_id: str) -> Reservation:
+        result: Reservation = self._c._get(
+            _tenant(product_id, tenant_id, "usage", "reservations", reservation_id), Reservation
+        )
+        return result
+
+    def commit(
+        self,
+        product_id: str,
+        tenant_id: str,
+        reservation_id: str,
+        *,
+        quantity: int | float | Decimal | str | None = None,
+        properties: Json | None = None,
+    ) -> UsageRecordResult:
+        """Record the actual usage (default: the reserved quantity); idempotent."""
+        result: UsageRecordResult = self._c._send(
+            "POST",
+            _tenant(product_id, tenant_id, "usage", "reservations", reservation_id, "commit"),
+            UsageRecordResult,
+            _body(quantity=None if quantity is None else str(quantity), properties=properties),
+        )
+        return result
+
+    def release(self, product_id: str, tenant_id: str, reservation_id: str) -> Reservation:
+        """Give the reserved quantity back without recording usage."""
+        result: Reservation = self._c._send(
+            "POST",
+            _tenant(product_id, tenant_id, "usage", "reservations", reservation_id, "release"),
+            Reservation,
+        )
+        return result
+
 
 class Billing(_Resource):
     def plans(self, product_id: str) -> list[Plan]:
@@ -1116,6 +1246,26 @@ class Billing(_Resource):
         """The tenant's current subscription (else the latest canceled one); 404 when none."""
         result: Subscription = self._c._get(
             _tenant(product_id, tenant_id, "billing", "subscription"), Subscription
+        )
+        return result
+
+    def checkout(
+        self,
+        product_id: str,
+        tenant_id: str,
+        plan: str,
+        *,
+        success_url: str,
+        cancel_url: str,
+        price_id: str | None = None,
+    ) -> CheckoutSession:
+        """Start a hosted checkout for ``plan``; send the customer to ``url`` (``None`` when the
+        provider completed the change directly, see ``completed``)."""
+        result: CheckoutSession = self._c._send(
+            "POST",
+            _tenant(product_id, tenant_id, "billing", "checkout"),
+            CheckoutSession,
+            _body(plan=plan, success_url=success_url, cancel_url=cancel_url, price_id=price_id),
         )
         return result
 
@@ -1244,6 +1394,198 @@ class Notify(_Resource):
         result: Message = self._c._get(_product(product_id, "notify", "messages", message_id), Message)
         return result
 
+    # templates (notify:manage)
+
+    def templates(self, product_id: str) -> list[Template]:
+        """The product's templates, including the built-in ones it has not overridden."""
+        result: list[Template] = self._c._get(
+            _product(product_id, "notify", "templates"), list[Template]
+        )
+        return result
+
+    def template(self, product_id: str, key: str) -> Template:
+        result: Template = self._c._get(_product(product_id, "notify", "templates", key), Template)
+        return result
+
+    def create_template(
+        self,
+        product_id: str,
+        key: str,
+        variants: Mapping[str, Json],
+        *,
+        channel: str | None = None,
+        category: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        variables: Sequence[str] | None = None,
+        sample_data: Json | None = None,
+        sensitive: bool | None = None,
+    ) -> Template:
+        """``variants`` maps a locale to ``{"subject", "text", "html"?}``."""
+        body = _body(
+            key=key,
+            variants=dict(variants),
+            channel=channel,
+            category=category,
+            name=name,
+            description=description,
+            variables=list(variables) if variables is not None else None,
+            sample_data=sample_data,
+            sensitive=sensitive,
+        )
+        result: Template = self._c._send(
+            "POST", _product(product_id, "notify", "templates"), Template, body
+        )
+        return result
+
+    def update_template(
+        self,
+        product_id: str,
+        key: str,
+        *,
+        variants: Mapping[str, Json] | None = None,
+        channel: str | None = None,
+        category: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        variables: Sequence[str] | None = None,
+        sample_data: Json | None = None,
+        sensitive: bool | None = None,
+        version: int | None = None,
+    ) -> Template:
+        """Change the given fields; with ``version``, a concurrent change fails with 412."""
+        body = _body(
+            variants=dict(variants) if variants is not None else None,
+            channel=channel,
+            category=category,
+            name=name,
+            description=description,
+            variables=list(variables) if variables is not None else None,
+            sample_data=sample_data,
+            sensitive=sensitive,
+        )
+        result: Template = self._c._send(
+            "PATCH", _product(product_id, "notify", "templates", key), Template, body, if_match(version)
+        )
+        return result
+
+    def delete_template(self, product_id: str, key: str, *, version: int | None = None) -> None:
+        """Delete a product template (an override of a built-in one restores the built-in)."""
+        self._c.request(
+            "DELETE", _product(product_id, "notify", "templates", key), headers=if_match(version)
+        )
+
+    def preview_template(
+        self, product_id: str, key: str, *, variables: Json | None = None, locale: str | None = None
+    ) -> RenderedContent:
+        """Render a stored template; ``variables`` override its sample data."""
+        result: RenderedContent = self._c._send(
+            "POST",
+            _product(product_id, "notify", "templates", key, "preview"),
+            RenderedContent,
+            _body(variables=variables or {}, locale=locale),
+        )
+        return result
+
+    def preview_draft(
+        self,
+        product_id: str,
+        variants: Mapping[str, Json],
+        *,
+        variables: Sequence[str] | None = None,
+        sample_data: Json | None = None,
+        values: Json | None = None,
+        locale: str | None = None,
+    ) -> RenderedContent:
+        """Render an unsaved template (for editors)."""
+        body = _body(
+            variants=dict(variants),
+            variables=list(variables) if variables is not None else None,
+            sample_data=sample_data,
+            values=values,
+            locale=locale,
+        )
+        result: RenderedContent = self._c._send(
+            "POST", _product(product_id, "notify", "templates", "preview"), RenderedContent, body
+        )
+        return result
+
+    # the caller's own preferences
+
+    def preferences(self, product_id: str, *, tenant_id: str | None = None) -> Preferences:
+        """The caller's opt-outs in the product (or one tenant)."""
+        result: Preferences = self._c._get(
+            _product(product_id, "notify", "preferences", "me"), Preferences, {"tenant_id": tenant_id}
+        )
+        return result
+
+    def set_preferences(
+        self,
+        product_id: str,
+        opted_out: Sequence[str],
+        *,
+        tenant_id: str | None = None,
+        version: int | None = None,
+    ) -> Preferences:
+        """Replace the caller's opted-out categories; locked categories cannot be opted out."""
+        result: Preferences = self._c._send(
+            "PUT",
+            _product(product_id, "notify", "preferences", "me"),
+            Preferences,
+            {"opted_out": list(opted_out)},
+            if_match(version),
+            {"tenant_id": tenant_id},
+        )
+        return result
+
+    # the caller's own inbox (channel "inbox"; users only)
+
+    def inbox(
+        self,
+        product_id: str,
+        *,
+        tenant_id: str | None = None,
+        unread_only: bool = False,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[InboxEntry]:
+        """The caller's in-app notifications, newest first (one tenant or the whole product)."""
+        params = {
+            "tenant_id": tenant_id,
+            "unread_only": "true" if unread_only else None,
+            "limit": limit,
+            "cursor": cursor,
+        }
+        result: Page[InboxEntry] = self._c._get(
+            _product(product_id, "notify", "inbox", "me"), Page[InboxEntry], params
+        )
+        return result
+
+    def unread_count(self, product_id: str, *, tenant_id: str | None = None) -> int:
+        """How many of the caller's in-app notifications are unread."""
+        result: Json = self._c.request_json(
+            "GET", _product(product_id, "notify", "inbox", "me", "unread"), params={"tenant_id": tenant_id}
+        )
+        return int(result["unread"])
+
+    def mark_read(
+        self,
+        product_id: str,
+        message_ids: Sequence[str] | None = None,
+        *,
+        tenant_id: str | None = None,
+    ) -> int:
+        """Mark the given notifications (``None``: all unread ones in the scope) as read; returns
+        how many changed. Ids of other users' messages change nothing."""
+        body = _body(message_ids=list(message_ids) if message_ids is not None else None)
+        result: Json = self._c.request_json(
+            "POST",
+            _product(product_id, "notify", "inbox", "me", "read"),
+            json=body,
+            params={"tenant_id": tenant_id},
+        )
+        return int(result["marked"])
+
 
 class Audit(_Resource):
     def list(
@@ -1296,8 +1638,7 @@ __all__ = ["CSRF_HEADER", "AxentraClient"]
 
 class Events(_Resource):
     """Domain events: publish into a tenant, list and read (``events:read``/``events:publish``).
-    The live stream (``GET .../events/stream``, server-sent events) is reachable through
-    ``client.stream(...)``."""
+    ``stream()`` follows new events live (server-sent events)."""
 
     def publish(
         self,
@@ -1345,6 +1686,20 @@ class Events(_Resource):
     def get(self, product_id: str, event_id: str) -> Event:
         result: Event = self._c._get(_product(product_id, "events", event_id), Event)
         return result
+
+    def stream(
+        self,
+        product_id: str,
+        *,
+        tenant_id: str | None = None,
+        types: Sequence[str] | None = None,
+        last_event_id: str | None = None,
+    ) -> Iterator[StreamMessage]:
+        """New events as they happen (server-sent events). ``types`` are type patterns such as
+        ``invoice.*``; ``last_event_id`` resumes after that position. The server closes the stream
+        after ``events.sse_max_seconds`` and sends an ``error`` message when access is lost."""
+        params = {"tenant_id": tenant_id, "types": ",".join(types) if types else None}
+        return self._c._sse(_product(product_id, "events", "stream"), params, last_event_id)
 
 
 class Jobs(_Resource):
@@ -1436,6 +1791,13 @@ class Jobs(_Resource):
             _product(product_id, "jobs", "kinds"), EnqueueableKinds, {"tenant_id": tenant_id}
         )
         return result
+
+    def stream(
+        self, product_id: str, *, tenant_id: str | None = None, last_event_id: str | None = None
+    ) -> Iterator[StreamMessage]:
+        """Job status changes as they happen (server-sent events; only the latest state of a job is
+        guaranteed). ``last_event_id`` resumes after that position."""
+        return self._c._sse(_product(product_id, "jobs", "stream"), {"tenant_id": tenant_id}, last_event_id)
 
 
 class Schedules(_Resource):
@@ -1682,15 +2044,18 @@ class Search(_Resource):
         limit: int | None = None,
         cursor: str | None = None,
         match: str | None = None,
+        metadata: Json | None = None,
     ) -> Page[SearchHit]:
         """Best matches first. ``q`` takes words, "phrases" and -exclusions; with
-        ``match="prefix"`` (search as you type) terms also match words that start with them."""
+        ``match="prefix"`` (search as you type) terms also match words that start with them.
+        ``metadata`` keeps only documents whose metadata contains that object."""
         params = {
             "q": q,
             "kind": list(kinds) if kinds else None,
             "limit": limit,
             "cursor": cursor,
             "match": match,
+            "metadata": metadata,
         }
         result: Page[SearchHit] = self._c._get(
             _tenant(product_id, tenant_id, "search"), Page[SearchHit], params
@@ -1706,11 +2071,12 @@ class Search(_Resource):
         kinds: Sequence[str] | None = None,
         page_size: int | None = None,
         match: str | None = None,
+        metadata: Json | None = None,
     ) -> Iterator[SearchHit]:
         return self._c._iterate(
             _tenant(product_id, tenant_id, "search"),
             SearchHit,
-            {"q": q, "kind": list(kinds) if kinds else None, "match": match},
+            {"q": q, "kind": list(kinds) if kinds else None, "match": match, "metadata": metadata},
             page_size,
         )
 
@@ -1748,5 +2114,155 @@ class Search(_Resource):
         """The tenant's indexed kinds with their document counts."""
         result: list[SearchKindCount] = self._c._get(
             _tenant(product_id, tenant_id, "search", "kinds"), list[SearchKindCount]
+        )
+        return result
+
+    def index_batch(
+        self, product_id: str, tenant_id: str, documents: Sequence[Json]
+    ) -> SearchBatchResult:
+        """Add or replace up to 100 documents (``{"kind", "ref_id", "title", "body", "metadata"}``)
+        in one transaction: all or nothing."""
+        result: SearchBatchResult = self._c._send(
+            "POST",
+            _tenant(product_id, tenant_id, "search", "documents", "batch"),
+            SearchBatchResult,
+            {"documents": list(documents)},
+        )
+        return result
+
+    def remove_kind(self, product_id: str, tenant_id: str, kind: str) -> int:
+        """Remove every document of ``kind``; returns how many were removed."""
+        data = self._c.request_json(
+            "DELETE", _tenant(product_id, tenant_id, "search", "documents", kind)
+        )
+        return int(data["deleted"])
+
+
+class Users(_Resource):
+    """User administration (platform ``users:read`` / ``users:manage``; external identities:
+    platform admins)."""
+
+    def list(
+        self,
+        *,
+        product_id: str | None = None,
+        q: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[User]:
+        """All users (``users:read``), or the users of one product (``product_users:read``)."""
+        params = {"product_id": product_id, "q": q, "status": status, "limit": limit, "cursor": cursor}
+        result: Page[User] = self._c._get("/v1/users", Page[User], params)
+        return result
+
+    def iter(
+        self,
+        *,
+        product_id: str | None = None,
+        q: str | None = None,
+        status: str | None = None,
+        page_size: int | None = None,
+    ) -> Iterator[User]:
+        return self._c._iterate(
+            "/v1/users", User, {"product_id": product_id, "q": q, "status": status}, page_size
+        )
+
+    def get(self, user_id: str) -> User:
+        result: User = self._c._get("/v1/" + _p("users", user_id), User)
+        return result
+
+    def update(
+        self, user_id: str, *, status: str | None = None, platform_role: str | None = None
+    ) -> User:
+        """Enable/disable a user (``users:manage``) or set the platform role (platform admins;
+        ``"none"`` removes it)."""
+        result: User = self._c._send(
+            "PATCH", "/v1/" + _p("users", user_id), User, _body(status=status, platform_role=platform_role)
+        )
+        return result
+
+    def memberships(self, user_id: str) -> UserMemberships:
+        """The products and tenants the user belongs to, as far as the caller may read them."""
+        result: UserMemberships = self._c._get(
+            "/v1/" + _p("users", user_id, "memberships"), UserMemberships
+        )
+        return result
+
+    def sessions(self, user_id: str) -> SessionList:
+        result: SessionList = self._c._get("/v1/" + _p("users", user_id, "sessions"), SessionList)
+        return result
+
+    def revoke_sessions(self, user_id: str) -> int:
+        """End all sessions of the user; returns how many were revoked."""
+        data = self._c.request_json("POST", "/v1/" + _p("users", user_id, "sessions", "revoke"))
+        return int(data["revoked"])
+
+    def create_external(
+        self,
+        provider: str,
+        subject: str,
+        *,
+        email: str | None = None,
+        email_verified: bool = False,
+        name: str = "",
+    ) -> User:
+        """A user who signs in through an identity provider (imports, migrations). Without
+        ``email_verified`` the user has no email address."""
+        result: User = self._c._send(
+            "POST",
+            "/v1/users/external",
+            User,
+            _body(provider=provider, subject=subject, email=email, email_verified=email_verified, name=name),
+        )
+        return result
+
+    def identities(self, user_id: str) -> IdentityList:
+        result: IdentityList = self._c._get("/v1/" + _p("users", user_id, "identities"), IdentityList)
+        return result
+
+    def link_identity(self, user_id: str, provider: str, subject: str) -> ExternalIdentity:
+        result: ExternalIdentity = self._c._send(
+            "POST",
+            "/v1/" + _p("users", user_id, "identities"),
+            ExternalIdentity,
+            {"provider": provider, "subject": subject},
+        )
+        return result
+
+    def unlink_identity(self, user_id: str, provider: str, subject: str) -> int:
+        """Unlink an identity; the user's sessions end (returns how many). Refused (409) for the
+        user's last way to sign in."""
+        data = self._c.request_json(
+            "DELETE",
+            "/v1/" + _p("users", user_id, "identities"),
+            params={"provider": provider, "subject": subject},
+        )
+        return int(data["revoked"])
+
+
+class ProductInvitations(_Resource):
+    """Invitations to a product's team (operators), accepted with ``accept(token)``."""
+
+    def list(self, product_id: str) -> list[ProductInvitation]:
+        result: list[ProductInvitation] = self._c._get(
+            _product(product_id, "invitations"), list[ProductInvitation]
+        )
+        return result
+
+    def create(self, product_id: str, email: str, *, role: str | None = None) -> NewProductInvitation:
+        """The token is returned only here; Axentra also emails the link when notify is enabled."""
+        result: NewProductInvitation = self._c._send(
+            "POST", _product(product_id, "invitations"), NewProductInvitation, _body(email=email, role=role)
+        )
+        return result
+
+    def revoke(self, product_id: str, invitation_id: str) -> None:
+        self._c.request("DELETE", _product(product_id, "invitations", invitation_id))
+
+    def accept(self, token: str) -> ProductMember:
+        """Accept as the signed-in user (the invitation's email address must be the user's)."""
+        result: ProductMember = self._c._send(
+            "POST", "/v1/product-invitations/accept", ProductMember, {"token": token}
         )
         return result

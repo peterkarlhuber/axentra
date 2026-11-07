@@ -24,8 +24,21 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
 
 - Multi-stage build on `python:3.13-slim`; the runtime stage contains only a virtual environment
   in `/opt/axentra` and no build tools.
-- Dependencies are pinned with `deploy/constraints.txt` (`pip install --constraint`); regenerate
-  it as described in its header after dependency changes.
+- Every installed distribution is pinned by version and hash (`pip install --require-hashes`):
+  `deploy/locks/server.txt` for `EXTRAS=server`, `deploy/locks/full.txt` for any other `EXTRAS`
+  (it holds the dependencies of all extras), and the build backend (hatchling) from
+  `deploy/locks/build.txt`, which builds Axentra's own wheel offline in a separate venv that does
+  not reach the image. `pip check` in the build fails when a lock lacks a dependency of the
+  requested extras. The versions follow `deploy/constraints.txt` (used for installs without the
+  image); after a change to it or to the dependencies, regenerate the locks with
+  `scripts/update_locks.sh` (needs `uv`); CI's `scripts/check_locks.py` refuses locks that drift
+  from the constraints or lack hashes.
+- SBOM: the build writes a CycloneDX 1.5 SBOM of the image's Python environment to
+  `/opt/axentra/sbom.cdx.json` (`deploy/sbom.py`, deterministic; a timestamp only with
+  `SOURCE_DATE_EPOCH`). Read it with
+  `docker run --rm --entrypoint cat axentra:local /opt/axentra/sbom.cdx.json`; CI keeps it as the
+  artifact `sbom-axentra`. It covers Python distributions, not the Debian packages of the base
+  image (scan the image for those).
 - Runs as `axentra` (uid/gid 10001), working directory `/var/lib/axentra`.
 - `ENTRYPOINT ["axentra"]`, default `CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]`, so
   `docker run axentra:local migrate` or `... admin setup-token` run other commands.
@@ -38,7 +51,8 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
 `deploy/compose/docker-compose.single.yml` and `docker-compose.multi.yml` are identical except for
 the configuration file (`deploy/config/single.toml` or `multi.toml`):
 
-- `db`: `postgres:16` with a named volume. On first initialization,
+- `db`: `postgres:16`, pinned by digest (CI checks the pin; Dependabot proposes updates), with a named
+  volume. On first initialization,
   `deploy/compose/initdb/01-roles.sql` creates `axentra_owner` (owns the database and schema,
   runs migrations) and `axentra_app` (no superuser, no BYPASSRLS, no DDL, `SELECT/INSERT/UPDATE/
   DELETE` on the owner's tables through default privileges). The port is not published.
@@ -68,6 +82,12 @@ curl -fsS http://localhost:8080/v1/health/ready
 ```
 
 Then create the first platform admin with `POST /v1/auth/setup` (or through Studio).
+
+`scripts/compose_smoke.sh single|multi [port]` does all of this unattended against the image
+`axentra:local`: throwaway passwords and keyring, `up`, readiness, the mode in `/v1/meta`, a setup
+token, the first admin, a product (multi), a tenant and a record written as the restricted role;
+the stack and its volumes are removed afterwards. CI runs it for both stacks with the image it
+built (the Taskboard stack is built, not started).
 
 Upgrades: pull/build the new image, then `docker compose ... up -d`: the `migrate` job runs
 again (idempotent) before the API restarts. Take a backup first
@@ -127,3 +147,27 @@ own passwords (the `\getenv` lines are psql-specific), or create the two roles y
 `axentra db grant-runtime-role axentra_app` (as the owner) grant the runtime role; `axentra db
 inspect-role` shows whether row-level security fully applies to the application role (no
 superuser, no `BYPASSRLS`, owns no table).
+
+## Administration over HTTP (`axentra remote`)
+
+The other CLI commands connect to PostgreSQL and need the configuration (database URL, keyring).
+`axentra remote` needs only the API's URL and a credential, uses the API's permission checks and
+audit trail, and works with the core install (standard library HTTP only):
+
+```bash
+export AXENTRA_URL=https://api.example.com
+export AXENTRA_SESSION_TOKEN="$(axentra remote login admin@example.com)"   # password prompted
+axentra remote whoami
+axentra remote products create crm "CRM"                 # platform admins; also list|get|archive|restore
+axentra remote tenants create prd_... acme "Acme"        # also list|get|suspend|activate
+axentra remote keys create prd_... ci --permission tenant:read --tenant-id ten_...   # secret printed once
+axentra remote keys rotate prd_... key_... --grace-seconds 3600                      # also list|revoke
+axentra remote users list --q alice                      # also disable|enable|revoke-sessions
+```
+
+The credential comes from `AXENTRA_API_KEY` or `AXENTRA_SESSION_TOKEN` (or `--api-key-file` /
+`--session-token-file`), never from a command-line argument, so it does not appear in `ps` or the
+shell history; `login` reads the password from a prompt (or `AXENTRA_PASSWORD` for scripts).
+Answers are printed as JSON; an error answer prints `axentra: <code>: <detail>` and exits with 2.
+Revoke a session token you no longer need with `axentra remote users revoke-sessions <your id>`
+or by signing out in Studio.

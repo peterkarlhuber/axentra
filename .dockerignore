@@ -1,5 +1,5 @@
-# Only pyproject.toml, the docs files named in the Dockerfile, src/ and deploy/constraints.txt
-# are needed for the image. Keep secrets, local state and caches out of the build context.
+# Only pyproject.toml, the docs files named in the Dockerfile, src/, deploy/locks, deploy/sbom.py and
+# deploy/constraints.txt (Taskboard image) are needed for the images. Keep secrets, local state and caches out of the build context.
 .git
 .github
 .venv*

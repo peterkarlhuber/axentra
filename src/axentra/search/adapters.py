@@ -21,7 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 import psycopg
 from psycopg.types.json import Jsonb
 
-from axentra.core.errors import ConfigurationError, NotFound
+from axentra.core.errors import ConfigurationError, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.search.models import (
@@ -39,6 +39,10 @@ from axentra.search.models import (
 #: Called inside the write transaction (PostgreSQL) or right after the external write (other
 #: adapters) with the stored document, e.g. to write the audit event.
 WriteHook = Callable[[Tx, SearchDocument], None]
+#: Called inside a bulk delete's transaction with the number of removed documents.
+BulkHook = Callable[[Tx, int], None]
+#: ``reason`` of the ``422`` for a search cancelled by ``search.statement_timeout_ms``.
+QUERY_TOO_EXPENSIVE = "query_too_expensive"
 
 
 @runtime_checkable
@@ -64,8 +68,11 @@ class SearchAdapter(Protocol):
         ...
 
     # Optional: ``kinds(product_id, tenant_id, limit) -> list[KindCount]`` (the tenant's indexed
-    # kinds in kind order with their counts). Adapters without it answer ``GET .../search/kinds``
-    # with ``409 conflict``; the PostgreSQL adapter has it.
+    # kinds in kind order with their counts), ``upsert_many(docs, *, actor, hook) -> list[IndexResult]``
+    # (all documents of one tenant, all or nothing) and ``delete_kind(product_id, tenant_id, kind, *,
+    # hook) -> int`` (remove every document of a kind; ``hook`` gets the transaction and the count).
+    # Adapters without them answer the matching endpoints with ``409 conflict``; the PostgreSQL
+    # adapter has all three.
 
 
 _COLUMNS = (
@@ -91,9 +98,18 @@ class PostgresSearchAdapter:
 
     name = "postgres"
 
-    def __init__(self, db: Database, *, language: str = "simple") -> None:
+    def __init__(
+        self,
+        db: Database,
+        *,
+        language: str = "simple",
+        max_candidates: int = 10_000,
+        statement_timeout_ms: int = 5_000,
+    ) -> None:
         self.db = db
         self.language = language
+        self.max_candidates = max_candidates
+        self.statement_timeout_ms = statement_timeout_ms
         self._checked = False
         self._lock = threading.Lock()
 
@@ -116,36 +132,66 @@ class PostgresSearchAdapter:
         return SearchDocument(**{k: v for k, v in row.items() if k != "inserted"})
 
     def upsert(self, doc: IndexDocument, *, actor: str | None, hook: WriteHook | None = None) -> IndexResult:
-        lang = self._lang()
+        self._lang()  # checked before the write transaction opens (it reads on its own connection)
         with self.db.transaction(DbScope.tenant(doc.product_id, doc.tenant_id)) as tx:
-            row = tx.one(
-                "INSERT INTO axentra_search_documents AS d"
-                " (id, product_id, tenant_id, kind, ref_id, title, body, metadata, language,"
-                "  created_by, updated_by)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::regconfig, %s, %s)"
-                " ON CONFLICT (product_id, tenant_id, kind, ref_id) DO UPDATE SET"
-                "  title = EXCLUDED.title, body = EXCLUDED.body, metadata = EXCLUDED.metadata,"
-                "  language = EXCLUDED.language, updated_by = EXCLUDED.updated_by,"
-                "  version = d.version + 1, updated_at = now()"
-                f" RETURNING {_COLUMNS}, (xmax = 0) AS inserted",
-                (
-                    new_id("sdoc"),
-                    doc.product_id,
-                    doc.tenant_id,
-                    doc.kind,
-                    doc.ref_id,
-                    doc.title,
-                    doc.body,
-                    Jsonb(doc.metadata),
-                    lang,
-                    actor,
-                    actor,
-                ),
+            return self._upsert(tx, doc, actor=actor, hook=hook)
+
+    def upsert_many(
+        self, docs: list[IndexDocument], *, actor: str | None, hook: WriteHook | None = None
+    ) -> list[IndexResult]:
+        """Index documents of ONE tenant in one transaction (all or nothing)."""
+        if not docs:
+            return []
+        first = docs[0]
+        if any((d.product_id, d.tenant_id) != (first.product_id, first.tenant_id) for d in docs):
+            raise ValidationFailed("a batch indexes documents of one tenant")
+        self._lang()
+        with self.db.transaction(DbScope.tenant(first.product_id, first.tenant_id)) as tx:
+            return [self._upsert(tx, d, actor=actor, hook=hook) for d in docs]
+
+    def delete_kind(self, product_id: str, tenant_id: str, kind: str, *, hook: BulkHook | None = None) -> int:
+        """Remove every document of ``kind`` in the tenant; returns how many were removed."""
+        with self.db.transaction(DbScope.tenant(product_id, tenant_id)) as tx:
+            n = tx.execute(
+                "DELETE FROM axentra_search_documents WHERE product_id = %s AND tenant_id = %s AND kind = %s",
+                (product_id, tenant_id, kind),
             )
-            assert row is not None
-            stored = self._doc(row)
             if hook is not None:
-                hook(tx, stored)
+                hook(tx, n)
+        return n
+
+    def _upsert(
+        self, tx: Tx, doc: IndexDocument, *, actor: str | None, hook: WriteHook | None
+    ) -> IndexResult:
+        lang = self._lang()
+        row = tx.one(
+            "INSERT INTO axentra_search_documents AS d"
+            " (id, product_id, tenant_id, kind, ref_id, title, body, metadata, language,"
+            "  created_by, updated_by)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::regconfig, %s, %s)"
+            " ON CONFLICT (product_id, tenant_id, kind, ref_id) DO UPDATE SET"
+            "  title = EXCLUDED.title, body = EXCLUDED.body, metadata = EXCLUDED.metadata,"
+            "  language = EXCLUDED.language, updated_by = EXCLUDED.updated_by,"
+            "  version = d.version + 1, updated_at = now()"
+            f" RETURNING {_COLUMNS}, (xmax = 0) AS inserted",
+            (
+                new_id("sdoc"),
+                doc.product_id,
+                doc.tenant_id,
+                doc.kind,
+                doc.ref_id,
+                doc.title,
+                doc.body,
+                Jsonb(doc.metadata),
+                lang,
+                actor,
+                actor,
+            ),
+        )
+        assert row is not None
+        stored = self._doc(row)
+        if hook is not None:
+            hook(tx, stored)
         return IndexResult(document=stored, created=bool(row["inserted"]))
 
     def get(self, product_id: str, tenant_id: str, kind: str, ref_id: str) -> SearchDocument:
@@ -196,8 +242,12 @@ class PostgresSearchAdapter:
             "limit": query.limit + 1,
             "title_opts": _TITLE_OPTS,
             "body_opts": _BODY_OPTS,
+            "max_candidates": self.max_candidates,
         }
         kind_filter = " AND d.kind = ANY(%(kinds)s)" if query.kinds else ""
+        if query.metadata:
+            params["metadata"] = Jsonb(query.metadata)
+            kind_filter += " AND d.metadata @> %(metadata)s"
         if query.match == "prefix":
             # Terms are only letters and digits (split on everything else), so quoting them in the
             # tsquery syntax is safe; the configuration still normalizes each one (case, stemming).
@@ -211,17 +261,22 @@ class PostgresSearchAdapter:
             )
         else:
             tsquery = "websearch_to_tsquery(%(lang)s::regconfig, %(q)s)"
-        # Rank and page first; ts_headline (expensive on long bodies) runs only for the page.
+        # Bound the work first: at most max_candidates matches (the GIN index finds them without
+        # reading every match) are ranked; then rank and page; ts_headline (expensive on long
+        # bodies) runs only for the page.
         sql = (
             f"WITH q AS (SELECT {tsquery} AS query),"
-            " page AS ("
+            " candidates AS ("
             "  SELECT d.id, d.kind, d.ref_id, d.title, d.body, d.metadata, d.updated_at, d.language,"
-            "         ts_rank(d.search_vector, q.query) AS rank"
+            "         d.search_vector"
             "  FROM axentra_search_documents d, q"
             "  WHERE d.product_id = %(p)s AND d.tenant_id = %(t)s AND numnode(q.query) > 0"
-            "    AND d.search_vector @@ q.query"
-            + kind_filter
-            + "  ORDER BY rank DESC, d.updated_at DESC, d.id"
+            "    AND d.search_vector @@ q.query" + kind_filter + "  LIMIT %(max_candidates)s),"
+            " page AS ("
+            "  SELECT c.id, c.kind, c.ref_id, c.title, c.body, c.metadata, c.updated_at, c.language,"
+            "         ts_rank(c.search_vector, q.query) AS rank"
+            "  FROM candidates c, q"
+            "  ORDER BY rank DESC, c.updated_at DESC, c.id"
             "  OFFSET %(offset)s LIMIT %(limit)s)"
             " SELECT page.id, page.kind, page.ref_id, page.title, page.metadata, page.updated_at,"
             "        page.rank::float8 AS rank,"
@@ -229,8 +284,21 @@ class PostgresSearchAdapter:
             "        ts_headline(page.language, page.body, q.query, %(body_opts)s) AS body_highlight"
             " FROM page, q ORDER BY page.rank DESC, page.updated_at DESC, page.id"
         )
-        with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
-            rows = tx.all(sql, params)
+        try:
+            with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
+                # Transaction-local; inside a host transaction (Database.joined) the savepoint is
+                # released afterwards, so the previous value is put back explicitly.
+                previous = tx.scalar("SELECT current_setting('statement_timeout')")
+                tx.execute(
+                    "SELECT set_config('statement_timeout', %s, true)", (f"{self.statement_timeout_ms}ms",)
+                )
+                rows = tx.all(sql, params)
+                tx.execute("SELECT set_config('statement_timeout', %s, true)", (str(previous),))
+        except psycopg.errors.QueryCanceled:
+            raise ValidationFailed(
+                "the search took too long; use more specific terms or a kind filter",
+                extra={"reason": QUERY_TOO_EXPENSIVE},
+            ) from None
         more = len(rows) > query.limit
         hits = [
             SearchHit(

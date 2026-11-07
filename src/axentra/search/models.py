@@ -23,6 +23,10 @@ MAX_QUERY_CHARS = 500
 MAX_PREFIX_TERMS = 8
 MATCH_MODES = ("words", "prefix")
 MAX_KINDS = 20
+#: Most documents in one ``upsert_many`` (``POST .../search/documents/batch``).
+MAX_BATCH_DOCUMENTS = 100
+#: Largest ``metadata`` containment filter of a query (bytes of JSON).
+MAX_METADATA_FILTER_BYTES = 2000
 
 #: Private-use characters that delimit highlighted words between PostgreSQL and Python. They are
 #: removed from indexed text, so only the highlighter produces them.
@@ -127,6 +131,8 @@ class SearchQuery:
     limit: int = 20
     offset: int = 0
     match: str = "words"
+    #: Only documents whose ``metadata`` contains this object (JSON containment, ``@>``).
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -205,7 +205,11 @@ class Axentra:
     def migration_runner(self) -> MigrationRunner:
         """A runner with Axentra's schema, registered product migrations and discovered sources
         (``database.extra_migrations`` and the ``axentra.migrations`` entry point group)."""
-        runner = MigrationRunner(_migration_url(self.settings))
+        runner = MigrationRunner(
+            _migration_url(self.settings),
+            lock_timeout_ms=self.settings.database.migration_lock_timeout_ms,
+            statement_timeout_ms=self.settings.database.migration_statement_timeout_ms,
+        )
         runner.register(self._extra_migrations)
         runner.register(
             discover_migrations(

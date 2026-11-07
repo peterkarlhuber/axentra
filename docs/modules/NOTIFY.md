@@ -54,8 +54,8 @@ development mailbox and delivery statistics. Package `axentra.notify`, HTTP rout
   Preferences (opt-outs) and idempotency keys apply as for e-mail. `read_at` marks it as read.
   Library: `ax.notify.list_inbox(principal, product_id, tenant_id=None, unread_only=False, limit,
   cursor)`, `unread_count(...)`, `mark_read(..., message_ids=None)` (all: the caller's own
-  messages only; `notify:preferences` in the tenant, users only). No HTTP routes yet: a host product
-  serves the inbox through its own API.
+  messages only; `notify:preferences` in the tenant, users only). The same operations are served
+  over HTTP under `/notify/inbox/me` (see the endpoint table).
 
 ## Library usage
 
@@ -91,7 +91,7 @@ All under `/v1/products/{product_id}`; all require authentication.
 | PATCH | `/notify/templates/{key}` | `notify:manage` | `Template`; `If-Match: <version>` -> 412 on mismatch |
 | DELETE | `/notify/templates/{key}` | `notify:manage` | 204; `If-Match` optional |
 | POST | `/notify/templates/{key}/preview` | `notify:manage` | `RenderedContent {locale, subject, text, html}`; body `{locale?, variables?}` overrides sample data |
-| POST | `/tenants/{tenant_id}/notify/send` | `notify:send` (tenant); `to.email` outside the tenant's members also `notify:send_external` (product) | 202 `Message` (200 + `Idempotent-Replayed: true` on replay); body `{template_key, to: {user_id} \| {email}, variables, locale?}`, header `Idempotency-Key`; `403` for system-only templates (`invitation`) and for external addresses without `notify:send_external` |
+| POST | `/tenants/{tenant_id}/notify/send` | `notify:send` (tenant); `to.email` outside the tenant's members also `notify:send_external` (product) | 202 `Message` (200 + `Idempotent-Replayed: true` on replay); body `{template_key, to: {user_id} \| {email}, variables, locale?}`, header `Idempotency-Key`; `403` for system-only templates (`invitation`) and for external addresses without `notify:send_external`; `429 rate_limited` beyond `notify.tenant_send_limit_per_hour` |
 | GET | `/notify/messages` | `notify:manage`; or `notify:send` with `tenant_id` | `Page[Message]`; filters `tenant_id, status, template_key, recipient, since`, `limit`, `cursor` |
 | GET | `/notify/messages/{id}` | `notify:manage`, or `notify:send` in the message's tenant | `Message` with `content {subject, text, html}` when available |
 | POST | `/notify/messages/{id}/retry` | same as GET | `Message` (only `failed` -> `queued`, attempts reset; else 409) |
@@ -99,6 +99,9 @@ All under `/v1/products/{product_id}`; all require authentication.
 | GET | `/notify/stats` | `notify:manage` | `DeliveryStats {provider, total{queued,sending,sent,failed,suppressed}, last_24h{...}, oldest_queued_at, attempts_24h}`; optional `tenant_id` |
 | GET | `/notify/preferences/me` | user related to the product; with `tenant_id`: `notify:preferences` there | `Preferences {opted_out, available_categories, locked_categories, version}` (+ `ETag`) |
 | PUT | `/notify/preferences/me` | as GET | `Preferences`; body `{opted_out: [...]}`, `If-Match` optional (`0` = not yet stored) |
+| GET | `/notify/inbox/me` | signed-in user related to the product; with `tenant_id`: `notify:preferences` there; an API key gets 403 | `Page[InboxEntry]`, newest first; `tenant_id`, `unread_only`, `limit`, `cursor` |
+| GET | `/notify/inbox/me/unread` | as GET `/inbox/me` | `{unread}` |
+| POST | `/notify/inbox/me/read` | as GET `/inbox/me` | `{marked}`; body `{message_ids?: [...]}` (at most 500; omitted: all unread ones in the scope). Ids of other users' messages change nothing; product-wide, messages of a suspended tenant are left unchanged |
 
 `Message`: `id, product_id, tenant_id, template_key, template_version, channel, category,
 recipient, recipient_user_id, locale, status, attempts, max_attempts, next_attempt_at (queued
@@ -184,7 +187,13 @@ The built-in invitation template is `sensitive`.
   tenant (`to.email` must be a member's address; `to.user_id` a member or product operator).
   Free-form addresses need the product permission `notify:send_external` (product owners and
   admins, API keys that hold it). The `403` is the same whether or not the address has an account.
-  There is no per-tenant send rate limit yet (docs/TODO.md).
+- **Per-tenant send limit.** `POST .../notify/send` (and `NotifyService.send`) accepts at most
+  `notify.tenant_send_limit_per_hour` (default 1000, `0` = off) messages per tenant in any rolling hour;
+  more are refused with `429 rate_limited` (problem members `limit`, `window_seconds`) and a
+  `Retry-After` that says when the oldest counted message leaves the window. The count is read from
+  the outbox under a per-tenant transaction lock, so it holds across API processes and concurrent
+  requests. Suppressed messages count (the caller asked for them); messages Axentra sends itself
+  (invitations, account emails) and idempotent replays do not.
 - Row-level security on all four tables (`axentra_scope_allows(product_id, tenant_id)`).
 
 ## Configuration (`[notify]`)
@@ -197,7 +206,7 @@ provider configuration complete, secrets resolvable; no network calls).
 
 ## Limitations / TODO
 
-- Email and the in-app inbox only; the inbox has no Axentra HTTP routes or Studio page yet; SMS/push adapters, implicit TLS (SMTPS/465), attachments and per-product sender
+- Email and the in-app inbox only; the inbox has no Axentra Studio page yet; SMS/push adapters, implicit TLS (SMTPS/465), attachments and per-product sender
   addresses do not exist yet.
 - No unsubscribe links/List-Unsubscribe header; opt-outs only through the preferences API, and only
   for addresses that belong to users.

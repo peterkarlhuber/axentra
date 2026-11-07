@@ -67,6 +67,41 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   longer lets a non-superuser owning role through in production. New `Settings.table_owner_allowed`. The
   compose files already use separate roles. The database pool is closed when the start-up role check fails.
 
+### Added (TODO abatement round 4, 2026-11-07; all `/v1` changes are additive)
+- Users without an email address over HTTP: `POST /v1/users/external`, `GET/POST /v1/users/{uid}/identities` and
+  `DELETE /v1/users/{uid}/identities?provider=&subject=` (platform admins; `409` with `reason: last_sign_in_method`
+  when the user would be left without a way to sign in; unlinking revokes the user's sessions).
+- Search: `POST .../search/documents/batch` (up to 100 documents, all or nothing), `DELETE .../search/documents/{kind}`
+  (one audit event `search.documents.delete_kind`) and a `metadata` JSON containment filter.
+- Search and record lists are bounded: `search.max_candidates` (10,000) caps the ranked candidates,
+  `search.statement_timeout_ms` (5,000) cancels a slow search with `422` and `reason: query_too_expensive`, and
+  migration `0014` adds time-sort indexes for records (`created_at`, `updated_at`).
+- The caller's inbox over HTTP: `GET .../notify/inbox/me`, `GET .../notify/inbox/me/unread` and
+  `POST .../notify/inbox/me/read` (users only; other users' ids change nothing).
+- `GET /v1/me?tenants=all|memberships|none`: `memberships` lists only the tenants the caller belongs to, `none` no
+  tenants (the default `all` is unchanged).
+- Migrations: `-- axentra:lock-timeout=` and `-- axentra:statement-timeout=` directives per migration, defaults
+  `database.migration_lock_timeout_ms` and `database.migration_statement_timeout_ms`, and `axentra migrate --dry-run`
+  (prints the SQL of the pending migrations, applies nothing).
+- `axentra remote`: administration over the HTTP API without database access (login, whoami, products, tenants, API
+  keys, users), with `AXENTRA_URL` and an API key file or a session token.
+- Python SDK: notify templates and previews, the caller's preferences and inbox, usage reservations, billing
+  checkout, permission declarations, the `users` and `product_invitations` resources, external identities, search
+  batches, and parsed event and job streams (`events.stream`, `jobs.stream`); `me.get(tenants=)`.
+- Image: dependencies installed from hash-pinned locks (`deploy/locks/`, `--require-hashes`, checked against
+  `deploy/constraints.txt` by `scripts/check_locks.py`), a CycloneDX SBOM in the image (`/opt/axentra/sbom.cdx.json`,
+  uploaded by CI); the compose stacks pin `postgres:16` by digest, and CI starts the single and multi stacks and
+  smoke-tests them (`scripts/compose_smoke.sh`).
+
+### Changed (TODO abatement round 4)
+- `POST .../notify/send` is limited per tenant: `notify.tenant_send_limit_per_hour` (default 1,000; `0` turns it
+  off) answers `429` with `Retry-After`; messages Axentra sends itself and idempotent replays do not count.
+- Heavy reads (search and record lists) have their own per-credential budget:
+  `security.heavy_rate_limit_per_minute` (default 120; `0` turns it off) answers `429` with `Retry-After`.
+- Login throttling windows use the database clock instead of the host clock.
+- The migration runner polls for the migration lock instead of blocking on it, so a waiting runner no longer
+  deadlocks with a `CREATE INDEX CONCURRENTLY` of the runner that holds the lock.
+
 ### Added (TODO abatement round 2, 2026-11-06; all `/v1` changes are additive)
 - Password reset and email verification by single-use email links: `POST /v1/auth/password-reset` (always `202`,
   the work runs after the response, so neither the answer nor its timing reveals whether the address exists),

@@ -378,6 +378,88 @@
         "title": "AuthInfo",
         "type": "object"
       },
+      "BatchDocument": {
+        "properties": {
+          "body": {
+            "default": "",
+            "description": "Plain text; the limit is search.max_body_chars",
+            "title": "Body",
+            "type": "string"
+          },
+          "kind": {
+            "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+            "title": "Kind",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Returned with hits (at most 16 KB); not searched",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "ref_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$",
+            "title": "Ref Id",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ref_id"
+        ],
+        "title": "BatchDocument",
+        "type": "object"
+      },
+      "BatchResult": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/SearchDocument"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "documents"
+        ],
+        "title": "BatchResult",
+        "type": "object"
+      },
+      "BatchUpsert": {
+        "properties": {
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/BatchDocument"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Documents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documents"
+        ],
+        "title": "BatchUpsert",
+        "type": "object"
+      },
       "CheckoutCreate": {
         "properties": {
           "cancel_url": {
@@ -501,6 +583,19 @@
           "last_updated_at"
         ],
         "title": "CollectionStats",
+        "type": "object"
+      },
+      "DeleteKindResult": {
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "DeleteKindResult",
         "type": "object"
       },
       "Delivery": {
@@ -1315,6 +1410,84 @@
         "title": "EventCreate",
         "type": "object"
       },
+      "ExternalIdentity": {
+        "description": "An external (OIDC) identity linked to a user: ``provider`` is the issuer, ``subject`` its\n``sub`` claim; ``email`` is the address the provider reported (empty when none, and kept for\nreference even when it was not verified).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "subject",
+          "email",
+          "created_at"
+        ],
+        "title": "ExternalIdentity",
+        "type": "object"
+      },
+      "ExternalUserCreate": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_verified": {
+            "default": false,
+            "description": "The email becomes the user's address only when true; otherwise the user has none",
+            "title": "Email Verified",
+            "type": "boolean"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The issuer (`oidc[].issuer`)",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The provider's `sub` claim",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "subject"
+        ],
+        "title": "ExternalUserCreate",
+        "type": "object"
+      },
       "FileInfo": {
         "description": "File metadata as returned by the API (the storage key stays internal).",
         "properties": {
@@ -1493,6 +1666,171 @@
           "checks"
         ],
         "title": "Health",
+        "type": "object"
+      },
+      "IdentityLink": {
+        "properties": {
+          "provider": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "subject"
+        ],
+        "title": "IdentityLink",
+        "type": "object"
+      },
+      "InboxEntry": {
+        "description": "One in-app notification of the current user (channel ``inbox``).",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "content_state": {
+            "enum": [
+              "available",
+              "redacted",
+              "purged",
+              "none"
+            ],
+            "title": "Content State",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "product_id": {
+            "title": "Product Id",
+            "type": "string"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "template_key": {
+            "title": "Template Key",
+            "type": "string"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "id",
+          "product_id",
+          "tenant_id",
+          "template_key",
+          "category",
+          "created_at",
+          "read_at",
+          "subject",
+          "text",
+          "content_state"
+        ],
+        "title": "InboxEntry",
+        "type": "object"
+      },
+      "InboxMarked": {
+        "properties": {
+          "marked": {
+            "title": "Marked",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "marked"
+        ],
+        "title": "InboxMarked",
+        "type": "object"
+      },
+      "InboxRead": {
+        "properties": {
+          "message_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inbox messages to mark as read; omitted: all unread ones",
+            "title": "Message Ids"
+          }
+        },
+        "title": "InboxRead",
+        "type": "object"
+      },
+      "InboxUnread": {
+        "properties": {
+          "unread": {
+            "title": "Unread",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread"
+        ],
+        "title": "InboxUnread",
         "type": "object"
       },
       "Invitation": {
@@ -3298,6 +3636,33 @@
           "items"
         ],
         "title": "Page[FileInfo]",
+        "type": "object"
+      },
+      "Page_InboxEntry_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InboxEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "Page[InboxEntry]",
         "type": "object"
       },
       "Page_Job_": {
@@ -9259,6 +9624,25 @@
     "/v1/me": {
       "get": {
         "operationId": "get_me_v1_me_get",
+        "parameters": [
+          {
+            "description": "Which tenants each product lists: `all` (default) every tenant the caller may read, which for product operators and platform roles is every tenant of the product; `memberships` only the tenants where the caller holds a tenant role (an API key: its tenant); `none` no tenants (product-level access only). The product entries are the same in every mode.",
+            "in": "query",
+            "name": "tenants",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Which tenants each product lists: `all` (default) every tenant the caller may read, which for product operators and platform roles is every tenant of the product; `memberships` only the tenants where the caller holds a tenant role (an API key: its tenant); `none` no tenants (product-level access only). The product entries are the same in every mode.",
+              "enum": [
+                "all",
+                "memberships",
+                "none"
+              ],
+              "title": "Tenants",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9269,6 +9653,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
           },
           "default": {
             "content": {
@@ -11972,6 +12366,275 @@
         "summary": "Change Member",
         "tags": [
           "products"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/notify/inbox/me": {
+      "get": {
+        "description": "Messages of inbox templates addressed to the signed-in user (users only; an API key gets\n`403`). In a tenant this needs `notify:preferences` there; product-wide any relation to the\nproduct.",
+        "operationId": "my_inbox_v1_products__product_id__notify_inbox_me_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this tenant; omitted: the whole product",
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only this tenant; omitted: the whole product",
+              "title": "Tenant Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unread_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Unread Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Page size (1-200, default 50)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 200,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size (1-200, default 50)",
+              "title": "Limit"
+            }
+          },
+          {
+            "description": "Opaque cursor from a previous page's next_cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page's next_cursor",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_InboxEntry_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "My in-app notifications (newest first)",
+        "tags": [
+          "notify"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/notify/inbox/me/read": {
+      "post": {
+        "description": "Marks the given messages (or all unread ones) of the signed-in user; ids of other users'\nmessages change nothing. Returns how many changed.",
+        "operationId": "my_inbox_read_v1_products__product_id__notify_inbox_me_read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxRead"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMarked"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Mark my notifications as read",
+        "tags": [
+          "notify"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/notify/inbox/me/unread": {
+      "get": {
+        "operationId": "my_inbox_unread_v1_products__product_id__notify_inbox_me_unread_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxUnread"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "How many of my notifications are unread",
+        "tags": [
+          "notify"
         ]
       }
     },
@@ -17291,6 +17954,25 @@
             }
           },
           {
+            "description": "JSON object; only documents whose metadata contains it, e.g. {\"status\":\"open\"}",
+            "in": "query",
+            "name": "metadata",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JSON object; only documents whose metadata contains it, e.g. {\"status\":\"open\"}",
+              "title": "Metadata"
+            }
+          },
+          {
             "description": "Page size (1-200, default 50)",
             "in": "query",
             "name": "limit",
@@ -17362,6 +18044,152 @@
           }
         },
         "summary": "Full-text search in the tenant's index (ranked, highlighted)",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/batch": {
+      "post": {
+        "description": "Each document is created or replaced by kind and ref_id, as with `PUT .../documents/{kind}/{ref_id}`;\na (kind, ref_id) may appear once. `search:index` in the tenant.",
+        "operationId": "upsert_batch_v1_products__product_id__tenants__tenant_id__search_documents_batch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchUpsert"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Index up to 100 documents in one transaction (all or nothing)",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}": {
+      "delete": {
+        "description": "`search:index` in the tenant; one audit event `search.documents.delete_kind` with the count.",
+        "operationId": "delete_kind_v1_products__product_id__tenants__tenant_id__search_documents__kind__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "product_id",
+            "required": true,
+            "schema": {
+              "title": "Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "tenant_id",
+            "required": true,
+            "schema": {
+              "title": "Tenant Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document kind, e.g. `invoice`",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "description": "Document kind, e.g. `invoice`",
+              "pattern": "^[a-z][a-z0-9_.-]{0,62}$",
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteKindResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Remove every document of a kind from the tenant's index",
         "tags": [
           "search"
         ]
@@ -20391,6 +21219,58 @@
         ]
       }
     },
+    "/v1/users/external": {
+      "post": {
+        "description": "For migrations and imports: the user signs in through the identity provider. `409` when the\nidentity is already linked or a verified email belongs to another user.",
+        "operationId": "create_external_user_v1_users_external_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalUserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Create a user with an external identity, with or without an email address (platform admins)",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/v1/users/{user_id}": {
       "get": {
         "operationId": "get_user_v1_users__user_id__get",
@@ -20498,6 +21378,196 @@
           }
         },
         "summary": "Enable/disable a user or set the platform role",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{user_id}/identities": {
+      "delete": {
+        "description": "`409` (`reason` `last_sign_in_method`) when it is the user's only way to sign in: disable\nthe user instead. `revoked` counts the user's sessions that were ended.",
+        "operationId": "unlink_identity_v1_users__user_id__identities_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Subject",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Unlink an external identity from a user and revoke the user's sessions (platform admins)",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "operationId": "list_identities_v1_users__user_id__identities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalIdentity"
+                  },
+                  "title": "Response List Identities V1 Users  User Id  Identities Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "External identities linked to a user (users:manage)",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "`409` when the identity is already linked (to this or another user).",
+        "operationId": "link_identity_v1_users__user_id__identities_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIdentity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Link an external identity to a user (platform admins)",
         "tags": [
           "users"
         ]

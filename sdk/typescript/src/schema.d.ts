@@ -918,6 +918,66 @@ export interface paths {
         patch: operations["change_member_v1_products__product_id__members__user_id__patch"];
         trace?: never;
     };
+    "/v1/products/{product_id}/notify/inbox/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My in-app notifications (newest first)
+         * @description Messages of inbox templates addressed to the signed-in user (users only; an API key gets
+         *     `403`). In a tenant this needs `notify:preferences` there; product-wide any relation to the
+         *     product.
+         */
+        get: operations["my_inbox_v1_products__product_id__notify_inbox_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/notify/inbox/me/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark my notifications as read
+         * @description Marks the given messages (or all unread ones) of the signed-in user; ids of other users'
+         *     messages change nothing. Returns how many changed.
+         */
+        post: operations["my_inbox_read_v1_products__product_id__notify_inbox_me_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/notify/inbox/me/unread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How many of my notifications are unread */
+        get: operations["my_inbox_unread_v1_products__product_id__notify_inbox_me_unread_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/notify/mailbox": {
         parameters: {
             query?: never;
@@ -1690,6 +1750,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove every document of a kind from the tenant's index
+         * @description `search:index` in the tenant; one audit event `search.documents.delete_kind` with the count.
+         */
+        delete: operations["delete_kind_v1_products__product_id__tenants__tenant_id__search_documents__kind__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/{kind}/{ref_id}": {
         parameters: {
             query?: never;
@@ -1704,6 +1784,27 @@ export interface paths {
         post?: never;
         /** Remove a document from the index */
         delete: operations["delete_document_v1_products__product_id__tenants__tenant_id__search_documents__kind___ref_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/products/{product_id}/tenants/{tenant_id}/search/documents/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Index up to 100 documents in one transaction (all or nothing)
+         * @description Each document is created or replaced by kind and ref_id, as with `PUT .../documents/{kind}/{ref_id}`;
+         *     a (kind, ref_id) may appear once. `search:index` in the tenant.
+         */
+        post: operations["upsert_batch_v1_products__product_id__tenants__tenant_id__search_documents_batch_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2183,6 +2284,32 @@ export interface paths {
         patch: operations["update_user_v1_users__user_id__patch"];
         trace?: never;
     };
+    "/v1/users/{user_id}/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** External identities linked to a user (users:manage) */
+        get: operations["list_identities_v1_users__user_id__identities_get"];
+        put?: never;
+        /**
+         * Link an external identity to a user (platform admins)
+         * @description `409` when the identity is already linked (to this or another user).
+         */
+        post: operations["link_identity_v1_users__user_id__identities_post"];
+        /**
+         * Unlink an external identity from a user and revoke the user's sessions (platform admins)
+         * @description `409` (`reason` `last_sign_in_method`) when it is the user's only way to sign in: disable
+         *     the user instead. `revoked` counts the user's sessions that were ended.
+         */
+        delete: operations["unlink_identity_v1_users__user_id__identities_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{user_id}/memberships": {
         parameters: {
             query?: never;
@@ -2233,6 +2360,27 @@ export interface paths {
         put?: never;
         /** Revoke all sessions of a user */
         post: operations["revoke_user_sessions_v1_users__user_id__sessions_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/external": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a user with an external identity, with or without an email address (platform admins)
+         * @description For migrations and imports: the user signs in through the identity provider. `409` when the
+         *     identity is already linked or a verified email belongs to another user.
+         */
+        post: operations["create_external_user_v1_users_external_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2393,6 +2541,45 @@ export interface components {
              */
             limit: number | string | null;
         };
+        /** BatchDocument */
+        BatchDocument: {
+            /**
+             * Body
+             * @description Plain text; the limit is search.max_body_chars
+             * @default
+             */
+            body?: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Metadata
+             * @description Returned with hits (at most 16 KB); not searched
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Ref Id */
+            ref_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title?: string;
+        };
+        /** BatchResult */
+        BatchResult: {
+            /** Created */
+            created: number;
+            /** Documents */
+            documents: components["schemas"]["SearchDocument"][];
+            /** Updated */
+            updated: number;
+        };
+        /** BatchUpsert */
+        BatchUpsert: {
+            /** Documents */
+            documents: components["schemas"]["BatchDocument"][];
+        };
         /** CheckoutCreate */
         CheckoutCreate: {
             /** Cancel Url */
@@ -2429,6 +2616,11 @@ export interface components {
             records: number;
             /** Tenants */
             tenants: number;
+        };
+        /** DeleteKindResult */
+        DeleteKindResult: {
+            /** Deleted */
+            deleted: number;
         };
         /** Delivery */
         Delivery: {
@@ -2724,6 +2916,51 @@ export interface components {
             type: string;
         };
         /**
+         * ExternalIdentity
+         * @description An external (OIDC) identity linked to a user: ``provider`` is the issuer, ``subject`` its
+         *     ``sub`` claim; ``email`` is the address the provider reported (empty when none, and kept for
+         *     reference even when it was not verified).
+         */
+        ExternalIdentity: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+            /** Provider */
+            provider: string;
+            /** Subject */
+            subject: string;
+        };
+        /** ExternalUserCreate */
+        ExternalUserCreate: {
+            /** Email */
+            email?: string | null;
+            /**
+             * Email Verified
+             * @description The email becomes the user's address only when true; otherwise the user has none
+             * @default false
+             */
+            email_verified?: boolean;
+            /**
+             * Name
+             * @default
+             */
+            name?: string;
+            /**
+             * Provider
+             * @description The issuer (`oidc[].issuer`)
+             */
+            provider: string;
+            /**
+             * Subject
+             * @description The provider's `sub` claim
+             */
+            subject: string;
+        };
+        /**
          * FileInfo
          * @description File metadata as returned by the API (the storage key stays internal).
          */
@@ -2795,6 +3032,63 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable";
+        };
+        /** IdentityLink */
+        IdentityLink: {
+            /** Provider */
+            provider: string;
+            /** Subject */
+            subject: string;
+        };
+        /**
+         * InboxEntry
+         * @description One in-app notification of the current user (channel ``inbox``).
+         */
+        InboxEntry: {
+            /** Category */
+            category: string;
+            /**
+             * Content State
+             * @enum {string}
+             */
+            content_state: "available" | "redacted" | "purged" | "none";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Product Id */
+            product_id: string;
+            /** Read At */
+            read_at: string | null;
+            /** Subject */
+            subject: string | null;
+            /** Template Key */
+            template_key: string;
+            /** Tenant Id */
+            tenant_id: string | null;
+            /** Text */
+            text: string | null;
+        };
+        /** InboxMarked */
+        InboxMarked: {
+            /** Marked */
+            marked: number;
+        };
+        /** InboxRead */
+        InboxRead: {
+            /**
+             * Message Ids
+             * @description Inbox messages to mark as read; omitted: all unread ones
+             */
+            message_ids?: string[] | null;
+        };
+        /** InboxUnread */
+        InboxUnread: {
+            /** Unread */
+            unread: number;
         };
         /** Invitation */
         Invitation: {
@@ -3444,6 +3738,13 @@ export interface components {
         Page_FileInfo_: {
             /** Items */
             items: components["schemas"]["FileInfo"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** Page[InboxEntry] */
+        Page_InboxEntry_: {
+            /** Items */
+            items: components["schemas"]["InboxEntry"][];
             /** Next Cursor */
             next_cursor?: string | null;
         };
@@ -6015,7 +6316,10 @@ export interface operations {
     };
     get_me_v1_me_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which tenants each product lists: `all` (default) every tenant the caller may read, which for product operators and platform roles is every tenant of the product; `memberships` only the tenants where the caller holds a tenant role (an API key: its tenant); `none` no tenants (product-level access only). The product entries are the same in every mode. */
+                tenants?: "all" | "memberships" | "none";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6029,6 +6333,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Error: problem details (RFC 9457) */
@@ -7727,6 +8040,142 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductMember"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    my_inbox_v1_products__product_id__notify_inbox_me_get: {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from a previous page's next_cursor */
+                cursor?: string | null;
+                /** @description Page size (1-200, default 50) */
+                limit?: number | null;
+                /** @description Only this tenant; omitted: the whole product */
+                tenant_id?: string | null;
+                unread_only?: boolean;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_InboxEntry_"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    my_inbox_read_v1_products__product_id__notify_inbox_me_read_post: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InboxRead"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMarked"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    my_inbox_unread_v1_products__product_id__notify_inbox_me_unread_get: {
+        parameters: {
+            query?: {
+                tenant_id?: string | null;
+            };
+            header?: never;
+            path: {
+                product_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxUnread"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
@@ -10737,6 +11186,8 @@ export interface operations {
                 limit?: number | null;
                 /** @description `words`: web search syntax. `prefix` (search as you type): every term must match, and terms of two or more characters also match words that start with them */
                 match?: "words" | "prefix";
+                /** @description JSON object; only documents whose metadata contains it, e.g. {"status":"open"} */
+                metadata?: string | null;
                 /** @description Web search syntax: words (all must match), "quoted phrase", or, -excluded */
                 q: string;
             };
@@ -10756,6 +11207,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_SearchHit_"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    delete_kind_v1_products__product_id__tenants__tenant_id__search_documents__kind__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Document kind, e.g. `invoice` */
+                kind: string;
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeleteKindResult"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
@@ -10903,6 +11397,51 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    upsert_batch_v1_products__product_id__tenants__tenant_id__search_documents_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                product_id: string;
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchUpsert"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchResult"];
+                };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */
             422: {
@@ -12521,6 +13060,133 @@ export interface operations {
             };
         };
     };
+    list_identities_v1_users__user_id__identities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalIdentity"][];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    link_identity_v1_users__user_id__identities_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityLink"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalIdentity"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    unlink_identity_v1_users__user_id__identities_delete: {
+        parameters: {
+            query: {
+                provider: string;
+                subject: string;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokeResult"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     user_memberships_v1_users__user_id__memberships_get: {
         parameters: {
             query?: never;
@@ -12619,6 +13285,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RevokeResult"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_external_user_v1_users_external_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalUserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

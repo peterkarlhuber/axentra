@@ -77,6 +77,8 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `migration_url_ref` | `AXENTRA__DATABASE__MIGRATION_URL_REF` | none | Secret reference for the migration URL; overrides `migration_url` |
 | `extra_migrations` | `AXENTRA__DATABASE__EXTRA_MIGRATIONS` | `[]` | Product migration sources for `axentra migrate`: `"package.module:attribute"` (a list of `Migration` or a callable returning one) |
 | `migration_entry_points` | `AXENTRA__DATABASE__MIGRATION_ENTRY_POINTS` | `true` | Also apply migrations that installed packages publish in the `axentra.migrations` entry point group |
+| `migration_lock_timeout_ms` | `AXENTRA__DATABASE__MIGRATION_LOCK_TIMEOUT_MS` | `0` (off) | `lock_timeout` for every migration; a migration that waits longer for a lock fails unrecorded (run `axentra migrate` again). A file's `-- axentra:lock-timeout=<duration>` header wins (see architecture/DATA.md) |
+| `migration_statement_timeout_ms` | `AXENTRA__DATABASE__MIGRATION_STATEMENT_TIMEOUT_MS` | `0` (off) | `statement_timeout` for every migration; a file's `-- axentra:statement-timeout=<duration>` header wins |
 | `pool_min` | `AXENTRA__DATABASE__POOL_MIN` | `1` | Minimum pooled connections per process |
 | `pool_max` | `AXENTRA__DATABASE__POOL_MAX` | `10` | Maximum pooled connections per process |
 | `statement_timeout_ms` | `AXENTRA__DATABASE__STATEMENT_TIMEOUT_MS` | `30000` | `statement_timeout` per connection (0 = none) |
@@ -106,6 +108,7 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); see `rate_limit_store` |
 | `rate_limit_ip_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_IP_PER_MINUTE` | none (off) | Requests per minute per client IP, whatever the credential |
 | `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size (memory store only) |
+| `heavy_rate_limit_per_minute` | `AXENTRA__SECURITY__HEAVY_RATE_LIMIT_PER_MINUTE` | `120` | Expensive reads (`GET .../search` queries, `GET .../records/{collection}` lists) per minute per credential, a separate budget that is on by default (`0` = off; `429 rate_limited` with `Retry-After`). Counted in `rate_limit_store`; the bucket holds one minute's budget |
 | `rate_limit_store` | `AXENTRA__SECURITY__RATE_LIMIT_STORE` | `memory` | `memory` (per process) or `database` (one-minute windows in PostgreSQL shared by all API processes; one write per request and limit) |
 | `api_docs` | `AXENTRA__SECURITY__API_DOCS` | `disabled` in production, else `public` | `/v1/docs` and `/v1/openapi.json`: `public`, `authenticated` or `disabled` |
 
@@ -165,6 +168,7 @@ These sections are accepted and validated now; they take effect when the corresp
 | `smtp_starttls` | `true` |
 | `invitation_accept_url` | none: `<security.public_url>/accept-invitation`. Link in invitation emails and in `accept_url` of `POST .../invitations`, used when the product sets no own `settings.invitation_accept_url`. Absolute `http(s)` URL (`https` in production); `{token}` is replaced by the token, otherwise `?token=` is appended; a `#fragment` only together with `{token}`. Set it when the frontend that accepts invitations is not on the API origin, e.g. `https://studio.example.com/invitations/accept` (env `AXENTRA__NOTIFY__INVITATION_ACCEPT_URL`; see modules/NOTIFY.md "Invitation hook") |
 | `account_url` | none: the origin of `invitation_accept_url`, else `security.public_url`. Base URL of the frontend serving `/reset-password` and `/verify-email` (Studio does), used in password reset and email verification emails. Absolute `http(s)` URL without query or fragment (`https` in production); a path is kept (env `AXENTRA__NOTIFY__ACCOUNT_URL`; see modules/IDENTITY.md) |
+| `tenant_send_limit_per_hour` | `1000` (0-1000000; messages one tenant may send through `POST .../notify/send` in any rolling hour, `429 rate_limited` with `Retry-After` beyond it; counted in the database, so it holds across processes; system sends such as invitations do not count; `0` = off; see modules/NOTIFY.md) |
 
 `[billing]`
 
@@ -194,6 +198,8 @@ These sections are accepted and validated now; they take effect when the corresp
 | `language` | `"simple"` (PostgreSQL text search configuration, e.g. `english`, `german`; re-index after a change) |
 | `max_body_chars` | `100000` (1000-1000000) |
 | `max_offset` | `1000` (deepest result position reachable by paging) |
+| `max_candidates` | `10000` (100-10000000; most matching documents ranked per query) |
+| `statement_timeout_ms` | `5000` (100-600000; a slower query is cancelled: `422`, `reason` `query_too_expensive`) |
 | `audit_index_writes` | `true` |
 
 ## Effective configuration

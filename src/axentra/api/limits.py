@@ -11,6 +11,11 @@ default). A request is charged to its credential (a hash of the bearer token, AP
 cookie; the client IP for anonymous requests) and, independently, to its client IP. An exhausted
 budget answers 429 with ``Retry-After``. Health and metrics endpoints are never limited.
 
+Heavy reads (``security.heavy_rate_limit_per_minute``, default 120, ``0`` = off) get a second,
+separate budget per credential that is ON by default: full-text search queries and record lists
+(:data:`HEAVY_READ_PATHS`) can cost seconds of database time on large tenants and are reachable with
+read permissions alone. It is counted in the same store as the general limits.
+
 ``security.rate_limit_store`` picks where the budgets live:
 
 - ``"memory"`` (default): token buckets **per process** (:class:`TokenBuckets`). No database round
@@ -50,6 +55,11 @@ logger = logging.getLogger(__name__)
 F = TypeVar("F", bound=Callable[..., Any])
 _OWN_LIMIT_ATTR = "__axentra_own_body_limit__"
 UNLIMITED_PATHS = ("/v1/health/", "/metrics")
+#: ``GET`` endpoints charged to the heavy-read budget (``security.heavy_rate_limit_per_minute``).
+HEAVY_READ_PATHS = (
+    re.compile(r"^/v1/products/[^/]+/tenants/[^/]+/search/?$"),
+    re.compile(r"^/v1/products/[^/]+/tenants/[^/]+/records/[^/]+/?$"),
+)
 
 
 def own_body_limit(fn: F) -> F:
@@ -194,19 +204,25 @@ class RateLimitMiddleware:
         per_ip: Budgets | None,
         client_ip: Callable[[Request], str | None],
         session_cookie: Callable[[], str],
+        only: tuple[re.Pattern[str], ...] | None = None,
     ) -> None:
+        """``only``: limit just ``GET`` requests to these paths (the heavy-read budget); ``None``: all."""
         self.app = app
         self.per_credential = per_credential
         self.per_ip = per_ip
         self.client_ip = client_ip
         self.session_cookie = session_cookie
+        self.only = only
+
+    def _applies(self, scope: Scope) -> bool:
+        if scope["type"] != "http" or scope["method"] == "OPTIONS":
+            return False
+        if self.only is not None:
+            return scope["method"] == "GET" and any(p.match(scope["path"]) for p in self.only)
+        return not scope["path"].startswith(UNLIMITED_PATHS)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope["type"] != "http"
-            or scope["path"].startswith(UNLIMITED_PATHS)
-            or scope["method"] == "OPTIONS"
-        ):
+        if not self._applies(scope):
             await self.app(scope, receive, send)
             return
         request = Request(scope)

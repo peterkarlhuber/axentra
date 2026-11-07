@@ -56,13 +56,13 @@ email verification), me, products,
 tenants, operators (product members), members (tenant members), invitations, roles, API keys,
 records (CRUD + iterator), files (multipart upload, streamed download), usage (record and batch record with
 idempotency key, events, summary, quotas, meters), billing (plans, subscription, entitlements),
-notify (send, messages), audit, events (publish with idempotency key, list, iterator), jobs
-(enqueue, list, retry, cancel, stats, the kinds the caller may enqueue), schedules (interval or
-cron), webhooks (endpoints, secret rotation, test, deliveries, redeliver) and search (index,
-query with kind filter, kinds, remove). Not typed yet: notify templates and preferences, usage
-reservations, billing checkout and the users admin; the event and job streams (server-sent
-events) are reachable through `client.stream(...)`. Anything else: `client.request(method, path, ...)` /
-`client.request_json(...)`, which apply the same authentication and error mapping.
+notify (send, messages, templates and previews, the caller's preferences and inbox), audit, events (publish
+with idempotency key, list, iterator, live stream), jobs (enqueue, list, retry, cancel, stats, the
+kinds the caller may enqueue, live stream), schedules (interval or cron), webhooks (endpoints, secret
+rotation, test, deliveries, redeliver), search (index, batch index, query with kind and metadata
+filters, kinds, remove, remove a kind), usage reservations, billing checkout, the users admin with
+external identities, product invitations and permission declarations. Anything else:
+`client.request(method, path, ...)` / `client.request_json(...)`, which apply the same authentication and error mapping.
 
 ## Development
 

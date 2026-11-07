@@ -82,6 +82,24 @@ also visible in tenant scope of the same product (see
   is recorded after its last statement. It cannot be rolled back halfway: make every statement
   re-runnable (`IF NOT EXISTS`, `CREATE OR REPLACE`). Statements are split at top-level
   semicolons (quotes, dollar quotes and comments are respected).
+  An interrupted `CREATE INDEX CONCURRENTLY` leaves an `INVALID` index that `IF NOT EXISTS` would
+  keep: find it with `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it
+  (`DROP INDEX CONCURRENTLY ...`) and run `axentra migrate` again. Axentra's own `0014` (time-sort
+  indexes of `axentra_records`) is such a migration. Runners wait for the migration lock by
+  polling (`pg_try_advisory_lock`), so a waiting runner holds no snapshot that a concurrent index
+  build of the lock holder would wait for.
+- **Timeouts.** `-- axentra:lock-timeout=<duration>` and `-- axentra:statement-timeout=<duration>`
+  in a file's leading comment lines (a PostgreSQL duration: `250ms`, `5s`, `2min`) set
+  `lock_timeout` / `statement_timeout` for that migration only; `database.migration_lock_timeout_ms`
+  and `database.migration_statement_timeout_ms` (default `0`, off) are the defaults for all. A
+  migration that hits the lock timeout (for example an `ALTER TABLE` behind a long-running
+  transaction) fails without being recorded instead of queueing every query of the table behind
+  its lock request; run `axentra migrate` again later. An invalid duration is refused when the
+  migration is registered.
+- **Dry run.** `axentra migrate --dry-run` (`MigrationRunner.plan()` + `render_plan()`) prints the
+  SQL of the pending migrations in apply order, with their timeouts and `BEGIN`/`COMMIT` for
+  transactional ones, after the same refusals as `migrate` (changed or unknown applied
+  migrations; `--allow-newer` applies here too). Nothing is applied and no lock is taken.
 - Backups: `pg_dump` must run as a superuser or a dedicated backup role with `BYPASSRLS`
   (`pg_read_all_data`); forced RLS makes dumps as the owner or the application role fail
   ([BACKUP_RESTORE](../operations/BACKUP_RESTORE.md#database-backup)).

@@ -1,6 +1,6 @@
 # Weekly, grouped update pull requests with a small limit, like the Nodestro repositories. Every action in the
 # workflows is pinned by commit SHA (the version is the trailing comment); Dependabot keeps those pins current, and
-# the digests of the Python base image in the Dockerfiles.
+# the digests of the Python base image in the Dockerfiles and of the compose stacks' postgres image.
 # pip covers pyproject.toml, the image pins in deploy/constraints.txt and the Python SDK. The root entry
 # also finds deploy/constraints.txt (PR #35 updated it "in /"), so /deploy is not listed separately: with
 # both, every pin change came twice (audit round 3, AX3-06: #35 and #36 were the same change).
@@ -39,6 +39,15 @@ updates:
 
   - package-ecosystem: docker
     directories: [/, /examples/taskboard]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 2
+
+  # The postgres service image of the compose stacks (pinned by digest, checked in CI).
+  - package-ecosystem: docker-compose
+    directory: /deploy/compose
     schedule:
       interval: weekly
     cooldown:

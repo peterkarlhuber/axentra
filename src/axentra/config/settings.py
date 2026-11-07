@@ -67,6 +67,14 @@ class DatabaseSettings(_Section):
     """Optional separate (owner) URL for migrations; defaults to ``url``."""
     migration_url_ref: str | None = None
     """Reference to a secret holding the migration URL (``env:`` / ``file:``); overrides ``migration_url``."""
+    migration_lock_timeout_ms: int = Field(0, ge=0, le=3_600_000)
+    """``lock_timeout`` for every migration (``0``: off, the server's setting). A migration that waits
+    longer for a lock fails without being recorded, instead of queueing every query of the table
+    behind its lock request; run ``axentra migrate`` again later. A file's own
+    ``-- axentra:lock-timeout=<duration>`` header wins."""
+    migration_statement_timeout_ms: int = Field(0, ge=0, le=86_400_000)
+    """``statement_timeout`` for every migration (``0``: off); a file's own
+    ``-- axentra:statement-timeout=<duration>`` header wins."""
     extra_migrations: list[str] = Field(default_factory=list)
     """Product migration sources applied by ``axentra migrate``: ``package.module:attribute``
     (a list of ``Migration`` or a callable returning one)."""
@@ -135,6 +143,10 @@ class SecuritySettings(_Section):
     """Requests per minute per client IP regardless of credentials (``None``: off)."""
     rate_limit_burst: int | None = Field(None, ge=1)
     """Bucket size (burst); defaults to the per-minute budget. Only for ``rate_limit_store = "memory"``."""
+    heavy_rate_limit_per_minute: int = Field(120, ge=0)
+    """Expensive reads (full-text search queries, record lists) per minute per credential, counted
+    separately from ``rate_limit_per_minute`` and ON by default; ``0`` turns it off. Counted in
+    ``rate_limit_store`` like the general limit (the burst is one minute's budget)."""
     rate_limit_store: Literal["memory", "database"] = "memory"
     """Where the general rate limits are counted: ``memory`` (per process, no database write) or
     ``database`` (one-minute windows in PostgreSQL shared by all API processes; one write per
@@ -243,6 +255,11 @@ class NotifySettings(_Section):
     """Rendered subjects/bodies (and local mailbox entries) are erased after this many days."""
     message_retention_days: int = Field(180, ge=1)
     """Finished messages (incl. recipient addresses) are deleted after this many days."""
+    tenant_send_limit_per_hour: int = Field(1000, ge=0, le=1_000_000)
+    """Messages one tenant may send through :meth:`NotifyService.send` (``POST .../notify/send``) in any
+    rolling hour; more are refused with ``429 rate_limited`` and ``Retry-After``. Counted in the database,
+    so the limit holds across API processes. System sends (invitations, account emails) neither count nor
+    are limited. ``0`` turns the limit off."""
     invitation_accept_url: str | None = None
     """Installation-wide link for invitation emails, used when a product has no own
     ``settings.invitation_accept_url``. ``{token}`` is replaced by the token, otherwise
@@ -369,6 +386,13 @@ class SearchSettings(_Section):
     """Longest document body accepted by the index (characters)."""
     max_offset: int = Field(1_000, ge=0, le=100_000)
     """Deepest result position reachable by paging (bounds the cost of deep pages)."""
+    max_candidates: int = Field(10_000, ge=100, le=10_000_000)
+    """Most matching documents ranked per query. A common term in a large tenant matches far more;
+    then only this many matches (in index order, not the best ones) are ranked, so the cost of a query
+    is bounded instead of growing with the tenant."""
+    statement_timeout_ms: int = Field(5_000, ge=100, le=600_000)
+    """Longest a search query may run in the database; a slower one is cancelled and answered with
+    ``422 validation_failed`` (``reason`` ``query_too_expensive``)."""
     audit_index_writes: bool = True
     """Write an audit event for every index upsert/delete (without document content)."""
 
