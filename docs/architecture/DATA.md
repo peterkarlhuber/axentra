@@ -82,6 +82,10 @@ also visible in tenant scope of the same product (see
   is recorded after its last statement. It cannot be rolled back halfway: make every statement
   re-runnable (`IF NOT EXISTS`, `CREATE OR REPLACE`). Statements are split at top-level
   semicolons (quotes, dollar quotes and comments are respected).
+  An interrupted `CREATE INDEX CONCURRENTLY` leaves an `INVALID` index that `IF NOT EXISTS` would
+  keep: find it with `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it
+  (`DROP INDEX CONCURRENTLY ...`) and run `axentra migrate` again. Axentra's own `0014` (time-sort
+  indexes of `axentra_records`) is such a migration.
 - Backups: `pg_dump` must run as a superuser or a dedicated backup role with `BYPASSRLS`
   (`pg_read_all_data`); forced RLS makes dumps as the owner or the application role fail
   ([BACKUP_RESTORE](../operations/BACKUP_RESTORE.md#database-backup)).

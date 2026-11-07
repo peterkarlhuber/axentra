@@ -21,7 +21,7 @@ from typing import Any, Protocol, runtime_checkable
 import psycopg
 from psycopg.types.json import Jsonb
 
-from axentra.core.errors import ConfigurationError, NotFound
+from axentra.core.errors import ConfigurationError, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.data.database import Database, DbScope, Row, Tx
 from axentra.search.models import (
@@ -39,6 +39,8 @@ from axentra.search.models import (
 #: Called inside the write transaction (PostgreSQL) or right after the external write (other
 #: adapters) with the stored document, e.g. to write the audit event.
 WriteHook = Callable[[Tx, SearchDocument], None]
+#: ``reason`` of the ``422`` for a search cancelled by ``search.statement_timeout_ms``.
+QUERY_TOO_EXPENSIVE = "query_too_expensive"
 
 
 @runtime_checkable
@@ -91,9 +93,18 @@ class PostgresSearchAdapter:
 
     name = "postgres"
 
-    def __init__(self, db: Database, *, language: str = "simple") -> None:
+    def __init__(
+        self,
+        db: Database,
+        *,
+        language: str = "simple",
+        max_candidates: int = 10_000,
+        statement_timeout_ms: int = 5_000,
+    ) -> None:
         self.db = db
         self.language = language
+        self.max_candidates = max_candidates
+        self.statement_timeout_ms = statement_timeout_ms
         self._checked = False
         self._lock = threading.Lock()
 
@@ -196,6 +207,7 @@ class PostgresSearchAdapter:
             "limit": query.limit + 1,
             "title_opts": _TITLE_OPTS,
             "body_opts": _BODY_OPTS,
+            "max_candidates": self.max_candidates,
         }
         kind_filter = " AND d.kind = ANY(%(kinds)s)" if query.kinds else ""
         if query.match == "prefix":
@@ -211,17 +223,22 @@ class PostgresSearchAdapter:
             )
         else:
             tsquery = "websearch_to_tsquery(%(lang)s::regconfig, %(q)s)"
-        # Rank and page first; ts_headline (expensive on long bodies) runs only for the page.
+        # Bound the work first: at most max_candidates matches (the GIN index finds them without
+        # reading every match) are ranked; then rank and page; ts_headline (expensive on long
+        # bodies) runs only for the page.
         sql = (
             f"WITH q AS (SELECT {tsquery} AS query),"
-            " page AS ("
+            " candidates AS ("
             "  SELECT d.id, d.kind, d.ref_id, d.title, d.body, d.metadata, d.updated_at, d.language,"
-            "         ts_rank(d.search_vector, q.query) AS rank"
+            "         d.search_vector"
             "  FROM axentra_search_documents d, q"
             "  WHERE d.product_id = %(p)s AND d.tenant_id = %(t)s AND numnode(q.query) > 0"
-            "    AND d.search_vector @@ q.query"
-            + kind_filter
-            + "  ORDER BY rank DESC, d.updated_at DESC, d.id"
+            "    AND d.search_vector @@ q.query" + kind_filter + "  LIMIT %(max_candidates)s),"
+            " page AS ("
+            "  SELECT c.id, c.kind, c.ref_id, c.title, c.body, c.metadata, c.updated_at, c.language,"
+            "         ts_rank(c.search_vector, q.query) AS rank"
+            "  FROM candidates c, q"
+            "  ORDER BY rank DESC, c.updated_at DESC, c.id"
             "  OFFSET %(offset)s LIMIT %(limit)s)"
             " SELECT page.id, page.kind, page.ref_id, page.title, page.metadata, page.updated_at,"
             "        page.rank::float8 AS rank,"
@@ -229,8 +246,21 @@ class PostgresSearchAdapter:
             "        ts_headline(page.language, page.body, q.query, %(body_opts)s) AS body_highlight"
             " FROM page, q ORDER BY page.rank DESC, page.updated_at DESC, page.id"
         )
-        with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
-            rows = tx.all(sql, params)
+        try:
+            with self.db.transaction(DbScope.tenant(product_id, tenant_id), read_only=True) as tx:
+                # Transaction-local; inside a host transaction (Database.joined) the savepoint is
+                # released afterwards, so the previous value is put back explicitly.
+                previous = tx.scalar("SELECT current_setting('statement_timeout')")
+                tx.execute(
+                    "SELECT set_config('statement_timeout', %s, true)", (f"{self.statement_timeout_ms}ms",)
+                )
+                rows = tx.all(sql, params)
+                tx.execute("SELECT set_config('statement_timeout', %s, true)", (str(previous),))
+        except psycopg.errors.QueryCanceled:
+            raise ValidationFailed(
+                "the search took too long; use more specific terms or a kind filter",
+                extra={"reason": QUERY_TOO_EXPENSIVE},
+            ) from None
         more = len(rows) > query.limit
         hits = [
             SearchHit(

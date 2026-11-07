@@ -133,6 +133,12 @@ grant `search:index` through a custom role.
 - Input limits: title 1000 characters, body `search.max_body_chars` (default 100 000), metadata
   16 KB, query 500 characters, at most 20 kinds, page size at most 200, paging depth
   `search.max_offset`.
+- Cost bounds (reads need only `search:query`): a query ranks at most `search.max_candidates`
+  matching documents (default 10 000; a very common term in a larger tenant ranks only that many
+  matches, taken in index order, not the best ones), runs with `search.statement_timeout_ms`
+  (default 5 s; a cancelled query answers `422 validation_failed` with `reason`
+  `query_too_expensive`), and `GET .../search` is charged to the per-credential heavy-read budget
+  `security.heavy_rate_limit_per_minute` (default 120, `429 rate_limited` with `Retry-After`).
 
 ## Configuration (`[search]`)
 
@@ -141,6 +147,8 @@ grant `search:index` through a custom role.
 | `language` | `"simple"` | PostgreSQL text search configuration for indexing and queries |
 | `max_body_chars` | `100000` | Longest accepted body (1000..1000000) |
 | `max_offset` | `1000` | Deepest result position reachable by paging (0..100000) |
+| `max_candidates` | `10000` | Most matching documents ranked per query (100..10000000); beyond it, only that many matches in index order are ranked |
+| `statement_timeout_ms` | `5000` | Longest a query may run (100..600000); slower ones are cancelled with `422` (`reason` `query_too_expensive`) |
 | `audit_index_writes` | `true` | Audit every index upsert and delete |
 
 ## Limitations / TODO

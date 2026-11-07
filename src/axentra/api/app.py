@@ -105,6 +105,7 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
 
     from axentra.api.context import client_ip, session_cookie_name
     from axentra.api.limits import (
+        HEAVY_READ_PATHS,
         BodyLimitMiddleware,
         Budgets,
         DatabaseWindows,
@@ -126,7 +127,8 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
             return None
         if sec.rate_limit_store == "database":
             return DatabaseWindows(ax.db, per_minute, prefix=prefix)
-        return TokenBuckets(per_minute, sec.rate_limit_burst)
+        # The burst setting belongs to the general limit; the heavy-read bucket holds one minute's budget.
+        return TokenBuckets(per_minute, sec.rate_limit_burst if prefix == "req:" else None)
 
     if sec.rate_limit_per_minute or sec.rate_limit_ip_per_minute:
         app.add_middleware(
@@ -135,6 +137,15 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
             per_ip=budgets(sec.rate_limit_ip_per_minute, "req:"),
             client_ip=client_ip,
             session_cookie=lambda: session_cookie_name(ax),
+        )
+    if sec.heavy_rate_limit_per_minute:
+        app.add_middleware(
+            RateLimitMiddleware,
+            per_credential=budgets(sec.heavy_rate_limit_per_minute, "heavy:"),
+            per_ip=None,
+            client_ip=client_ip,
+            session_cookie=lambda: session_cookie_name(ax),
+            only=HEAVY_READ_PATHS,
         )
 
 

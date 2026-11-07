@@ -52,7 +52,12 @@ class SearchService:
         self.settings = settings.search
         self.authz = authz
         self.audit = audit
-        self.adapter: SearchAdapter = adapter or PostgresSearchAdapter(db, language=self.settings.language)
+        self.adapter: SearchAdapter = adapter or PostgresSearchAdapter(
+            db,
+            language=self.settings.language,
+            max_candidates=self.settings.max_candidates,
+            statement_timeout_ms=self.settings.statement_timeout_ms,
+        )
 
     def set_adapter(self, adapter: SearchAdapter) -> None:
         """Replace the default PostgreSQL adapter (e.g. with an external search engine)."""

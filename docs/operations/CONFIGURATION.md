@@ -106,6 +106,7 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `rate_limit_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_PER_MINUTE` | none (off) | Requests per minute per credential (per IP when anonymous); see `rate_limit_store` |
 | `rate_limit_ip_per_minute` | `AXENTRA__SECURITY__RATE_LIMIT_IP_PER_MINUTE` | none (off) | Requests per minute per client IP, whatever the credential |
 | `rate_limit_burst` | `AXENTRA__SECURITY__RATE_LIMIT_BURST` | = the per-minute budget | Token bucket size (memory store only) |
+| `heavy_rate_limit_per_minute` | `AXENTRA__SECURITY__HEAVY_RATE_LIMIT_PER_MINUTE` | `120` | Expensive reads (`GET .../search` queries, `GET .../records/{collection}` lists) per minute per credential, a separate budget that is on by default (`0` = off; `429 rate_limited` with `Retry-After`). Counted in `rate_limit_store`; the bucket holds one minute's budget |
 | `rate_limit_store` | `AXENTRA__SECURITY__RATE_LIMIT_STORE` | `memory` | `memory` (per process) or `database` (one-minute windows in PostgreSQL shared by all API processes; one write per request and limit) |
 | `api_docs` | `AXENTRA__SECURITY__API_DOCS` | `disabled` in production, else `public` | `/v1/docs` and `/v1/openapi.json`: `public`, `authenticated` or `disabled` |
 
@@ -195,6 +196,8 @@ These sections are accepted and validated now; they take effect when the corresp
 | `language` | `"simple"` (PostgreSQL text search configuration, e.g. `english`, `german`; re-index after a change) |
 | `max_body_chars` | `100000` (1000-1000000) |
 | `max_offset` | `1000` (deepest result position reachable by paging) |
+| `max_candidates` | `10000` (100-10000000; most matching documents ranked per query) |
+| `statement_timeout_ms` | `5000` (100-600000; a slower query is cancelled: `422`, `reason` `query_too_expensive`) |
 | `audit_index_writes` | `true` |
 
 ## Effective configuration

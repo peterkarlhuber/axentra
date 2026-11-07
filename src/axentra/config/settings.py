@@ -135,6 +135,10 @@ class SecuritySettings(_Section):
     """Requests per minute per client IP regardless of credentials (``None``: off)."""
     rate_limit_burst: int | None = Field(None, ge=1)
     """Bucket size (burst); defaults to the per-minute budget. Only for ``rate_limit_store = "memory"``."""
+    heavy_rate_limit_per_minute: int = Field(120, ge=0)
+    """Expensive reads (full-text search queries, record lists) per minute per credential, counted
+    separately from ``rate_limit_per_minute`` and ON by default; ``0`` turns it off. Counted in
+    ``rate_limit_store`` like the general limit (the burst is one minute's budget)."""
     rate_limit_store: Literal["memory", "database"] = "memory"
     """Where the general rate limits are counted: ``memory`` (per process, no database write) or
     ``database`` (one-minute windows in PostgreSQL shared by all API processes; one write per
@@ -371,6 +375,13 @@ class SearchSettings(_Section):
     """Longest document body accepted by the index (characters)."""
     max_offset: int = Field(1_000, ge=0, le=100_000)
     """Deepest result position reachable by paging (bounds the cost of deep pages)."""
+    max_candidates: int = Field(10_000, ge=100, le=10_000_000)
+    """Most matching documents ranked per query. A common term in a large tenant matches far more;
+    then only this many matches (in index order, not the best ones) are ranked, so the cost of a query
+    is bounded instead of growing with the tenant."""
+    statement_timeout_ms: int = Field(5_000, ge=100, le=600_000)
+    """Longest a search query may run in the database; a slower one is cancelled and answered with
+    ``422 validation_failed`` (``reason`` ``query_too_expensive``)."""
     audit_index_writes: bool = True
     """Write an audit event for every index upsert/delete (without document content)."""
 
