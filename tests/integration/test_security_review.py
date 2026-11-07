@@ -587,8 +587,9 @@ def test_I3_audit_lookup_is_not_an_existence_oracle(world: World) -> None:
 def test_I4_login_throttling_is_atomic(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
     # Pin the one-minute window: fixed windows allow up to twice the budget across a boundary
     # (documented in SECURITY_MODEL.md), which would make this test fail when it straddles one.
-    window = utcnow().replace(second=0, microsecond=0)
-    monkeypatch.setattr(world.ax.identity, "_window", lambda: window)
+    with world.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        window = tx.scalar("SELECT date_trunc('minute', now())")
+    monkeypatch.setattr(world.ax.identity, "_WINDOW", f"'{window.isoformat()}'::timestamptz")
     world.user("t@example.com")
     limit = world.ax.settings.security.login_rate_per_minute
     results: list[str] = []

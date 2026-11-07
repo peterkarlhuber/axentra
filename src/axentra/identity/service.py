@@ -404,8 +404,9 @@ class IdentityService:
 
     # -- throttling ------------------------------------------------------------------------------
 
-    def _window(self) -> datetime:
-        return utcnow().replace(second=0, microsecond=0)
+    #: The current one-minute throttling window, on the database clock (never the API host's), so
+    #: API hosts with skewed clocks share the same windows.
+    _WINDOW = "date_trunc('minute', now())"
 
     def hit(self, bucket: str, limit: int) -> None:
         """Count one attempt and refuse it when the bucket is over ``limit`` in this minute.
@@ -415,10 +416,11 @@ class IdentityService:
         successful login), so that only failures use up the budget."""
         with self.db.transaction(DbScope.platform()) as tx:
             hits = tx.scalar(
-                "INSERT INTO axentra_rate_limits (bucket, window_start, hits) VALUES (%s, %s, 1)"
+                "INSERT INTO axentra_rate_limits (bucket, window_start, hits)"
+                f" VALUES (%s, {self._WINDOW}, 1)"
                 " ON CONFLICT (bucket, window_start) DO UPDATE SET hits = axentra_rate_limits.hits + 1"
                 " RETURNING hits",
-                (bucket, self._window()),
+                (bucket,),
             )
             tx.execute("DELETE FROM axentra_rate_limits WHERE window_start < now() - interval '10 minutes'")
         if hits is not None and hits > limit:
@@ -428,16 +430,17 @@ class IdentityService:
         """Give back one attempt counted by :meth:`hit` in the current window."""
         with self.db.transaction(DbScope.platform()) as tx:
             tx.execute(
-                "UPDATE axentra_rate_limits SET hits = greatest(hits - 1, 0) WHERE bucket = %s AND window_start = %s",
-                (bucket, self._window()),
+                "UPDATE axentra_rate_limits SET hits = greatest(hits - 1, 0)"
+                f" WHERE bucket = %s AND window_start = {self._WINDOW}",
+                (bucket,),
             )
 
     def throttle(self, bucket: str, limit: int) -> None:
         """Check without counting (prefer :meth:`hit`; check-then-count is not atomic)."""
         with self.db.transaction(DbScope.platform(), read_only=True) as tx:
             hits = tx.scalar(
-                "SELECT hits FROM axentra_rate_limits WHERE bucket = %s AND window_start = %s",
-                (bucket, self._window()),
+                f"SELECT hits FROM axentra_rate_limits WHERE bucket = %s AND window_start = {self._WINDOW}",
+                (bucket,),
             )
         if hits is not None and hits >= limit:
             raise RateLimited("too many attempts; try again in a minute")
@@ -445,9 +448,10 @@ class IdentityService:
     def count_failure(self, bucket: str) -> None:
         with self.db.transaction(DbScope.platform()) as tx:
             tx.execute(
-                "INSERT INTO axentra_rate_limits (bucket, window_start, hits) VALUES (%s, %s, 1)"
+                "INSERT INTO axentra_rate_limits (bucket, window_start, hits)"
+                f" VALUES (%s, {self._WINDOW}, 1)"
                 " ON CONFLICT (bucket, window_start) DO UPDATE SET hits = axentra_rate_limits.hits + 1",
-                (bucket, self._window()),
+                (bucket,),
             )
             tx.execute("DELETE FROM axentra_rate_limits WHERE window_start < now() - interval '10 minutes'")
 
@@ -1160,3 +1164,50 @@ class IdentityService:
                 " ORDER BY created_at, id",
                 (user_id,),
             )
+
+    def unlink_identity(self, principal: Principal, user_id: str, *, provider: str, subject: str) -> int:
+        """Remove an external identity from a user (for corrections after migrations and imports).
+
+        Refuses an unknown user or identity (``404``) and the user's last way to sign in (no
+        password and no other identity, ``409`` with ``reason`` ``last_sign_in_method``): disable the
+        user instead. The user's sessions are revoked, since a session does not record which
+        identity started it; returns how many were revoked. Platform admins (or a system principal)
+        only; audited as ``identity.external.unlink``."""
+        self._require_platform_admin(principal)
+        self._check_identity(provider, subject)
+        with self.db.transaction(DbScope.platform()) as tx:
+            user = tx.one_or_404(
+                "SELECT id, password_hash FROM axentra_users WHERE id = %s FOR UPDATE",
+                (user_id,),
+                what="user",
+            )
+            others = tx.scalar(
+                "SELECT count(*) FROM axentra_user_identities WHERE user_id = %s"
+                " AND NOT (provider = %s AND subject = %s)",
+                (user_id, provider, subject),
+            )
+            removed = tx.one(
+                "DELETE FROM axentra_user_identities WHERE user_id = %s AND provider = %s AND subject = %s"
+                " RETURNING id",
+                (user_id, provider, subject),
+            )
+            if removed is None:
+                raise NotFound("external identity not found")
+            if not user["password_hash"] and not others:
+                raise Conflict(
+                    "this is the user's only way to sign in; disable the user instead",
+                    extra={"reason": "last_sign_in_method"},
+                )
+            revoked = tx.execute(
+                "UPDATE axentra_sessions SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL",
+                (user_id,),
+            )
+            self.audit.record(
+                tx,
+                principal,
+                "identity.external.unlink",
+                target_type="user",
+                target_id=user_id,
+                details={"provider": provider, "sessions_revoked": revoked},
+            )
+        return int(revoked)

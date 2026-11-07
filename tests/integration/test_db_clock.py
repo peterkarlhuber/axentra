@@ -107,3 +107,21 @@ def test_resolving_a_session_is_one_transaction(world, monkeypatch):  # type: ig
             (new.info.session_id,),
         )
     assert seen is True
+
+
+def test_login_throttling_windows_use_the_database_clock(world, monkeypatch):  # type: ignore[no-untyped-def]
+    ax = world.ax
+    world.user("throttle@example.com")
+    # An API host whose clock runs a day ahead counts into the same window as the database.
+    _skew_app_clock(monkeypatch, timedelta(days=1))
+    with pytest.raises(Unauthenticated):
+        ax.identity.login_password(
+            "throttle@example.com", "wrong password 123", ip="10.9.9.9", user_agent="t"
+        )
+    with ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        row = tx.one(
+            "SELECT window_start, date_trunc('minute', now()) AS db_window FROM axentra_rate_limits"
+            " WHERE bucket = 'login:acct:throttle@example.com'"
+        )
+    assert row is not None
+    assert abs(row["window_start"] - row["db_window"]) <= timedelta(minutes=1)

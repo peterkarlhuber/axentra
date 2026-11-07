@@ -29,6 +29,17 @@ class User(BaseModel):
         return self.email or self.name or self.id
 
 
+class ExternalIdentity(BaseModel):
+    """An external (OIDC) identity linked to a user: ``provider`` is the issuer, ``subject`` its
+    ``sub`` claim; ``email`` is the address the provider reported (empty when none, and kept for
+    reference even when it was not verified)."""
+
+    provider: str
+    subject: str
+    email: str
+    created_at: datetime
+
+
 class Session(BaseModel):
     id: str
     user_id: str

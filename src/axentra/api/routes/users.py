@@ -9,7 +9,7 @@ from axentra.api.context import Ax, CurrentPrincipal, request_id
 from axentra.api.routes.common import Cursor, Limit
 from axentra.core.errors import Forbidden, NotFound
 from axentra.core.pagination import Page
-from axentra.identity.models import Session, User
+from axentra.identity.models import ExternalIdentity, Session, User
 from axentra.tenancy.models import Product, Tenant, UserMemberships
 
 router = APIRouter(prefix="/v1", tags=["users"])
@@ -54,6 +54,22 @@ class UserUpdate(BaseModel):
 
 class RevokeResult(BaseModel):
     revoked: int
+
+
+class ExternalUserCreate(BaseModel):
+    provider: str = Field(min_length=1, max_length=500, description="The issuer (`oidc[].issuer`)")
+    subject: str = Field(min_length=1, max_length=500, description="The provider's `sub` claim")
+    email: str | None = Field(default=None, max_length=320)
+    email_verified: bool = Field(
+        default=False,
+        description="The email becomes the user's address only when true; otherwise the user has none",
+    )
+    name: str = Field(default="", max_length=200)
+
+
+class IdentityLink(BaseModel):
+    provider: str = Field(min_length=1, max_length=500)
+    subject: str = Field(min_length=1, max_length=500)
 
 
 @router.get("/me", response_model=Me, summary="Who I am and what I may do, per product and tenant")
@@ -213,3 +229,67 @@ def user_sessions(user_id: str, principal: CurrentPrincipal, ax: Ax) -> list[Ses
 def revoke_user_sessions(user_id: str, principal: CurrentPrincipal, ax: Ax) -> RevokeResult:
     ax.authz.require(principal, "users:manage")
     return RevokeResult(revoked=ax.identity.revoke_all_sessions(principal, user_id))
+
+
+@router.post(
+    "/users/external",
+    response_model=User,
+    status_code=201,
+    summary="Create a user with an external identity, with or without an email address (platform admins)",
+)
+def create_external_user(body: ExternalUserCreate, principal: CurrentPrincipal, ax: Ax) -> User:
+    """For migrations and imports: the user signs in through the identity provider. `409` when the
+    identity is already linked or a verified email belongs to another user."""
+    return ax.identity.create_external_user(
+        principal,
+        provider=body.provider,
+        subject=body.subject,
+        email=body.email,
+        email_verified=body.email_verified,
+        name=body.name,
+    )
+
+
+@router.get(
+    "/users/{user_id}/identities",
+    response_model=list[ExternalIdentity],
+    summary="External identities linked to a user (users:manage)",
+)
+def list_identities(user_id: str, principal: CurrentPrincipal, ax: Ax) -> list[ExternalIdentity]:
+    ax.authz.require(principal, "users:manage")
+    ax.identity.get_user(user_id)  # 404 for an unknown id
+    return [ExternalIdentity.model_validate(r) for r in ax.identity.list_identities(user_id)]
+
+
+@router.post(
+    "/users/{user_id}/identities",
+    response_model=ExternalIdentity,
+    status_code=201,
+    summary="Link an external identity to a user (platform admins)",
+)
+def link_identity(user_id: str, body: IdentityLink, principal: CurrentPrincipal, ax: Ax) -> ExternalIdentity:
+    """`409` when the identity is already linked (to this or another user)."""
+    ax.identity.link_identity(principal, user_id, provider=body.provider, subject=body.subject)
+    for row in ax.identity.list_identities(user_id):
+        if row["provider"] == body.provider and row["subject"] == body.subject:
+            return ExternalIdentity.model_validate(row)
+    raise NotFound("external identity not found")  # pragma: no cover - removed concurrently
+
+
+@router.delete(
+    "/users/{user_id}/identities",
+    response_model=RevokeResult,
+    summary="Unlink an external identity from a user and revoke the user's sessions (platform admins)",
+)
+def unlink_identity(
+    user_id: str,
+    principal: CurrentPrincipal,
+    ax: Ax,
+    provider: str = Query(min_length=1, max_length=500),
+    subject: str = Query(min_length=1, max_length=500),
+) -> RevokeResult:
+    """`409` (`reason` `last_sign_in_method`) when it is the user's only way to sign in: disable
+    the user instead. `revoked` counts the user's sessions that were ended."""
+    return RevokeResult(
+        revoked=ax.identity.unlink_identity(principal, user_id, provider=provider, subject=subject)
+    )

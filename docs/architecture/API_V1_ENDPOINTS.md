@@ -65,6 +65,15 @@ summary. Permission names in brackets.
 - `GET /v1/users/{uid}`, `PATCH /v1/users/{uid}` `{status: active|disabled}` [users:manage]
 - `GET /v1/users/{uid}/sessions`, `POST /v1/users/{uid}/sessions/revoke` [users:manage]
 - `GET /v1/users/{uid}/memberships` -> `{products: [{product_id, product_slug, product_name, role, created_at}], tenants: [{product_id, product_slug, product_name, tenant_id, tenant_slug, tenant_name, tenant_status, role, created_at}]}`: everything with `users:read`; product operators see the product roles where they hold `product_members:read` and the tenant memberships where they hold `members:read` (`404` for users they cannot see)
+- `POST /v1/users/external` `{provider, subject, email?, email_verified?, name?}` -> `201 User` [platform admin]:
+  a user who signs in through an identity provider, for migrations and imports; the email becomes the
+  user's address only with `email_verified: true`, otherwise the user has no address (`409` when the
+  identity is linked or a verified address is taken)
+- `GET /v1/users/{uid}/identities` -> `[{provider, subject, email, created_at}]` [users:manage];
+  `POST /v1/users/{uid}/identities` `{provider, subject}` -> `201` [platform admin] (`409` when linked);
+  `DELETE /v1/users/{uid}/identities?provider=&subject=` -> `{revoked}` [platform admin]: unlinks and
+  revokes the user's sessions; `409` with `reason` `last_sign_in_method` when the user has no password
+  and no other identity (disable the user instead). Audited as `identity.external.create|link|unlink`
 
 ## Access
 - `GET /v1/permissions` -> built-in permission catalog `{name, scope, description, source, read_like, ...}`

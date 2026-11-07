@@ -2183,6 +2183,32 @@ export interface paths {
         patch: operations["update_user_v1_users__user_id__patch"];
         trace?: never;
     };
+    "/v1/users/{user_id}/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** External identities linked to a user (users:manage) */
+        get: operations["list_identities_v1_users__user_id__identities_get"];
+        put?: never;
+        /**
+         * Link an external identity to a user (platform admins)
+         * @description `409` when the identity is already linked (to this or another user).
+         */
+        post: operations["link_identity_v1_users__user_id__identities_post"];
+        /**
+         * Unlink an external identity from a user and revoke the user's sessions (platform admins)
+         * @description `409` (`reason` `last_sign_in_method`) when it is the user's only way to sign in: disable
+         *     the user instead. `revoked` counts the user's sessions that were ended.
+         */
+        delete: operations["unlink_identity_v1_users__user_id__identities_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{user_id}/memberships": {
         parameters: {
             query?: never;
@@ -2233,6 +2259,27 @@ export interface paths {
         put?: never;
         /** Revoke all sessions of a user */
         post: operations["revoke_user_sessions_v1_users__user_id__sessions_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/external": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a user with an external identity, with or without an email address (platform admins)
+         * @description For migrations and imports: the user signs in through the identity provider. `409` when the
+         *     identity is already linked or a verified email belongs to another user.
+         */
+        post: operations["create_external_user_v1_users_external_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2724,6 +2771,51 @@ export interface components {
             type: string;
         };
         /**
+         * ExternalIdentity
+         * @description An external (OIDC) identity linked to a user: ``provider`` is the issuer, ``subject`` its
+         *     ``sub`` claim; ``email`` is the address the provider reported (empty when none, and kept for
+         *     reference even when it was not verified).
+         */
+        ExternalIdentity: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+            /** Provider */
+            provider: string;
+            /** Subject */
+            subject: string;
+        };
+        /** ExternalUserCreate */
+        ExternalUserCreate: {
+            /** Email */
+            email?: string | null;
+            /**
+             * Email Verified
+             * @description The email becomes the user's address only when true; otherwise the user has none
+             * @default false
+             */
+            email_verified?: boolean;
+            /**
+             * Name
+             * @default
+             */
+            name?: string;
+            /**
+             * Provider
+             * @description The issuer (`oidc[].issuer`)
+             */
+            provider: string;
+            /**
+             * Subject
+             * @description The provider's `sub` claim
+             */
+            subject: string;
+        };
+        /**
          * FileInfo
          * @description File metadata as returned by the API (the storage key stays internal).
          */
@@ -2795,6 +2887,13 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable";
+        };
+        /** IdentityLink */
+        IdentityLink: {
+            /** Provider */
+            provider: string;
+            /** Subject */
+            subject: string;
         };
         /** Invitation */
         Invitation: {
@@ -12521,6 +12620,133 @@ export interface operations {
             };
         };
     };
+    list_identities_v1_users__user_id__identities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalIdentity"][];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    link_identity_v1_users__user_id__identities_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityLink"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalIdentity"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    unlink_identity_v1_users__user_id__identities_delete: {
+        parameters: {
+            query: {
+                provider: string;
+                subject: string;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokeResult"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     user_memberships_v1_users__user_id__memberships_get: {
         parameters: {
             query?: never;
@@ -12619,6 +12845,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RevokeResult"];
+                };
+            };
+            /** @description Validation failed (`validation_failed`, with `errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Error: problem details (RFC 9457) */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    create_external_user_v1_users_external_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExternalUserCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
                 };
             };
             /** @description Validation failed (`validation_failed`, with `errors`) */

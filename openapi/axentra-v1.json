@@ -1315,6 +1315,84 @@
         "title": "EventCreate",
         "type": "object"
       },
+      "ExternalIdentity": {
+        "description": "An external (OIDC) identity linked to a user: ``provider`` is the issuer, ``subject`` its\n``sub`` claim; ``email`` is the address the provider reported (empty when none, and kept for\nreference even when it was not verified).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "subject",
+          "email",
+          "created_at"
+        ],
+        "title": "ExternalIdentity",
+        "type": "object"
+      },
+      "ExternalUserCreate": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_verified": {
+            "default": false,
+            "description": "The email becomes the user's address only when true; otherwise the user has none",
+            "title": "Email Verified",
+            "type": "boolean"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The issuer (`oidc[].issuer`)",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The provider's `sub` claim",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "subject"
+        ],
+        "title": "ExternalUserCreate",
+        "type": "object"
+      },
       "FileInfo": {
         "description": "File metadata as returned by the API (the storage key stays internal).",
         "properties": {
@@ -1493,6 +1571,28 @@
           "checks"
         ],
         "title": "Health",
+        "type": "object"
+      },
+      "IdentityLink": {
+        "properties": {
+          "provider": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "subject"
+        ],
+        "title": "IdentityLink",
         "type": "object"
       },
       "Invitation": {
@@ -20391,6 +20491,58 @@
         ]
       }
     },
+    "/v1/users/external": {
+      "post": {
+        "description": "For migrations and imports: the user signs in through the identity provider. `409` when the\nidentity is already linked or a verified email belongs to another user.",
+        "operationId": "create_external_user_v1_users_external_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalUserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Create a user with an external identity, with or without an email address (platform admins)",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/v1/users/{user_id}": {
       "get": {
         "operationId": "get_user_v1_users__user_id__get",
@@ -20498,6 +20650,196 @@
           }
         },
         "summary": "Enable/disable a user or set the platform role",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{user_id}/identities": {
+      "delete": {
+        "description": "`409` (`reason` `last_sign_in_method`) when it is the user's only way to sign in: disable\nthe user instead. `revoked` counts the user's sessions that were ended.",
+        "operationId": "unlink_identity_v1_users__user_id__identities_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Subject",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Unlink an external identity from a user and revoke the user's sessions (platform admins)",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "operationId": "list_identities_v1_users__user_id__identities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExternalIdentity"
+                  },
+                  "title": "Response List Identities V1 Users  User Id  Identities Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "External identities linked to a user (users:manage)",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "`409` when the identity is already linked (to this or another user).",
+        "operationId": "link_identity_v1_users__user_id__identities_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIdentity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation failed (`validation_failed`, with `errors`)"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Error: problem details (RFC 9457)"
+          }
+        },
+        "summary": "Link an external identity to a user (platform admins)",
         "tags": [
           "users"
         ]
