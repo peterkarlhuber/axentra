@@ -40,6 +40,52 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Security (TABRION TB-031)
+- Database error redaction (B-06-1) closes the leaks that the independent review of Tabrion's port of the filter
+  (`tab-010-012-review.md`, H-2, M-2, re-review N-1) found in Axentra's filter as well. Before this change, the
+  `DETAIL` value of a database error (for example the email address of a unique violation) reached the log output
+  through `log.error(f"x {e!r}")`, `log.error("x %s", repr(e))`, `log.error("x %r", str(e))`, the error inside a
+  list, tuple, set or dict argument, `e.args`, an exception's `args` (`RuntimeError(e)`), a dict passed as the
+  message, a wrapper that keeps the error in `orig` inside a list, and the continuation lines of a multi-line
+  `DETAIL` in a message formatted before logging. `DbErrorRedactionFilter` now finds database errors inside
+  containers and exception `args` (at most 3 levels and 1,000 objects, a container whose iteration fails is
+  skipped), always checks the formatted message, replaces the `str`, `repr` and escaped forms of each error and of
+  its `DETAIL`/`HINT`/`CONTEXT` values, removes the escaped `\nDETAIL:` form, and replaces a server text part with a marker up to the end
+  of the text (inside a formatted traceback: up to the next traceback line) instead of removing only its first
+  line.
+  - Changed behavior: a message line that starts with `DETAIL:`, `HINT:` or `CONTEXT:` (also non-database text,
+    see R-4) now replaces the rest of the message with `[redacted: database server text]`, not just that line. Records whose
+    message is a plain `str` with plain arguments are not formatted by the filter (fast path); other records are
+    formatted once more by the filter, so an argument's `__str__` may run twice.
+  - `db_sqlstate` / `db_constraint` name the database error that describes the record's exception
+    (`primary_db_error`: `orig` and `__cause__` before `__context__`, a lost connection outermost wins), the rule
+    of Tabrion's contract note I-13 (review H-1). Axentra's job and notification retries do not classify errors
+    (every failed attempt is retried while attempts remain, at least once by design), so the H-1 retry defect
+    does not apply; a regression test pins that a COMMIT lost inside `except UniqueViolation` is reported as the
+    lost connection, not as 23505.
+- Fix round for the independent review `axe-tb031-review.md`:
+  - F-1: tracebacks are redacted also when no database error object is in the chain but an exception carries
+    database text in its message, `args` or notes (a retry loop's `raise RuntimeError(f"gave up: {last}")`,
+    `exc_info=RuntimeError(e)`, `add_note(str(e))`); an error object in an exception's `args` is found as such.
+  - F-2: `install_db_error_redaction` replaces `logging.Handler.handleError`, whose report of a failed `emit`
+    printed the database error being handled (its `__context__`) raw to stderr.
+  - F-3: the inline label pattern no longer backtracks quadratically on long runs of blanks (7.7 s at 40 KB
+    before, about 1 ms now).
+  - F-4: traceback structure lines end a removed server text part only inside a formatted traceback; in messages
+    and a stored `last_error` the part is removed to the end.
+  - F-5: a mapping message (structlog's event dict) stays a mapping with scrubbed values.
+  - F-6: `extra={"db_sqlstate": ...}` no longer raises `KeyError` (`Logger.makeRecord` accepts the two names; the
+    caller's value wins).
+  - F-7: removed server text is replaced by the visible marker `[redacted: database server text]`.
+- Delta re-review of the fix round:
+  - D-1: a mapping message logged with `exc_info` (`log.error({"event": "x"}, exc_info=True)`) skipped the
+    traceback redaction (a regression of the F-5 change); fixed.
+  - D-2: structlog's standard library integration rendered `exc_info=True` itself (`format_exc_info`,
+    `dict_tracebacks`, `ConsoleRenderer`); the event dict's `exc_info` is now replaced by the redacted traceback
+    under `exception`. New optional processor `axentra.core.db_errors.redact_db_errors_processor` for structlog
+    chains (no structlog dependency; `structlog` is a dev extra for the tests only).
+  - D-3: an exception whose `args` property raises no longer makes the filter replace the record.
+
 ### Security (TABRION MIG-AXE-0)
 - Database errors (finding B-06-1) no longer carry the values of the server's `DETAIL` text (for example
   `Key (email)=(...) already exists.` of a unique violation, or `Failing row contains (...)`) out of the process.

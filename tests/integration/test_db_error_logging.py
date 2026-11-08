@@ -619,3 +619,370 @@ def test_l6_cli_operator_error_without_values(
     (canary,) = canaries
     assert "axentra: database_error: unique violation" in err
     _assert_clean(err, canary)
+
+
+# --- TABRION TB-031: the Tabrion review's leaks (H-2, M-2, N-1) and the H-1 chain rule ------------------------------
+
+
+def _sa_style_wrapper(err: psycopg.Error) -> Exception:
+    """An error shaped like SQLAlchemy's ``IntegrityError`` (Axentra does not depend on SQLAlchemy): it keeps the
+    driver error in ``orig`` and quotes its text, the statement and the parameters."""
+    cls = type("IntegrityError", (Exception,), {"__module__": "sqlalchemy.exc"})
+    wrapper = cls(
+        f"({type(err).__module__}.{type(err).__qualname__}) {err}\n"
+        "[SQL: INSERT INTO canary_people (email) VALUES (%(email)s)]\n"
+        "(Background on this error at: https://sqlalche.me/e/20/gkpj)"
+    )
+    wrapper.orig = err  # type: ignore[attr-defined]
+    return wrapper
+
+
+#: Every log call of the Tabrion review's H-2 table that leaked the DETAIL value through Axentra's filter at
+#: 9c4666f. ``e`` is a real psycopg error, ``sa`` a wrapper of it.
+H2_CALLS: dict[str, Callable[[logging.Logger, psycopg.Error, Exception], None]] = {
+    "f-string repr": lambda lg, e, sa: lg.error(f"x {e!r}"),
+    "%s of repr(e)": lambda lg, e, sa: lg.error("x %s", repr(e)),
+    "%r of str(e)": lambda lg, e, sa: lg.error("x %r", str(e)),
+    "list argument": lambda lg, e, sa: lg.error("x %s", [e]),
+    "tuple argument": lambda lg, e, sa: lg.error("x %s", (e,)),
+    "e.args argument": lambda lg, e, sa: lg.error("x %s", e.args),
+    "dict as msg": lambda lg, e, sa: lg.error({"err": e}),
+    "nested containers": lambda lg, e, sa: lg.error("x %s", {"k": [(e,)]}),
+    "exception args": lambda lg, e, sa: lg.error("x %s", RuntimeError(e)),
+    "wrapper in a list": lambda lg, e, sa: lg.error("x %s", [sa]),
+    "wrapper repr": lambda lg, e, sa: lg.error(f"x {sa!r}"),
+    "set argument": lambda lg, e, sa: lg.error("x %s", {e}),
+    "ascii()": lambda lg, e, sa: lg.error("x %s", ascii(e)),
+}
+
+
+@pytest.mark.parametrize("call", sorted(H2_CALLS))
+@pytest.mark.usefixtures("ax")
+def test_tb031_h2_repr_and_container_arguments(pg_urls: dict[str, str], call: str) -> None:
+    """H-2: the DETAIL value never survives in ``repr`` (escaped ``\\nDETAIL:``) form or inside container, exception
+    ``args`` and non-``str`` message arguments, through a product's own plain handler."""
+    canary, exc = _db_error(pg_urls["admin"])
+    assert canary in repr(exc)  # the leak the filter has to close
+    out = _plain_handler_output(lambda lg: H2_CALLS[call](lg, exc, _sa_style_wrapper(exc)))
+    assert out.count("\n") == 1, out  # the record is kept, on one line
+    assert canary not in out, out
+    assert "DETAIL" not in out, out
+    assert "duplicate key" in out or "23505" in out, out
+
+
+@pytest.mark.usefixtures("ax")
+def test_tb031_h2_container_errors_name_the_sqlstate(pg_urls: dict[str, str]) -> None:
+    """A database error found inside a container argument is replaced by its safe message and named in
+    ``db_sqlstate`` / ``db_constraint`` (JSON logs)."""
+    canary, exc = _db_error(pg_urls["admin"])
+    # The process-wide redaction runs when the record is created.
+    record = logging.getLogRecordFactory()("x", logging.ERROR, __file__, 1, "x %s", ([exc],), None)
+    assert canary not in record.getMessage()
+    assert "unique violation (SQLSTATE 23505, constraint canary_people_email_key)" in record.getMessage()
+    assert (record.db_sqlstate, record.db_constraint) == ("23505", "canary_people_email_key")  # type: ignore[attr-defined]
+
+
+def _db_error_with_value(admin_url: str, value: str) -> psycopg.Error:
+    try:
+        with psycopg.connect(admin_url) as conn:
+            conn.execute(
+                "CREATE TEMP TABLE canary_people (email text CONSTRAINT canary_people_email_key UNIQUE)"
+            )
+            conn.execute("INSERT INTO canary_people (email) VALUES (%s)", (value,))
+            conn.execute("INSERT INTO canary_people (email) VALUES (%s)", (value,))
+    except psycopg.Error as exc:
+        return exc
+    raise AssertionError("the statement did not fail")
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        "{c}-1\n{c}-2\n{c}-3",  # M-2: continuation lines
+        "a\n+-{c}",  # N-1: a value line that starts like an exception group frame
+        'a\nFile "{c}',  # N-1: ... like a traceback frame
+        "a\n[SQL: {c}",  # N-1: ... like SQLAlchemy's statement line
+        "a\nTraceback (most recent call last): {c}",
+    ],
+)
+@pytest.mark.usefixtures("ax")
+def test_tb031_m2_n1_multi_line_detail_in_preformatted_text(pg_urls: dict[str, str], shape: str) -> None:
+    """M-2 and N-1: a multi-line key value in a message formatted before logging (the error object is not in the
+    record, so only the text can be cleaned)."""
+    canary = _canary()
+    exc = _db_error_with_value(pg_urls["admin"], shape.format(c=canary))
+    assert canary in str(exc)
+
+    def log(lg: logging.Logger) -> None:
+        lg.error("x %s" % exc)  # noqa: UP031 - preformatted on purpose
+        lg.error("wrapped: %s", str(exc))
+        try:
+            try:
+                raise exc
+            except psycopg.Error as e:
+                raise RuntimeError(f"quoting {e}") from None
+        except RuntimeError:
+            lg.exception("again")
+
+    out = _plain_handler_output(log)
+    assert canary not in out, out
+    assert "DETAIL" not in out, out
+    assert "Traceback (most recent call last)" in out
+
+
+def _cut(conn: psycopg.Connection[Any]) -> None:
+    """Shut the connection's socket down under the driver, as a lost network would."""
+    import os
+    import socket
+
+    sock = socket.socket(fileno=os.dup(conn.fileno()))
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    finally:
+        sock.close()
+
+
+@pytest.mark.usefixtures("ax")
+def test_tb031_h1_commit_lost_while_handling_a_unique_violation(
+    pg_urls: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """H-1 analog: an upsert fallback runs inside ``except UniqueViolation`` and its COMMIT loses the connection.
+    The lost connection (``OperationalError`` without SQLSTATE, the 23505 only as ``__context__``) is what the job's
+    ``last_error`` and the log record name, never the older unique violation."""
+    from axentra.events.jobs import format_error
+
+    canary = _canary()
+    lost: BaseException | None = None
+    conn = psycopg.connect(pg_urls["admin"])
+    try:
+        conn.execute("CREATE TEMP TABLE canary_people (email text CONSTRAINT canary_people_email_key UNIQUE)")
+        conn.execute("INSERT INTO canary_people (email) VALUES (%s)", (canary,))
+        conn.commit()
+        try:
+            conn.execute("INSERT INTO canary_people (email) VALUES (%s)", (canary,))
+        except psycopg.errors.UniqueViolation:
+            conn.rollback()
+            conn.execute("UPDATE canary_people SET email = %s WHERE email = %s", (canary, canary))
+            _cut(conn)
+            try:
+                conn.commit()
+            except psycopg.OperationalError as exc:
+                lost = exc
+    finally:
+        conn.close()
+    assert isinstance(lost, psycopg.OperationalError)
+    assert isinstance(lost.__context__, psycopg.errors.UniqueViolation)
+    assert getattr(lost, "sqlstate", None) is None
+    text = format_error(lost)
+    assert text.startswith("OperationalError: database client error")
+    assert "23505" not in text and canary not in text
+    # The service wraps the lost connection (raised in its handler, so the 23505 is two contexts down).
+    wrapper: BaseException | None = None
+    try:
+        try:
+            raise lost
+        except psycopg.OperationalError:
+            raise AxentraError("saving failed")  # noqa: B904 - the implicit context is the point
+    except AxentraError as exc:
+        wrapper = exc
+    assert wrapper is not None
+    assert "23505" not in format_error(wrapper) and canary not in format_error(wrapper)
+    records: list[logging.LogRecord] = []
+
+    def log(lg: logging.Logger) -> None:
+        class Keep(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        keep = Keep()
+        lg.addHandler(keep)
+        try:
+            lg.error("commit failed", exc_info=lost)
+            lg.error("saving failed", exc_info=wrapper)
+        finally:
+            lg.removeHandler(keep)
+
+    out = _plain_handler_output(log)
+    assert canary not in out and "DETAIL" not in out
+    # Both name the lost connection (no SQLSTATE), not the 23505 the handler was handling.
+    assert [r.db_sqlstate for r in records] == [None, None]  # type: ignore[attr-defined]
+
+
+# --- Review axe-tb031-review.md: tracebacks without a database error object (F-1), handleError (F-2), F-8 -----
+
+
+def test_f1_job_handler_with_a_retry_loop(world: Any, pg_urls: dict[str, str]) -> None:
+    """F-1: a job handler retries, keeps the last error and raises after the loop (no ``__context__``). The worker
+    logs the failure with its traceback; neither the log nor ``last_error`` carries the value."""
+    from axentra.core.context import Principal
+    from axentra.events import JobWorker
+
+    ax = world.ax
+    sys_principal = Principal.system("test")
+    product = ax.tenancy.create_product(sys_principal, slug="crm", name="CRM")
+    tenant = ax.tenancy.create_tenant(sys_principal, product.id, slug="acme", name="Acme")
+    canaries: list[str] = []
+
+    def handler(ctx: Any) -> None:
+        last: psycopg.Error | None = None
+        for _ in range(2):
+            canary, exc = _db_error(pg_urls["admin"])
+            canaries.append(canary)
+            last = exc
+        raise RuntimeError(f"gave up after 2 attempts: {last}")
+
+    ax.jobs.register("canary.retry", handler)
+    job = ax.jobs.enqueue(sys_principal, product.id, "canary.retry", {}, tenant_id=tenant.id)
+    root = logging.getLogger()
+    saved, level = root.handlers[:], root.level
+    own = io.StringIO()
+    root.handlers[:] = [logging.StreamHandler(own)]
+    root.setLevel(logging.DEBUG)
+    try:
+        assert JobWorker(ax, scheduler=False, housekeeping=False).run_once(maintenance=False) == 1
+    finally:
+        root.handlers[:] = saved
+        root.setLevel(level)
+    out = own.getvalue()
+    assert "Traceback (most recent call last)" in out and "RuntimeError: gave up after 2 attempts" in out
+    assert all(c not in out for c in canaries) and "DETAIL" not in out, out
+    r = world.admin.get(f"/v1/products/{product.id}/jobs/{job.id}")
+    assert r.status_code == 200, r.text
+    assert all(c not in r.text for c in canaries) and "DETAIL" not in r.text
+
+
+@pytest.mark.usefixtures("ax")
+def test_f1_exc_info_without_a_chain(pg_urls: dict[str, str]) -> None:
+    """F-1: the database error, or only its text, in the exception's args or notes; no ``__context__``."""
+    canary, exc = _db_error(pg_urls["admin"])
+    noted = RuntimeError("wrap")
+    noted.add_note(str(exc))
+
+    def log(lg: logging.Logger) -> None:
+        lg.error("a", exc_info=RuntimeError(exc))
+        lg.error("b", exc_info=RuntimeError("batch failed", [exc]))
+        lg.error("c", exc_info=RuntimeError(f"gave up: {exc}"))
+        lg.error("d", exc_info=noted)
+
+    out = _plain_handler_output(log)
+    assert canary not in out and "DETAIL" not in out, out
+    assert out.count("RuntimeError: ") == 4  # never raised, so no frames: one exception line each
+
+
+@pytest.mark.usefixtures("ax")
+def test_f2_failed_emit_while_handling_a_database_error(
+    pg_urls: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-2: a log call that fails while the database error is handled reports through ``handleError``."""
+    canary, exc = _db_error(pg_urls["admin"])
+    saved = logging.raiseExceptions
+    logging.raiseExceptions = True
+    try:
+
+        def log(lg: logging.Logger) -> None:
+            try:
+                raise exc
+            except psycopg.Error:
+                lg.error("user %s failed with %s", "bob")  # too few arguments
+
+        _plain_handler_output(log)
+    finally:
+        logging.raiseExceptions = saved
+    err = capsys.readouterr().err
+    assert "--- Logging error ---" in err
+    assert canary not in err and "DETAIL" not in err, err
+    assert "23505" in err
+
+
+@pytest.mark.usefixtures("ax")
+def test_f8_rewritten_label_with_the_error_object(pg_urls: dict[str, str]) -> None:
+    """F-8: the label was rewritten (single spaces), so only the replacement of the known DETAIL value helps."""
+    canary, exc = _db_error(pg_urls["admin"])
+    out = _plain_handler_output(lambda lg: lg.error("x %s / %s", exc, " ".join(str(exc).split())))
+    assert canary not in out, out
+    assert "[redacted]" in out
+
+
+# --- Delta review of the fix round (axe-tb031-review.md D-1, D-2) ---------------------------------------------------
+
+
+@pytest.mark.usefixtures("ax")
+def test_d1_mapping_message_with_exc_info(pg_urls: dict[str, str]) -> None:
+    """D-1: a mapping message logged with ``exc_info`` inside ``except UniqueViolation`` (and chained)."""
+    canary, exc = _db_error(pg_urls["admin"])
+
+    def log(lg: logging.Logger) -> None:
+        try:
+            raise exc
+        except psycopg.errors.UniqueViolation:
+            lg.error({"event": "failed"}, exc_info=True)
+        try:
+            try:
+                raise exc
+            except psycopg.Error as e:
+                raise RuntimeError("wrap") from e
+        except RuntimeError:
+            lg.exception({"event": "boom", "n": 1})
+
+    out = _plain_handler_output(log)
+    assert canary not in out and "DETAIL" not in out, out
+    assert "{'event': 'failed'}" in out and "unique violation (SQLSTATE 23505" in out
+
+
+def _structlog_stdlib(formatter_processors: list[Any]) -> tuple[Any, io.StringIO, logging.Logger]:
+    """structlog's documented stdlib integration: ``wrap_for_formatter`` and a ``ProcessorFormatter``."""
+    structlog = pytest.importorskip("structlog")
+    structlog.reset_defaults()
+    structlog.configure(
+        processors=[structlog.stdlib.add_log_level, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, *formatter_processors]
+        )
+    )
+    name = f"axentra.test.structlog.{uuid.uuid4().hex}"
+    lg = logging.getLogger(name)
+    lg.handlers[:] = [handler]
+    lg.propagate = False
+    lg.setLevel(logging.DEBUG)
+    return structlog.get_logger(name), stream, lg
+
+
+@pytest.mark.parametrize("config", ["format_exc_info", "dict_tracebacks", "console"])
+@pytest.mark.usefixtures("ax")
+def test_d2_structlog_stdlib_exceptions(pg_urls: dict[str, str], config: str) -> None:
+    """D-2: structlog renders ``exc_info=True`` from its event dict itself (``format_exc_info``,
+    ``dict_tracebacks``, ``ConsoleRenderer``); the value must not reach its output."""
+    structlog = pytest.importorskip("structlog")
+    processors = {
+        "format_exc_info": [structlog.processors.format_exc_info, structlog.processors.JSONRenderer()],
+        "dict_tracebacks": [structlog.processors.dict_tracebacks, structlog.processors.JSONRenderer()],
+        "console": [structlog.dev.ConsoleRenderer(colors=False)],
+    }[config]
+    canary, exc = _db_error(pg_urls["admin"])
+    slog, stream, lg = _structlog_stdlib(processors)
+    try:
+        try:
+            try:
+                raise exc
+            except psycopg.Error as e:
+                raise RuntimeError("wrap") from e
+        except RuntimeError:
+            slog.exception("boom")
+        try:
+            raise exc
+        except psycopg.Error:
+            slog.error("failed", exc_info=True)
+        slog.error("kw", err=exc, text=str(exc))
+    finally:
+        lg.handlers[:] = []
+        structlog.reset_defaults()
+    out = stream.getvalue()
+    assert out.count("boom") == 1 and "failed" in out and "kw" in out, out
+    assert canary not in out and "DETAIL" not in out, out
+    assert "unique violation (SQLSTATE 23505" in out
