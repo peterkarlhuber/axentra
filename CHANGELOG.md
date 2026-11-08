@@ -40,6 +40,29 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Security (TABRION TB-031)
+- Database error redaction (B-06-1) closes the leaks that the independent review of Tabrion's port of the filter
+  (`tab-010-012-review.md`, H-2, M-2, re-review N-1) found in Axentra's filter as well. Before this change, the
+  `DETAIL` value of a database error (for example the email address of a unique violation) reached the log output
+  through `log.error(f"x {e!r}")`, `log.error("x %s", repr(e))`, `log.error("x %r", str(e))`, the error inside a
+  list, tuple, set or dict argument, `e.args`, an exception's `args` (`RuntimeError(e)`), a dict passed as the
+  message, a wrapper that keeps the error in `orig` inside a list, and the continuation lines of a multi-line
+  `DETAIL` in a message formatted before logging. `DbErrorRedactionFilter` now finds database errors inside
+  containers and exception `args` (at most 3 levels and 1,000 objects, a container whose iteration fails is
+  skipped), always checks the formatted message, replaces the `str`, `repr` and escaped forms of each error and of
+  its `DETAIL`/`HINT`/`CONTEXT` values, removes the escaped `\nDETAIL:` form, and removes a server text part up to
+  the next line of a traceback's structure (or the end of the text) instead of only its first line.
+  - Changed behavior: a message line that starts with `DETAIL:`, `HINT:` or `CONTEXT:` (also non-database text,
+    see R-4) now removes the rest of the message up to the next traceback line, not just that line. Records whose
+    message is a plain `str` with plain arguments are not formatted by the filter (fast path); other records are
+    formatted once more by the filter, so an argument's `__str__` may run twice.
+  - `db_sqlstate` / `db_constraint` name the database error that describes the record's exception
+    (`primary_db_error`: `orig` and `__cause__` before `__context__`, a lost connection outermost wins), the rule
+    of Tabrion's contract note I-13 (review H-1). Axentra's job and notification retries do not classify errors
+    (every failed attempt is retried while attempts remain, at least once by design), so the H-1 retry defect
+    does not apply; a regression test pins that a COMMIT lost inside `except UniqueViolation` is reported as the
+    lost connection, not as 23505.
+
 ### Security (TABRION MIG-AXE-0)
 - Database errors (finding B-06-1) no longer carry the values of the server's `DETAIL` text (for example
   `Key (email)=(...) already exists.` of a unique violation, or `Failing row contains (...)`) out of the process.

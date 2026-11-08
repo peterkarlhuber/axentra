@@ -85,6 +85,13 @@ names the SQLSTATE and the constraint (`unique violation (SQLSTATE 23505, constr
 also carry `db_sqlstate` and `db_constraint`). This holds for every log record of the process, also with an
 application's own handlers or logging configuration: creating an `Axentra` instance installs the redaction in the
 log record factory. Trace spans, job and notification `last_error` and CLI error messages use the same text.
+The redaction also covers an error logged inside a list, tuple, set or dict argument, in an exception's `args`,
+as a non-`str` message, and in `repr` form (`f"{e!r}"`, `%r`). In a message that was formatted before it was
+logged, everything from a `DETAIL:`, `HINT:` or `CONTEXT:` label (also as the escaped `\nDETAIL:` of a `repr`) up
+to the next traceback line or the end of the message is removed, also for non-database text that uses these
+labels. Values in the first line of a pre-formatted message (for example `invalid input syntax for type integer:
+"..."`) and `extra=` values are not redacted: log the error object (`log.error("... %s", exc)` or
+`exc_info=True`), never its text.
 
 ## Maintenance and retention
 
