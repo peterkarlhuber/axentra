@@ -35,6 +35,7 @@ import uuid
 import psycopg
 
 from axentra.core.context import Actor, ActorKind, Principal
+from axentra.core.db_errors import install_db_error_redaction
 from axentra.data.database import DbScope, Tx
 from axentra.events.jobs import (
     DEFAULT_HANDLER_PERMISSIONS,
@@ -148,6 +149,8 @@ class JobWorker:
     ) -> None:
         if concurrency < 1:
             raise ValueError("concurrency must be at least 1")
+        # A worker may run in a process of its own: its job failure logs must not carry database values (B-06-1).
+        install_db_error_redaction()
         self.ax = ax
         self.kinds = kinds
         self.concurrency = concurrency

@@ -82,8 +82,9 @@ JSON logs (`observability.log_format = "json"`) carry `request_id`, method, path
 duration; messages and exceptions are redacted (API keys, bearer tokens, JWTs, invitation tokens,
 database passwords). Database errors are logged without the values of the server's `DETAIL` text: a log record
 names the SQLSTATE and the constraint (`unique violation (SQLSTATE 23505, constraint users_email_key)`; JSON logs
-also carry `db_sqlstate` and `db_constraint`). Applications that install their own logging handlers add
-`axentra.core.db_errors.DbErrorRedactionFilter` to them.
+also carry `db_sqlstate` and `db_constraint`). This holds for every log record of the process, also with an
+application's own handlers or logging configuration: creating an `Axentra` instance installs the redaction in the
+log record factory. Trace spans, job and notification `last_error` and CLI error messages use the same text.
 
 ## Maintenance and retention
 

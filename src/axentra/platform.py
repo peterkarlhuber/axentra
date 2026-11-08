@@ -31,6 +31,7 @@ from axentra.billing.service import BillingService
 from axentra.config.secrets import Keyring, SecretBox, keyring_from_settings
 from axentra.config.settings import DeploymentMode, Environment, Settings
 from axentra.core.context import Principal
+from axentra.core.db_errors import install_db_error_redaction
 from axentra.core.errors import ConfigurationError
 from axentra.data.database import Database
 from axentra.data.migrations import Migration, MigrationRunner, SchemaCheck, discover_migrations
@@ -96,6 +97,8 @@ class Axentra:
         ``keyring``: the master keys, when the embedding application loads them itself (default:
         ``security.master_keys_ref`` / ``master_keys``; then the ref is not required in production)."""
         settings.validate_security(keyring_injected=keyring is not None)
+        # Log records of every logger lose the values database errors carry (B-06-1), whoever configures logging.
+        install_db_error_redaction()
         self.settings = settings
         self.db = database or Database(
             _database_url(settings),

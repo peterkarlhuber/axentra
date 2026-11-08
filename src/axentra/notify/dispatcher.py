@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from axentra.config.secrets import SecretBox
 from axentra.config.settings import NotifySettings
+from axentra.core.db_errors import safe_error_text
 from axentra.core.ids import new_token
 from axentra.core.redaction import redact_text
 from axentra.data.database import Database, DbScope, Row
@@ -153,7 +154,8 @@ class NotifyDispatcher:
         except ProviderError as exc:
             error = exc
         except Exception as exc:
-            error = ProviderError(f"{type(exc).__name__}: {exc}")
+            # Stored as last_error and returned by the API: no database values (B-06-1, AX-I-7).
+            error = ProviderError(f"{type(exc).__name__}: {safe_error_text(exc)}")
         finally:
             if self._duration is not None:
                 self._duration.observe(time.perf_counter() - started, provider=self.provider.name)

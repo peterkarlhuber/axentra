@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Any
 
-from axentra.core.db_errors import DbErrorRedactionFilter
+from axentra.core.db_errors import DbErrorRedactionFilter, install_db_error_redaction
 from axentra.core.redaction import redact_auth_query, redact_text
 
 request_id_var: ContextVar[str | None] = ContextVar("axentra_request_id", default=None)
@@ -25,9 +25,11 @@ class JsonFormatter(logging.Formatter):
         rid = request_id_var.get()
         if rid:
             data["request_id"] = rid
-        if record.exc_info:
+        if record.exc_info or record.exc_text:
             # ``exc_text`` first: DbErrorRedactionFilter stores the traceback without database values there.
-            data["exc"] = redact_text(record.exc_text or self.formatException(record.exc_info))
+            data["exc"] = redact_text(
+                record.exc_text or self.formatException(record.exc_info)  # type: ignore[arg-type]
+            )
         keys = ("method", "path", "status", "duration_ms", "product_id", "tenant_id", "job_id")
         for key in (*keys, "db_sqlstate", "db_constraint"):
             if hasattr(record, key):
@@ -74,18 +76,3 @@ def install_access_log_redaction() -> None:
     access = logging.getLogger("uvicorn.access")
     if not any(isinstance(f, RedactAuthQuery) for f in access.filters):
         access.addFilter(RedactAuthQuery())
-
-
-#: Loggers that log database errors raised while answering a request, also through handlers that
-#: :func:`configure_logging` did not install: Axentra's error handlers (``axentra.http``) and uvicorn's
-#: "Exception in ASGI application" (``uvicorn.error``, which has its own handler and does not propagate).
-DB_ERROR_LOGGERS = ("axentra.http", "uvicorn.error")
-
-
-def install_db_error_redaction() -> None:
-    """Install :class:`~axentra.core.db_errors.DbErrorRedactionFilter` on :data:`DB_ERROR_LOGGERS` (B-06-1,
-    TABRION MIG-AXE-0); installing twice is harmless. uvicorn's logging configuration keeps logger filters."""
-    for name in DB_ERROR_LOGGERS:
-        log = logging.getLogger(name)
-        if not any(isinstance(f, DbErrorRedactionFilter) for f in log.filters):
-            log.addFilter(DbErrorRedactionFilter())
