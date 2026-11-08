@@ -80,7 +80,11 @@ There is no automatic database instrumentation yet.
 
 JSON logs (`observability.log_format = "json"`) carry `request_id`, method, path, status and
 duration; messages and exceptions are redacted (API keys, bearer tokens, JWTs, invitation tokens,
-database passwords).
+database passwords). Database errors are logged without the values of the server's `DETAIL` text: a log record
+names the SQLSTATE and the constraint (`unique violation (SQLSTATE 23505, constraint users_email_key)`; JSON logs
+also carry `db_sqlstate` and `db_constraint`). This holds for every log record of the process, also with an
+application's own handlers or logging configuration: creating an `Axentra` instance installs the redaction in the
+log record factory. Trace spans, job and notification `last_error` and CLI error messages use the same text.
 
 ## Maintenance and retention
 
@@ -98,3 +102,10 @@ still run).
 
 Notification delivery runs separately: `axentra notify-dispatch --loop` (or call
 `ax.notify.dispatcher().run_once()` from a job worker).
+
+### Database error records and `exc_info`
+
+When a log record carries a database error, the redaction clears `record.exc_info` and stores the redacted traceback in
+`record.exc_text`. Standard formatters, uvicorn's formatters and Axentra's JSON and text formatters print `exc_text`
+unchanged. Handlers that read the exception object from `exc_info` (for example Sentry or the OpenTelemetry log handler)
+only see the redacted text for these records. Records without a database error keep `exc_info`.

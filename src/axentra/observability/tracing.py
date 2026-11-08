@@ -16,6 +16,7 @@ import logging
 from typing import Any
 
 from axentra.config.settings import ObservabilitySettings
+from axentra.core.db_errors import redacted_traceback, safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,18 @@ class OtelTracing:
 
     @contextmanager
     def span(self, name: str, attributes: dict[str, Any] | None = None) -> Iterator[Any]:
-        with self.tracer.start_as_current_span(name, attributes=attributes or {}) as span:
-            yield span
+        # OpenTelemetry would record ``str(exc)`` and the raw traceback as the span's exception event and status,
+        # and export them: for a database error that is the DETAIL text with row values (B-06-1). The exception
+        # is recorded here instead, without those values.
+        with self.tracer.start_as_current_span(
+            name, attributes=attributes or {}, record_exception=False, set_status_on_exception=False
+        ) as span:
+            try:
+                yield span
+            except BaseException as exc:
+                if not isinstance(exc, GeneratorExit):
+                    record_redacted_exception(span, exc)
+                raise
 
     def shutdown(self) -> None:
         try:
@@ -62,6 +73,23 @@ class OtelTracing:
 
 
 Tracing = NoopTracing | OtelTracing
+
+
+def record_redacted_exception(span: Any, exc: BaseException) -> None:
+    """Record ``exc`` on an OpenTelemetry span as the SDK does (``exception`` event, ``ERROR`` status), with a
+    message and stack trace that carry no database values (:func:`~axentra.core.db_errors.safe_error_text`)."""
+    from opentelemetry.trace import Status, StatusCode
+
+    message = safe_error_text(exc)
+    span.record_exception(
+        exc,
+        attributes={
+            "exception.message": message,
+            "exception.stacktrace": redacted_traceback(exc),
+        },
+        escaped=True,
+    )
+    span.set_status(Status(StatusCode.ERROR, f"{type(exc).__name__}: {message}"))
 
 
 def setup_tracing(settings: ObservabilitySettings, *, span_processor: Any = None) -> Tracing:

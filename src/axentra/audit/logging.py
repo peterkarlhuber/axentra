@@ -8,6 +8,7 @@ import json
 import logging
 from typing import Any
 
+from axentra.core.db_errors import DbErrorRedactionFilter, install_db_error_redaction
 from axentra.core.redaction import redact_auth_query, redact_text
 
 request_id_var: ContextVar[str | None] = ContextVar("axentra_request_id", default=None)
@@ -24,9 +25,13 @@ class JsonFormatter(logging.Formatter):
         rid = request_id_var.get()
         if rid:
             data["request_id"] = rid
-        if record.exc_info:
-            data["exc"] = redact_text(self.formatException(record.exc_info))
-        for key in ("method", "path", "status", "duration_ms", "product_id", "tenant_id", "job_id"):
+        if record.exc_info or record.exc_text:
+            # ``exc_text`` first: DbErrorRedactionFilter stores the traceback without database values there.
+            data["exc"] = redact_text(
+                record.exc_text or self.formatException(record.exc_info)  # type: ignore[arg-type]
+            )
+        keys = ("method", "path", "status", "duration_ms", "product_id", "tenant_id", "job_id")
+        for key in (*keys, "db_sqlstate", "db_constraint"):
             if hasattr(record, key):
                 data[key] = getattr(record, key)
         return json.dumps(data, default=str)
@@ -44,10 +49,13 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
         if fmt == "json"
         else RedactingTextFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
     )
+    # Every record this handler emits loses the values database errors carry (B-06-1).
+    handler.addFilter(DbErrorRedactionFilter())
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
     install_access_log_redaction()
+    install_db_error_redaction()
 
 
 class RedactAuthQuery(logging.Filter):

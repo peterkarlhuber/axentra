@@ -26,6 +26,17 @@ the change that completes its package.
 
 No package is open.
 
+## TABRION
+
+Packages of the Tabrion ecosystem consolidation plan (migration plan, document 06; backlog, document 09) that touch
+Axentra, referenced as "TABRION <WP-ID>". Axentra gets no runtime dependency on Tabrion before MIG-AXE-3. A done
+package stays listed until the package that replaces it is done.
+
+| Pri | Package | Status | Item |
+|---|---|---|---|
+| P1 | TABRION MIG-AXE-0 | Done (this change) | Finding B-06-1: database errors carried the values of the server's `DETAIL` text (for example the email of a unique violation) into logs, trace spans, stored error texts and CLI output. Local fix in `axentra.core.db_errors`: `safe_message` / `safe_error_text` (kind, SQLSTATE, constraint), `DbErrorRedactionFilter`, and `install_db_error_redaction`, which wraps the log record factory process-wide (called by `Axentra`, `create_app`, `configure_logging`, `JobWorker` and the CLI) and adds the filter to `axentra.http`, `uvicorn.error` and `logging.lastResort`. OpenTelemetry spans record a redacted exception; job and notification `last_error` and CLI operator errors use the safe text. Problem details unchanged. Security review accepted with conditions; M-1..M-3 and L-1..L-7 fixed in this change. Regression tests: `tests/integration/test_db_error_logging.py` (kept), `tests/unit/test_db_errors_local.py` (local internals)
+| P1 | TABRION MIG-AXE-3 | Open | **TABRION MIG-AXE-3 replaces this local filter**: `axentra.core.db_errors` is replaced by `tabrion.errors` (`safe_message`, `classify`, `DbErrorRedactionFilter`) once Tabrion `v0.1.0` is final, installed process-wide as today (record factory); `tests/unit/test_db_errors_local.py` goes with the module, the regression tests in `tests/integration/test_db_error_logging.py` stay unchanged and must stay green. The PR lists every place that turns a database error into text (grep) and gets a security review. Review follow-up (L-2): a lint or grep rule against f-strings and `str(exc)` in logging calls. Re-review residuals (accepted, see `tabrion-planung/reviews/mig-axe-0-security-review.md`): R-1 values in the primary message of pre-formatted messages (e.g. 22P02) are kept, covered by the same lint rule; R-2 `extra=` values are not redacted (Axentra's JSON formatter allow-lists keys, so Axentra itself is unaffected); R-4 non-database lines starting with `HINT:`/`DETAIL:`/`CONTEXT:` are stripped; R-5 about 3 µs per record, add a fast path; R-6 products that replace the record factory without chaining skip it (handler filters still apply)
+
 ## Security and external review
 
 Items that need an independent or external review. The audit rounds so far were internal (no independent security

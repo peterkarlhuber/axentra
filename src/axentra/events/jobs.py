@@ -39,6 +39,7 @@ from axentra.access.permissions import (
 from axentra.audit.log import AuditLog
 from axentra.config.settings import Settings
 from axentra.core.context import Actor, ActorKind, Principal
+from axentra.core.db_errors import safe_error_text
 from axentra.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.core.pagination import Page, clamp_limit, decode_cursor, encode_cursor
@@ -100,7 +101,9 @@ def backoff_delay(attempt: int, base: float, cap: float, *, rng: random.Random |
 
 
 def format_error(exc: BaseException) -> str:
-    text = f"{type(exc).__name__}: {exc}"
+    """The stored ``last_error`` of a failed attempt; a database error is described by :func:`safe_error_text`
+    (kind, SQLSTATE, constraint), never by the values of its DETAIL text (B-06-1, AX-I-7)."""
+    text = f"{type(exc).__name__}: {safe_error_text(exc)}"
     return redact_text(text)[:MAX_ERROR_CHARS]
 
 

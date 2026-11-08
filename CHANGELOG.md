@@ -40,6 +40,34 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Security (TABRION MIG-AXE-0)
+- Database errors (finding B-06-1) no longer carry the values of the server's `DETAIL` text (for example
+  `Key (email)=(...) already exists.` of a unique violation, or `Failing row contains (...)`) out of the process.
+  `axentra.core.db_errors` describes them by kind, SQLSTATE and constraint name only (`safe_message`,
+  `safe_error_text`, such as `unique violation (SQLSTATE 23505, constraint users_email_key)`).
+  - Logs: `install_db_error_redaction` wraps the log record factory once per process, so every record is
+    redacted when it is created, whoever configured logging (embedding applications, CLI commands without
+    `configure_logging`, `logging.lastResort`, a product's own handlers). `Axentra`, `create_app`,
+    `configure_logging`, `JobWorker` and the CLI call it; `DbErrorRedactionFilter` is also on the `configure_logging`
+    handler, `axentra.http`, `uvicorn.error` and `logging.lastResort`. The filter redacts the whole exception
+    chain at any depth (also wrappers that quote the error, exception groups), positional and mapping arguments,
+    messages formatted before logging (psycopg's `DETAIL:` / `HINT:` / `CONTEXT:` lines are always removed), and
+    keeps a record whose message cannot be formatted, with its redacted traceback. A redacted record has
+    `exc_info` cleared and the redacted traceback in `exc_text`, plus `db_sqlstate` / `db_constraint` (also in
+    JSON logs).
+  - Tracing: OpenTelemetry spans record the exception event and error status with the safe text and a redacted
+    stack trace instead of the SDK's raw `str(exc)`.
+  - Stored and returned error texts: job `last_error` (`GET /v1/products/{id}/jobs[/{job_id}]`) and notification
+    `last_error` use the safe text (security plan invariant AX-I-7).
+  - CLI: `axentra: database_error: ...` on stderr shows the safe text (`--debug` still shows the traceback).
+  - Client-side psycopg errors without a SQLSTATE (connection failures) keep their own message, without server
+    text lines. Problem details answers are unchanged (snapshot test written before the fix).
+  - Local fix; TABRION MIG-AXE-3 replaces it with `tabrion.errors`. The regression tests in
+    `tests/integration/test_db_error_logging.py` (canary values in unique, foreign key and check violations,
+    including a value only the server adds, through caplog, JSON and text output, uvicorn's error log,
+    `logging.lastResort`, a product's own handler, the job worker, the jobs and notifications API, trace spans and
+    the CLI) stay.
+
 ### Security (MUP-ONA)
 - Webhook targets (MUP-ONA A4, PS-4): IPv6 addresses that lead to an IPv4 address are judged by that address
   with explicit prefix checks instead of `ipaddress.is_global`, whose answer depends on the Python patch level

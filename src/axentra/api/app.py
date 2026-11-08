@@ -32,6 +32,7 @@ from axentra.api.problems import (
 from axentra.api.routes import ROUTERS
 from axentra.audit.logging import install_access_log_redaction, request_id_var
 from axentra.config.settings import Settings, load_settings
+from axentra.core.db_errors import install_db_error_redaction
 from axentra.core.errors import AxentraError, ConfigurationError
 from axentra.core.ids import new_id
 from axentra.platform import Axentra
@@ -193,6 +194,7 @@ def create_app(
 ) -> FastAPI:
     ax = axentra or Axentra.from_settings(settings or load_settings())
     install_access_log_redaction()
+    install_db_error_redaction()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:

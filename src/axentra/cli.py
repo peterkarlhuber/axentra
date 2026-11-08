@@ -468,6 +468,7 @@ def _operator_error(exc: BaseException) -> tuple[str, str] | None:
     import psycopg
     from psycopg_pool import PoolTimeout
 
+    from axentra.core.db_errors import safe_message
     from axentra.core.errors import AxentraError
     from axentra.core.redaction import redact_text
     from axentra.remote import RemoteError
@@ -477,9 +478,10 @@ def _operator_error(exc: BaseException) -> tuple[str, str] | None:
     if isinstance(exc, AxentraError):
         return exc.code, redact_text(str(exc))
     if isinstance(exc, (psycopg.OperationalError, PoolTimeout)):
-        return "database_unreachable", redact_text(str(exc).strip()) + "\n" + DATABASE_URL_HINT
+        # No DETAIL values on stderr (B-06-1); --debug shows the full traceback.
+        return "database_unreachable", redact_text(safe_message(exc).strip()) + "\n" + DATABASE_URL_HINT
     if isinstance(exc, psycopg.Error):
-        return "database_error", redact_text(str(exc).strip())
+        return "database_error", redact_text(safe_message(exc).strip())
     if isinstance(exc, ModuleNotFoundError):
         return "module_not_found", str(exc)
     return None
@@ -490,6 +492,11 @@ def main(argv: list[str] | None = None) -> int:
     ``--debug`` (or ``AXENTRA_DEBUG=1``) shows the traceback instead."""
     import os
 
+    from axentra.core.db_errors import install_db_error_redaction
+
+    # Commands that never call configure_logging (migrate, purge, ...) log through logging.lastResort or the
+    # operator's handlers: their records must not carry database values either (B-06-1).
+    install_db_error_redaction()
     args = build_parser().parse_args(argv)
     try:
         try:
