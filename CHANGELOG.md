@@ -40,6 +40,19 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Security (TABRION MIG-AXE-0)
+- Logs (finding B-06-1): database errors no longer write the values of the server's `DETAIL` text to the logs
+  (for example `Key (email)=(...) already exists.` of a unique violation, or `Failing row contains (...)`).
+  The new `axentra.core.db_errors.DbErrorRedactionFilter` replaces the text of every psycopg error in a log
+  record's message, arguments and traceback with `safe_message(exc)`, such as
+  `unique violation (SQLSTATE 23505, constraint users_email_key)`, and adds `db_sqlstate` / `db_constraint`
+  (also in JSON logs). `configure_logging` installs it on its handler, and `create_app` on the `axentra.http`
+  and `uvicorn.error` loggers (uvicorn logs unhandled errors with its own handler). Client-side psycopg errors
+  without a SQLSTATE (connection failures) keep their own message. Problem details answers are unchanged
+  (snapshot test). This is a local fix; TABRION MIG-AXE-3 replaces it with `tabrion.errors`, and the
+  regression tests (`tests/integration/test_db_error_logging.py`: canary value in unique, foreign key and check
+  violations, caplog at every level, JSON and text output, uvicorn's error log) stay.
+
 ### Security (MUP-ONA)
 - Webhook targets (MUP-ONA A4, PS-4): IPv6 addresses that lead to an IPv4 address are judged by that address
   with explicit prefix checks instead of `ipaddress.is_global`, whose answer depends on the Python patch level

@@ -80,7 +80,10 @@ There is no automatic database instrumentation yet.
 
 JSON logs (`observability.log_format = "json"`) carry `request_id`, method, path, status and
 duration; messages and exceptions are redacted (API keys, bearer tokens, JWTs, invitation tokens,
-database passwords).
+database passwords). Database errors are logged without the values of the server's `DETAIL` text: a log record
+names the SQLSTATE and the constraint (`unique violation (SQLSTATE 23505, constraint users_email_key)`; JSON logs
+also carry `db_sqlstate` and `db_constraint`). Applications that install their own logging handlers add
+`axentra.core.db_errors.DbErrorRedactionFilter` to them.
 
 ## Maintenance and retention
 

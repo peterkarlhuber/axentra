@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from axentra.core.db_errors import DbErrorRedactionFilter
 from axentra.core.errors import PROBLEM_BASE, AxentraError, ProblemInfo, problem_details
 from axentra.core.errors import problem as make_problem
 
@@ -24,6 +25,9 @@ __all__ = [
 ]
 
 logger = logging.getLogger("axentra.http")
+# The handlers below log internal errors with their traceback; a database error in it must not carry the values
+# of its DETAIL text (B-06-1). On the logger, so that every handler of the record sees the redacted text.
+logger.addFilter(DbErrorRedactionFilter())
 _STATUS_CODES = {
     400: "bad_request",
     401: "unauthenticated",

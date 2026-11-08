@@ -26,6 +26,17 @@ the change that completes its package.
 
 No package is open.
 
+## TABRION
+
+Packages of the Tabrion ecosystem consolidation plan (migration plan, document 06; backlog, document 09) that touch
+Axentra, referenced as "TABRION <WP-ID>". Axentra gets no runtime dependency on Tabrion before MIG-AXE-3. A done
+package stays listed until the package that replaces it is done.
+
+| Pri | Package | Status | Item |
+|---|---|---|---|
+| P1 | TABRION MIG-AXE-0 | Done (this change) | Finding B-06-1: logs of database errors carried the values of the server's `DETAIL` text (for example the email of a unique violation) through `api/problems.py` and every traceback. Local fix: `axentra.core.db_errors` (`safe_message`, `DbErrorRedactionFilter`), installed by `configure_logging` (root handler) and `create_app` (`axentra.http`, `uvicorn.error`); SQLSTATE and constraint name stay. Problem details unchanged. Regression tests: `tests/integration/test_db_error_logging.py` |
+| P1 | TABRION MIG-AXE-3 | Open | **TABRION MIG-AXE-3 replaces this local filter**: `axentra.core.db_errors` is replaced by `tabrion.errors` (`safe_message`, `classify`, `DbErrorRedactionFilter`) once Tabrion `v0.1.0` is final; the MIG-AXE-0 regression tests stay unchanged and must stay green. The PR also lists every other place that turns a database error into text (grep), including error texts that are stored rather than logged (job and webhook `last_error`), and gets a security review |
+
 ## Security and external review
 
 Items that need an independent or external review. The audit rounds so far were internal (no independent security
