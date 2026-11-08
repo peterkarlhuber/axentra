@@ -94,7 +94,39 @@ label truncates the rest of that message visibly. Tracebacks are redacted the sa
 database text in its message, `args` or notes without the database error itself (a retry loop's
 `RuntimeError(f"gave up: {last}")`), and the report that logging prints to stderr when a handler fails
 (`--- Logging error ---`) carries no database values either. `db_sqlstate` and `db_constraint` are reserved record
-attributes; a value passed in `extra=` wins. Values in the first line of a pre-formatted message (for example `invalid input syntax for type integer:
+attributes; a value passed in `extra=` wins.
+
+The redaction patches two standard library methods for the whole process (`install_db_error_redaction`):
+`logging.Handler.handleError` prints a redacted report without the standard "Call stack:" section, and
+`logging.Logger.makeRecord` accepts `db_sqlstate`/`db_constraint` in `extra=`. A `Logger` subclass (set with
+`logging.setLoggerClass`) that overrides `makeRecord` without calling the base method raises `KeyError` again for
+these two keys, and a library that patches either method after Axentra replaces Axentra's version (for
+`handleError`, the redacted report is lost).
+
+### structlog
+
+With structlog's standard library integration (`ProcessorFormatter.wrap_for_formatter`), the event dict arrives as
+a mapping message and the filter redacts it as a mapping: values become safe messages, and an `exc_info` that names
+a database error (or its text) is replaced by the redacted traceback under `exception`, so `format_exc_info`,
+`dict_tracebacks` and `ConsoleRenderer` have nothing raw to render. A structlog chain that does not go through
+`logging` (for example `PrintLoggerFactory`) needs the optional processor
+`axentra.core.db_errors.redact_db_errors_processor` (no structlog dependency in Axentra). Put it in
+`structlog.configure(processors=[...])` after the processors that add context and **before** `format_exc_info`,
+`dict_tracebacks` and the renderer:
+
+```python
+structlog.configure(processors=[
+    structlog.contextvars.merge_contextvars,
+    structlog.processors.add_log_level,
+    redact_db_errors_processor,          # before any exception formatting
+    structlog.processors.format_exc_info,  # or dict_tracebacks, or leave it to ConsoleRenderer
+    structlog.processors.JSONRenderer(),
+])
+```
+
+The processor also fits the standard library integration (before `wrap_for_formatter`), where it is a second line
+of defense.
+ Values in the first line of a pre-formatted message (for example `invalid input syntax for type integer:
 "..."`) and `extra=` values are not redacted: log the error object (`log.error("... %s", exc)` or
 `exc_info=True`), never its text.
 

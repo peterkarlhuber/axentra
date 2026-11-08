@@ -45,6 +45,7 @@ __all__ = [
     "install_db_error_redaction",
     "is_db_error",
     "primary_db_error",
+    "redact_db_errors_processor",
     "redacted_traceback",
     "safe_error_text",
     "safe_message",
@@ -325,6 +326,14 @@ def _forms(value: str) -> list[str]:
     return forms
 
 
+def _attr(obj: object, name: str) -> Any:
+    """``getattr(obj, name, None)`` that never raises (a property that raises, review D-3)."""
+    try:
+        return getattr(obj, name, None)
+    except Exception:
+        return None
+
+
 def _text_of(producer: Any, value: object) -> str | None:
     try:
         text = producer(value)
@@ -337,7 +346,7 @@ def _error_texts(err: BaseException) -> list[str]:
     """Every text of ``err`` that may appear in a message: ``str``, ``repr``, its string ``args``, and their
     escaped forms (``f"{e!r}"``, ``"%r" % str(e)``, ``e.args`` or ``[e]`` formatted, Tabrion review H-2)."""
     sources = [_text_of(str, err), _text_of(repr, err)]
-    args = getattr(err, "args", None)
+    args = _attr(err, "args")
     for arg in args if isinstance(args, tuple) else ():
         if isinstance(arg, str):
             sources += [arg, _text_of(repr, arg)]
@@ -409,29 +418,85 @@ def _exception_may_hold_server_text(exc: BaseException) -> bool:
     for e in _chain(exc):
         if any(_may_hold_server_text(t) for t in _error_texts(e)):
             return True
-        notes = getattr(e, "__notes__", None)
+        notes = _attr(e, "__notes__")
         if isinstance(notes, list) and any(_may_hold_server_text(n) for n in notes):
             return True
     return False
 
 
-def _scrubbed_mapping(msg: Mapping[Any, Any], found: list[BaseException]) -> dict[Any, Any] | None:
-    """A copy of a mapping message (structlog's event dict) with each value scrubbed, or ``None`` when its text
-    still holds database text afterwards (review F-5)."""
-    out: dict[Any, Any] = {}
-    for key, value in msg.items():
+def _event_exception(value: object) -> tuple[BaseException, TracebackType | None] | None:
+    """The exception an event dict's ``exc_info`` names, as structlog resolves it: ``True`` for the exception
+    being handled, an exception instance, or an ``exc_info`` tuple."""
+    if value is True:
+        _, current, tb = sys.exc_info()
+        return (current, tb) if isinstance(current, BaseException) else None
+    if isinstance(value, BaseException):
+        return value, value.__traceback__
+    if isinstance(value, tuple) and len(value) == 3 and isinstance(value[1], BaseException):
+        return value[1], value[2]
+    return None
+
+
+def _redact_event_dict(event: Mapping[Any, Any], found: list[BaseException]) -> dict[Any, Any] | None:
+    """A copy of a mapping message or structlog event dict without database values, or ``None`` when its text
+    still holds database text afterwards (review F-5).
+
+    An ``exc_info`` that names an exception whose chain, ``args`` or notes hold a database error or its text is
+    replaced by the redacted traceback under ``exception`` (and ``exc_info`` is removed), so that structlog's
+    ``format_exc_info``, ``dict_tracebacks`` and ``ConsoleRenderer`` have nothing raw to render (review D-2). Each
+    other value is scrubbed: a database error becomes its safe message, a string is scrubbed, any other object whose
+    ``repr`` holds database text becomes its scrubbed ``repr``."""
+    out: dict[Any, Any] = dict(event)
+    named = _event_exception(out.get("exc_info"))
+    if named is not None:
+        exc, tb = named
+        errors: list[BaseException] = []
+        _collect(exc, errors)
+        if errors or _exception_may_hold_server_text(exc):
+            del out["exc_info"]
+            out["exception"] = redacted_traceback(exc, tb, errors)
+            found.extend(e for e in errors if all(e is not f for f in found))
+    _collect(list(out.values()), found)  # so that a value's text (``str(e)``) is replaced by its safe message
+    for key, value in list(out.items()):
         if _is_db_exc(value):
             out[key] = safe_message(value)
         elif isinstance(value, str):
             out[key] = scrub_text(value, found)
         else:
-            text = repr(value)
+            text = _text_of(repr, value)
+            if text is None:
+                continue
             redacted = scrub_text(text, found)
-            out[key] = value if redacted == text else redacted
+            if redacted != text:
+                out[key] = redacted
     text = str(out)
     if scrub_text(text, found) != text:
         return None
     return out
+
+
+def redact_db_errors_processor(logger: object, method_name: str, event_dict: Any) -> Any:
+    """A structlog processor that removes database values from an event dict (review D-2).
+
+    Optional and import-free: Axentra does not depend on structlog. It redacts ``exc_info`` (``True``, an exception
+    or an ``exc_info`` tuple: the redacted traceback goes under ``exception``) and every value, as
+    :class:`DbErrorRedactionFilter` does for a mapping message. Put it into structlog's processor chain **before**
+    ``format_exc_info``, ``dict_tracebacks`` or the renderer (``ConsoleRenderer`` renders ``exc_info`` itself), in
+    the logger's ``processors`` (where ``exc_info=True`` still names the exception being handled), not only in a
+    ``ProcessorFormatter``'s. It never raises: on an internal error it returns the event with only the ``event``
+    text, scrubbed."""
+    if not isinstance(event_dict, Mapping):
+        return event_dict
+    redacted: dict[Any, Any] | None = None
+    with contextlib.suppress(Exception):
+        redacted = _redact_event_dict(event_dict, [])
+    if redacted is not None:
+        return redacted
+    try:
+        event = event_dict.get("event")
+        return {"event": strip_server_text(event) if isinstance(event, str) else "event redacted"}
+    except Exception:
+        return {"event": "event redacted"}
 
 
 def _plain_record(record: logging.LogRecord) -> bool:
@@ -599,21 +664,23 @@ class DbErrorRedactionFilter(logging.Filter):
             record.args = {k: safe_message(v) if _is_db_exc(v) else v for k, v in args.items()}
         if isinstance(record.msg, BaseException) and is_db_error(record.msg):
             record.msg = safe_message(record.msg)
+        # Before the mapping branch below, which returns early (review D-1).
+        if isinstance(exc, BaseException) and found:
+            record.exc_text = redacted_traceback(exc, record.exc_info[2], found)  # type: ignore[index]
+            record.exc_info = None
+        elif isinstance(record.exc_text, str) and _may_hold_server_text(record.exc_text):
+            record.exc_text = strip_server_text(record.exc_text)
+
         if isinstance(record.msg, Mapping) and not record.args:
-            # A mapping message stays a mapping (structlog's ProcessorFormatter copies it, review F-5).
-            scrubbed = _scrubbed_mapping(record.msg, found)
+            # A mapping message stays a mapping (structlog's ProcessorFormatter copies it, review F-5), with its
+            # ``exc_info`` redacted (structlog renders it itself, review D-2).
+            scrubbed = _redact_event_dict(record.msg, found)
             if scrubbed is not None:
                 if scrubbed != record.msg:
                     record.msg = scrubbed
                 if found:
                     self._set_fields(record, primary, found)
                 return
-
-        if isinstance(exc, BaseException) and found:
-            record.exc_text = redacted_traceback(exc, record.exc_info[2], found)  # type: ignore[index]
-            record.exc_info = None
-        elif isinstance(record.exc_text, str) and _may_hold_server_text(record.exc_text):
-            record.exc_text = strip_server_text(record.exc_text)
 
         # The check runs on the formatted message, so a value in any argument (a repr, a list, e.args) is seen.
         try:

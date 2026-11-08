@@ -460,3 +460,76 @@ def test_f8_string_args_of_an_error_are_replaced() -> None:
     e = cls(f"value {SECRET} rejected")
     text = _filtered("failed: %s / %s", (e, e.args[0])).getMessage()
     assert SECRET not in text
+
+
+# --- Delta review (D-2 processor, D-3) ------------------------------------------------------------------------------
+
+
+def test_d2_structlog_processor_without_stdlib() -> None:
+    """D-2: the optional processor protects a structlog chain that does not go through ``logging``."""
+    import io
+
+    structlog = pytest.importorskip("structlog")
+    stream = io.StringIO()
+    structlog.reset_defaults()
+    structlog.configure(
+        processors=[
+            db_errors.redact_db_errors_processor,
+            structlog.processors.format_exc_info,
+            structlog.processors.JSONRenderer(),
+        ],
+        logger_factory=structlog.PrintLoggerFactory(file=stream),
+        cache_logger_on_first_use=False,
+    )
+    try:
+        slog = structlog.get_logger()
+        try:
+            raise _unique()
+        except psycopg.Error:
+            slog.exception("boom")
+        slog.error("kw", err=_unique(), items=[_unique()], text=str(_unique()))
+        slog.info("plain", n=1)
+    finally:
+        structlog.reset_defaults()
+    out = stream.getvalue()
+    assert SECRET not in out and "DETAIL" not in out, out
+    assert out.count("unique violation (SQLSTATE 23505)") >= 3
+    assert '"n": 1' in out
+
+
+@pytest.mark.parametrize(
+    "exc_info",
+    [True, "instance", "tuple", False, None],
+)
+def test_d2_processor_exc_info_forms(exc_info: object) -> None:
+    e = _unique()
+    try:
+        raise e
+    except psycopg.Error:
+        value = {"instance": e, "tuple": (type(e), e, e.__traceback__)}.get(exc_info, exc_info)  # type: ignore[call-overload]
+        out = db_errors.redact_db_errors_processor(None, "error", {"event": "x", "exc_info": value})
+    assert SECRET not in repr(out)
+    if exc_info in (False, None):
+        assert out == {"event": "x", "exc_info": exc_info}
+    else:
+        assert "exc_info" not in out and "unique violation (SQLSTATE 23505)" in out["exception"]
+
+
+def test_d2_processor_never_raises() -> None:
+    class Bad:
+        def __repr__(self) -> str:
+            raise RuntimeError("bad repr")
+
+    assert db_errors.redact_db_errors_processor(None, "error", {"event": "x", "b": Bad()})["event"] == "x"
+    assert db_errors.redact_db_errors_processor(None, "error", "not a dict") == "not a dict"
+
+
+def test_d3_exception_whose_args_property_raises() -> None:
+    class Odd(Exception):
+        @property
+        def args(self):  # type: ignore[override]
+            raise RuntimeError("no args")
+
+    record = _filtered("payment %s failed", ("ord-1",), Odd())
+    assert record.getMessage() == "payment ord-1 failed"
+    assert "DbErrorRedactionFilter" not in _traceback_text(record)

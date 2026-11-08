@@ -77,6 +77,14 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   - F-6: `extra={"db_sqlstate": ...}` no longer raises `KeyError` (`Logger.makeRecord` accepts the two names; the
     caller's value wins).
   - F-7: removed server text is replaced by the visible marker `[redacted: database server text]`.
+- Delta re-review of the fix round:
+  - D-1: a mapping message logged with `exc_info` (`log.error({"event": "x"}, exc_info=True)`) skipped the
+    traceback redaction (a regression of the F-5 change); fixed.
+  - D-2: structlog's standard library integration rendered `exc_info=True` itself (`format_exc_info`,
+    `dict_tracebacks`, `ConsoleRenderer`); the event dict's `exc_info` is now replaced by the redacted traceback
+    under `exception`. New optional processor `axentra.core.db_errors.redact_db_errors_processor` for structlog
+    chains (no structlog dependency; `structlog` is a dev extra for the tests only).
+  - D-3: an exception whose `args` property raises no longer makes the filter replace the record.
 
 ### Security (TABRION MIG-AXE-0)
 - Database errors (finding B-06-1) no longer carry the values of the server's `DETAIL` text (for example

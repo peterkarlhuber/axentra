@@ -901,3 +901,88 @@ def test_f8_rewritten_label_with_the_error_object(pg_urls: dict[str, str]) -> No
     out = _plain_handler_output(lambda lg: lg.error("x %s / %s", exc, " ".join(str(exc).split())))
     assert canary not in out, out
     assert "[redacted]" in out
+
+
+# --- Delta review of the fix round (axe-tb031-review.md D-1, D-2) ---------------------------------------------------
+
+
+@pytest.mark.usefixtures("ax")
+def test_d1_mapping_message_with_exc_info(pg_urls: dict[str, str]) -> None:
+    """D-1: a mapping message logged with ``exc_info`` inside ``except UniqueViolation`` (and chained)."""
+    canary, exc = _db_error(pg_urls["admin"])
+
+    def log(lg: logging.Logger) -> None:
+        try:
+            raise exc
+        except psycopg.errors.UniqueViolation:
+            lg.error({"event": "failed"}, exc_info=True)
+        try:
+            try:
+                raise exc
+            except psycopg.Error as e:
+                raise RuntimeError("wrap") from e
+        except RuntimeError:
+            lg.exception({"event": "boom", "n": 1})
+
+    out = _plain_handler_output(log)
+    assert canary not in out and "DETAIL" not in out, out
+    assert "{'event': 'failed'}" in out and "unique violation (SQLSTATE 23505" in out
+
+
+def _structlog_stdlib(formatter_processors: list[Any]) -> tuple[Any, io.StringIO, logging.Logger]:
+    """structlog's documented stdlib integration: ``wrap_for_formatter`` and a ``ProcessorFormatter``."""
+    structlog = pytest.importorskip("structlog")
+    structlog.reset_defaults()
+    structlog.configure(
+        processors=[structlog.stdlib.add_log_level, structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        structlog.stdlib.ProcessorFormatter(
+            processors=[structlog.stdlib.ProcessorFormatter.remove_processors_meta, *formatter_processors]
+        )
+    )
+    name = f"axentra.test.structlog.{uuid.uuid4().hex}"
+    lg = logging.getLogger(name)
+    lg.handlers[:] = [handler]
+    lg.propagate = False
+    lg.setLevel(logging.DEBUG)
+    return structlog.get_logger(name), stream, lg
+
+
+@pytest.mark.parametrize("config", ["format_exc_info", "dict_tracebacks", "console"])
+@pytest.mark.usefixtures("ax")
+def test_d2_structlog_stdlib_exceptions(pg_urls: dict[str, str], config: str) -> None:
+    """D-2: structlog renders ``exc_info=True`` from its event dict itself (``format_exc_info``,
+    ``dict_tracebacks``, ``ConsoleRenderer``); the value must not reach its output."""
+    structlog = pytest.importorskip("structlog")
+    processors = {
+        "format_exc_info": [structlog.processors.format_exc_info, structlog.processors.JSONRenderer()],
+        "dict_tracebacks": [structlog.processors.dict_tracebacks, structlog.processors.JSONRenderer()],
+        "console": [structlog.dev.ConsoleRenderer(colors=False)],
+    }[config]
+    canary, exc = _db_error(pg_urls["admin"])
+    slog, stream, lg = _structlog_stdlib(processors)
+    try:
+        try:
+            try:
+                raise exc
+            except psycopg.Error as e:
+                raise RuntimeError("wrap") from e
+        except RuntimeError:
+            slog.exception("boom")
+        try:
+            raise exc
+        except psycopg.Error:
+            slog.error("failed", exc_info=True)
+        slog.error("kw", err=exc, text=str(exc))
+    finally:
+        lg.handlers[:] = []
+        structlog.reset_defaults()
+    out = stream.getvalue()
+    assert out.count("boom") == 1 and "failed" in out and "kw" in out, out
+    assert canary not in out and "DETAIL" not in out, out
+    assert "unique violation (SQLSTATE 23505" in out

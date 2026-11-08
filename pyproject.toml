@@ -58,6 +58,8 @@ dev = [
     "import-linter>=2.1",
     "aiosmtpd>=1.4",
     "opentelemetry-sdk>=1.25",
+    # Only for the tests of the optional structlog processor (axentra.core.db_errors); not a runtime dependency.
+    "structlog>=24",
 ]
 
 [project.scripts]
