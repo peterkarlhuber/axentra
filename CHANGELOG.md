@@ -40,6 +40,16 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Tests (TABRION QA-25)
+- Security evidence for the Tabrion adoption (document 07, section 8): `tests/integration/test_adoption_security.py`
+  holds MIG-T-AXE-1..9 against the old code. The tests check: no scope on the same pooled connection after every
+  transaction path; the recorded statements of the helpers set the scope only transaction-locally, with a grep rule
+  in `tests/unit/test_adoption_scope_rules.py`; errors in the middle of a transaction return clean idle connections;
+  nested joins on a shared pool restore the scope and borrow nothing; the role decision table, FORCE RLS and the
+  problem details equal the QA-13 snapshots; database-error canaries reach no answer, log or audit event; and a lost
+  write runs exactly once through the fault-injection proxy `tests/evidence/faults.py`. The scoped-transaction
+  benchmark `tests/evidence/bench_transactions.py` (`run`, `compare` with a +5 % limit) completes this. Tests only.
+
 ### Tests (TABRION QA-13)
 - Snapshot tools for rollback evidence of the Tabrion adoption: `python -m tests.evidence.snapshots --url <superuser
   URL> write|check` creates a database and roles of its own, migrates it as a separate owner role, grants a runtime

@@ -13,6 +13,7 @@ written from the old code, before any TABRION MIG-AXE step:
 | `roles.json` | Role decision table, eight variants (`inspect_role`, `grant_runtime_role`, `role_info`, `check_role`) | AX-I-5 (MIG-T-AXE-5), MIG-AXE-6 |
 | `problems.json` | Problem details of every error class, HTTP error answers, OpenAPI `Problem` schemas | AX-I-7 (MIG-T-AXE-7), MIG-AXE-3 |
 | `settings.json` | `SHOW` extract per kind of connection (owned pool, read-only, `on_pool`, `joined`, `join`, leader lock, ping) | AX-I-1..4, MIG-AXE-4, MIG-AXE-5 |
+| `benchmark-reference.json` | 1,000 scoped `transaction()` calls, 7 rounds, on the lane's machine (PostgreSQL 16, local socket over TCP); for information only: the +5 % bound is an A/B run on one machine (`tests/evidence/bench_transactions.py`) | MIG-T-AXE-9 |
 | `schema.json` | Schema dump from the catalog (columns, constraints, indexes, triggers, functions, applied migrations) | every step: no schema change (document 11, section 3) |
 
 A pull request that changes a snapshot on purpose (a new migration, or a step whose plan allows the change) rewrites
