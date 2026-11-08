@@ -9,7 +9,9 @@ retry by the client would reach the server and show up in the server-side count 
 
 This is the "drop after send" mode of Tabrion's ``tabrion.testing.faults`` (QA-3), built from the standard library
 so that Axentra's tests need no Tabrion dependency before TABRION MIG-AXE-1. Connections through it must not use
-TLS or GSS encryption (:meth:`CutProxy.url` sets ``sslmode=disable`` and ``gssencmode=disable``).
+TLS or GSS encryption (:meth:`CutProxy.url` sets ``sslmode=disable`` and ``gssencmode=disable``), so the password
+and every statement cross the network in clear text between the proxy and the server: use it only against a server
+on the same machine (``localhost``), as the tests do; :meth:`CutProxy.for_url` refuses any other host.
 """
 
 from __future__ import annotations
@@ -19,6 +21,9 @@ import socket
 import threading
 
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+#: Hosts :meth:`CutProxy.for_url` accepts (the traffic to the server is not encrypted).
+LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 class CutProxy:
@@ -34,12 +39,16 @@ class CutProxy:
         #: How often the proxy cut a connection.
         self.cuts = 0
         self._closed = False
+        self._pairs: list[_Pair] = []
         threading.Thread(target=self._accept, name="cut-proxy", daemon=True).start()
 
     @classmethod
     def for_url(cls, url: str) -> CutProxy:
         params = conninfo_to_dict(url)
-        return cls(str(params.get("host") or "127.0.0.1"), int(params.get("port") or 5432))
+        host = str(params.get("host") or "127.0.0.1")
+        if host not in LOCAL_HOSTS:
+            raise ValueError(f"the proxy disables TLS: only a local server, not {host!r}")
+        return cls(host, int(params.get("port") or 5432))
 
     def url(self, url: str) -> str:
         """``url`` through this proxy."""
@@ -53,9 +62,14 @@ class CutProxy:
             self._marker, self._then = marker, then
 
     def close(self) -> None:
+        """Stop listening and drop every live proxied connection (their pump threads end with them)."""
         self._closed = True
         with suppress(OSError):
             self._listener.close()
+        with self._lock:
+            pairs, self._pairs = self._pairs, []
+        for pair in pairs:
+            pair._close()
 
     def _accept(self) -> None:
         while not self._closed:
@@ -69,7 +83,10 @@ class CutProxy:
                 client.close()
                 continue
             server.settimeout(None)
-            _Pair(self, client, server).start()
+            pair = _Pair(self, client, server)
+            with self._lock:
+                self._pairs.append(pair)
+            pair.start()
 
     def _claim(self) -> tuple[bytes, bytes | None] | None:
         """The armed marker, taken by the first connection that sends it (cut once)."""

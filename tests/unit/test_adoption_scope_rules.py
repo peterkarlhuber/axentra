@@ -8,7 +8,9 @@ Tabrion is held to the same rule:
 
 - ``set_config('<name>', ..., false)`` only for the allowed names; a dynamic name with ``false`` only at the listed
   places (each checked by hand: they set a timeout);
-- ``set_config('axentra.*', ..., <anything but true>)`` never;
+- ``set_config('axentra.*', ..., <anything but true>)`` never, including a flag passed as a parameter (``%s``,
+  ``%(local)s``): it is not proven transaction-local;
+- ``set_config(<other name>, ..., <parameter>)``: not proven local either, so it counts as a dynamic site;
 - no ``SET`` / ``SET SESSION`` statement of a setting (``SET LOCAL`` and ``SET TRANSACTION`` are transaction-local),
   and no ``SET``/``RESET`` of a scope name at all.
 
@@ -33,7 +35,7 @@ DYNAMIC_SESSION_SITES = {
     # MigrationRunner: the runner's own lock_timeout / statement_timeout around a no-transaction migration.
     "axentra/data/migrations.py": 1,
 }
-SET_CONFIG = re.compile(r"set_config\(\s*(?P<name>'[^']*'|%s|%\(\w+\)s|\{\w*\})\s*,(?P<value>[^,()]*),\s*(?P<local>\w+)\s*\)",
+SET_CONFIG = re.compile(r"set_config\(\s*(?P<name>'[^']*'|%s|%\(\w+\)s|\{\w*\})\s*,(?P<value>(?:%\(\w+\)s|[^,()])*),\s*(?P<local>%s|%\(\w+\)s|\{\w*\}|\w+)\s*\)",
                         re.IGNORECASE)  # fmt: skip
 #: A ``SET`` statement at the start of a string or SQL line (``UPDATE ... SET col =`` is not one).
 SET_STATEMENT = re.compile(r"""(?:^|["'`;])\s*SET\s+(?!LOCAL\b|TRANSACTION\b|CONSTRAINTS\b)(?:SESSION\s+)?(?P<name>[A-Za-z_][\w.]*)""",
@@ -63,6 +65,10 @@ def violations(path: str, text: str) -> tuple[list[str], int]:
         name, local = m["name"].strip("'"), m["local"].lower()
         if name.startswith("axentra.") and local != "true":
             found.append(f"{path}: scope setting {name} not transaction-local: {m[0]}")
+        elif local not in ("true", "false"):
+            dynamic += (
+                1  # the flag is a parameter: not proven transaction-local, reviewed like a dynamic name
+            )
         elif local == "false":
             if m["name"].startswith("'"):
                 if name not in SESSION_ALLOWED:
@@ -99,6 +105,9 @@ def test_no_session_wide_scope_or_unlisted_session_setting() -> None:
     [
         "SELECT set_config('axentra.tenant_id', %s, false)",
         "SELECT set_config('axentra.scope', %s, is_local)",
+        "SELECT set_config('axentra.scope', %s, %s)",
+        "SELECT set_config('axentra.tenant_id', %s, %(local)s)",
+        "SELECT set_config('axentra.product_id', %s, {local})",
         "SELECT set_config('work_mem', %s, false)",
         '"SET axentra.tenant_id = 1"',
         '"SET SESSION statement_timeout_x = 1"',
@@ -111,6 +120,19 @@ def test_the_rule_finds_what_it_forbids(snippet: str) -> None:
     """Mutation probe: each forbidden form is found."""
     problems, _ = violations("probe.py", snippet)
     assert problems, snippet
+
+
+@pytest.mark.parametrize(
+    "snippet",
+    [
+        "SELECT set_config(%s, %s, false)",
+        "SELECT set_config('statement_timeout', %s, %s)",
+        "SELECT set_config(%(name)s, %(value)s, %(local)s)",
+    ],
+)
+def test_a_dynamic_or_parameterised_session_setting_counts_as_a_reviewed_site(snippet: str) -> None:
+    problems, dynamic = violations("probe.py", snippet)
+    assert problems == [] and dynamic == 1, snippet
 
 
 @pytest.mark.parametrize(

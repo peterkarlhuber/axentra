@@ -21,11 +21,14 @@ MIG-T-AXE-4 (AX-I-4)    ``join``/``on_pool`` (M10): nested joins and savepoints 
                         previous scope; Axentra borrows no connection of the shared pool and opens none
 MIG-T-AXE-5 (AX-I-5)    the role decision table of eight variants equals the snapshot of the old code
 MIG-T-AXE-6 (AX-I-6)    ``relforcerowsecurity`` of every table equals the snapshot of the old code (34 tables)
-MIG-T-AXE-7 (AX-I-7)    canary values of database errors reach no HTTP answer, log record or audit event; the
-                        problem details snapshot equals the old code's
+MIG-T-AXE-7 (AX-I-7)    canary values of database errors reach no HTTP answer, log record or audit event (one
+                        path through a table without RLS, whose DETAIL carries the canary, checked as a positive
+                        control); the problem details snapshot equals the old code's; the 500 path, logs, jobs
+                        and notifications: ``tests/integration/test_db_error_logging.py``
 MIG-T-AXE-8 (AX-I-8)    a write whose connection is lost after it was sent runs exactly once (no retry)
-MIG-T-AXE-9             the benchmark of 1,000 scoped transactions runs; the +5 % bound is an A/B comparison per
-                        step (``tests/evidence/bench_transactions.py``)
+MIG-T-AXE-9             the benchmark of 1,000 scoped transactions runs; the +5 % bound is an interleaved A/B
+                        comparison per step with a noise-aware verdict (``tests/evidence/bench_transactions.py``
+                        ``ab``); no MIG-AXE pull request states a performance result without it
 ======================  =====================================================================================
 
 Tests and evidence only: nothing here changes RLS, ``DbScope``, ``join``/``on_pool`` or the pool.
@@ -37,10 +40,13 @@ from collections.abc import Callable, Iterator
 import contextlib
 import logging
 import os
+from pathlib import Path
+import re
 import threading
 from typing import Any
 import uuid
 
+from fastapi.testclient import TestClient
 import psycopg
 from psycopg import pq, sql
 from psycopg.rows import tuple_row
@@ -217,12 +223,21 @@ def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
     found = _Recorder()
 
     class RecordingCursor(psycopg.Cursor[Any]):
-        def execute(self, query: Any, params: Any = None, **kwargs: Any) -> Any:
+        def _record(self, query: Any, params: Any) -> None:
             text = query if isinstance(query, str | bytes) else query.as_string(self)
             text = text.decode() if isinstance(text, bytes) else text
             with found.lock:
                 found.statements.append((found.phase, text, params))
+
+        def execute(self, query: Any, params: Any = None, **kwargs: Any) -> Any:
+            self._record(query, params)
             return super().execute(query, params, **kwargs)
+
+        def executemany(self, query: Any, params_seq: Any, **kwargs: Any) -> Any:
+            params_seq = list(params_seq)
+            for params in params_seq or [None]:
+                self._record(query, params)
+            return super().executemany(query, params_seq, **kwargs)
 
     original = psycopg.Connection.connect.__func__  # type: ignore[attr-defined]
 
@@ -279,11 +294,12 @@ def test_mig_t_axe_2_helpers_set_the_scope_only_transaction_locally(
     session_wide: list[tuple[str, str]] = []
     for phase, text, params in recorder.statements:
         squashed = " ".join(text.split())
-        assert not squashed.upper().startswith(("SET SESSION", "SET AXENTRA", "RESET AXENTRA")), squashed
-        if squashed.upper().startswith("SET ") and not squashed.upper().startswith(
-            ("SET LOCAL", "SET TRANSACTION")
-        ):
-            session_wide.append((phase, squashed))
+        for part in (p.strip() for p in squashed.split(";")):  # every statement of a multi-statement string
+            assert not part.upper().startswith(("SET SESSION", "SET AXENTRA", "RESET AXENTRA")), squashed
+            if part.upper().startswith("SET ") and not part.upper().startswith(
+                ("SET LOCAL", "SET TRANSACTION")
+            ):
+                session_wide.append((phase, part))
         for name, local in _set_config_calls(squashed, params):
             if name.startswith("axentra."):
                 assert local == "true", (phase, squashed)
@@ -301,19 +317,71 @@ def test_mig_t_axe_2_helpers_set_the_scope_only_transaction_locally(
     }
 
 
+_PARAM = re.compile(r"%s|%\((\w+)\)s")
+
+
 def _set_config_calls(text: str, params: Any) -> list[tuple[str, str]]:
-    """``(name, is_local)`` of each ``set_config`` call of a statement, names resolved from positional params."""
-    import re
+    """``(name, is_local)`` of each ``set_config`` call of a statement. Placeholders (``%s``, ``%(name)s``) are
+    resolved from the statement's params; ``is_local`` is ``true``/``false`` or ``unknown`` when it is neither a
+    literal nor a resolvable parameter (then it is not proven transaction-local)."""
+    positional = list(params) if isinstance(params, list | tuple) else []
+    named = params if isinstance(params, dict) else {}
+
+    def resolve(arg: str, start: int) -> Any:
+        m = _PARAM.fullmatch(arg)
+        if m is None:
+            return arg.strip("'")
+        if m[1] is not None:
+            return named.get(m[1], _UNKNOWN)
+        index = len(re.findall(r"%s", text[:start]))
+        return positional[index] if index < len(positional) else _UNKNOWN
 
     calls = []
-    positional = list(params) if isinstance(params, list | tuple) else []
-    for m in re.finditer(r"set_config\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*(\w+)\s*\)", text):
-        name = m[1].strip("'")
-        before = text[: m.start()].count("%s")
-        if m[1] == "%s" and before < len(positional):
-            name = str(positional[before])
-        calls.append((name, m[3].lower()))
+    for m in re.finditer(r"set_config\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*(%\(\w+\)s|[^,()]+?)\s*\)", text):
+        name = resolve(m[1], m.start(1))
+        local = resolve(m[3], m.start(3))
+        if isinstance(local, bool):
+            local = "true" if local else "false"
+        elif isinstance(local, str) and local.lower() in ("true", "false"):
+            local = local.lower()
+        else:
+            local = "unknown"
+        calls.append((str(name), local))
     return calls
+
+
+_UNKNOWN = object()
+
+
+@pytest.mark.parametrize(
+    ("text", "params", "expected"),
+    [
+        ("SELECT set_config('axentra.scope', %s, true)", ("tenant",), [("axentra.scope", "true")]),
+        ("SELECT set_config('axentra.scope', %s, %s)", ("tenant", False), [("axentra.scope", "false")]),
+        ("SELECT set_config('axentra.scope', %s, %s)", ("tenant", True), [("axentra.scope", "true")]),
+        (
+            "SELECT set_config(%s, %s, %s)",
+            ("axentra.tenant_id", "t", False),
+            [("axentra.tenant_id", "false")],
+        ),
+        (
+            "SELECT set_config(%(n)s, %(v)s, %(local)s)",
+            {"n": "axentra.scope", "v": "x", "local": False},
+            [("axentra.scope", "false")],
+        ),
+        ("SELECT set_config('axentra.scope', %s, %s)", ("tenant",), [("axentra.scope", "unknown")]),
+        (
+            "SELECT 1, %s; SELECT set_config('statement_timeout', %s, false)",
+            (1, "5s"),
+            [("statement_timeout", "false")],
+        ),
+    ],
+)
+def test_mig_t_axe_2_the_recorder_resolves_a_parameterised_local_flag(
+    text: str, params: Any, expected: list[tuple[str, str]]
+) -> None:
+    """Mutation probe (M-4 of the QA-13/25 review): a flag passed as a parameter is checked, not skipped."""
+    assert _set_config_calls(text, params) == expected
 
 
 # -- MIG-T-AXE-3 ----------------------------------------------------------------------------------------------------
@@ -383,6 +451,8 @@ def test_mig_t_axe_3_a_killed_backend_is_replaced_by_a_clean_connection(db: Data
             break
         except psycopg.OperationalError:
             continue
+    else:
+        pytest.fail("the pool handed out a broken connection three times in a row")
     assert after_pid != pid and after == EMPTY and status == pq.TransactionStatus.IDLE
 
 
@@ -497,22 +567,91 @@ def _audit_rows(admin_url: str) -> list[str]:
         ]
 
 
-@pytest.mark.parametrize("what", ["product", "tenant"])
+@pytest.fixture
+def server_errors(monkeypatch: pytest.MonkeyPatch) -> list[psycopg.Error]:
+    """Every database error a cursor of this process receives (the positive control of MIG-T-AXE-7)."""
+    seen: list[psycopg.Error] = []
+    original = psycopg.Cursor.execute
+
+    def execute(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return original(self, *args, **kwargs)
+        except psycopg.Error as exc:
+            seen.append(exc)
+            raise
+
+    monkeypatch.setattr(psycopg.Cursor, "execute", execute)
+    return seen
+
+
+@contextlib.contextmanager
+def _unique_user_names(admin_url: str) -> Iterator[None]:
+    """A unique index on ``axentra_users.name`` (a table WITHOUT row-level security, so the server's
+    ``DETAIL: Key (name)=(...)`` carries the value), dropped afterwards."""
+    index = sql.Identifier(f"qa25_unique_name_{uuid.uuid4().hex[:8]}")
+    with psycopg.connect(admin_url, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE UNIQUE INDEX {} ON axentra_users (name)").format(index))
+    try:
+        yield
+    finally:
+        with psycopg.connect(admin_url, autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP INDEX IF EXISTS {}").format(index))
+
+
+#: The canary paths of MIG-T-AXE-7, and whether the server's error DETAIL carries the canary. PostgreSQL leaves the
+#: key values out of a unique violation's DETAIL when row-level security applies to the table (``axentra_products``,
+#: ``axentra_tenants``), so only the ``axentra_users`` path (no RLS) puts the canary on the wire to Axentra: that case
+#: is what proves AX-I-7 here; the RLS cases pin that their DETAIL stays empty (review ``qa-13-25-review.md``, M-3).
+CANARY_PATHS = {"product_slug": False, "tenant_slug": False, "user_name": True}
+
+
+@pytest.mark.parametrize("what", sorted(CANARY_PATHS))
 def test_mig_t_axe_7_canary_of_a_unique_violation_reaches_no_answer_log_or_audit_event(
-    world: World, pg_urls: dict[str, str], caplog: pytest.LogCaptureFixture, what: str
+    world: World,
+    pg_urls: dict[str, str],
+    caplog: pytest.LogCaptureFixture,
+    server_errors: list[psycopg.Error],
+    what: str,
 ) -> None:
     canary = f"canary-{uuid.uuid4().hex[:12]}"
-    if what == "product":
-        path, body = "/v1/products", {"slug": canary, "name": "Canary"}
+    with contextlib.ExitStack() as stack:
+        if what == "product_slug":
+            method, path, body = "post", "/v1/products", {"slug": canary, "name": "Canary"}
+            assert world.admin.post(path, json=body).status_code == 201
+        elif what == "tenant_slug":
+            pid = world.admin.post("/v1/products", json={"slug": "host", "name": "Host"}).json()["id"]
+            method, path, body = "post", f"/v1/products/{pid}/tenants", {"slug": canary, "name": "Canary"}
+            assert world.admin.post(path, json=body).status_code == 201
+        else:
+            stack.enter_context(_unique_user_names(pg_urls["admin"]))
+            world.user(f"{canary}@example.com", name=canary)  # another user already has the name
+            method, path, body = "patch", "/v1/me", {"name": canary}
+            # The unclassified violation goes through the generic 500 handler: answer it, do not re-raise it here.
+            client = world.admin.client
+            stack.callback(setattr, world.admin, "client", client)
+            world.admin.client = TestClient(
+                world.app,
+                base_url="http://testserver",
+                headers=dict(client.headers),
+                cookies=client.cookies,
+                raise_server_exceptions=False,
+            )
+        audit_before = _audit_rows(pg_urls["admin"])
+        caplog.clear()
+        server_errors.clear()
+        with caplog.at_level(logging.DEBUG):
+            answer = getattr(world.admin, method)(path, json=body)  # a unique violation in the database
+    # Positive control: the server's error really was a unique violation, with (or, under RLS, without) the canary.
+    violations = [e for e in server_errors if isinstance(e, psycopg.errors.UniqueViolation)]
+    assert violations, (
+        f"no unique violation reached Axentra: the test does not exercise the path ({answer.text})"
+    )
+    carried = any(canary in (e.diag.message_detail or "") for e in violations)
+    assert carried is CANARY_PATHS[what], [e.diag.message_detail for e in violations]
+    if what == "user_name":
+        assert answer.status_code in (409, 500), answer.text
     else:
-        pid = world.admin.post("/v1/products", json={"slug": "host", "name": "Host"}).json()["id"]
-        path, body = f"/v1/products/{pid}/tenants", {"slug": canary, "name": "Canary"}
-    assert world.admin.post(path, json=body).status_code == 201
-    audit_before = _audit_rows(pg_urls["admin"])
-    caplog.clear()
-    with caplog.at_level(logging.DEBUG):
-        answer = world.admin.post(path, json=body)  # a unique violation in the database
-    assert answer.status_code == 409 and answer.json()["code"] == "conflict"
+        assert answer.status_code == 409 and answer.json()["code"] == "conflict"
     assert canary not in answer.text and "DETAIL" not in answer.text and "Key (" not in answer.text
     logged = "\n".join(f"{r.getMessage()} {r.exc_text or ''}" for r in caplog.records)
     assert canary not in logged and "Key (" not in logged
@@ -587,6 +726,20 @@ def test_mig_t_axe_8_a_lost_write_is_not_repeated(pg_urls: dict[str, str], probe
         proxy.close()
 
 
+def test_the_fault_proxy_refuses_a_remote_server_and_closes_live_connections(pg_urls: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="only a local server"):
+        CutProxy.for_url("postgresql://u@db.example.com:5432/x")
+    proxy = CutProxy.for_url(pg_urls["app"])
+    conn = psycopg.connect(proxy.url(pg_urls["app"]), autocommit=True)
+    try:
+        conn.execute("SELECT 1")
+        proxy.close()
+        with pytest.raises(psycopg.OperationalError):
+            conn.execute("SELECT 1")
+    finally:
+        conn.close()
+
+
 def test_mig_t_axe_8_a_service_write_whose_answer_is_lost_runs_once(
     ax_factory: Any, pg_urls: dict[str, str], probe: str
 ) -> None:
@@ -629,7 +782,27 @@ def test_mig_t_axe_9_the_transaction_benchmark_runs(pg_urls: dict[str, str]) -> 
     assert result["calls"] == 200 and len(result["round_ms"]) == 3 and result["median_ms"] > 0
 
 
-@pytest.mark.parametrize(("new", "ok"), [(104.9, True), (105.0, True), (105.1, False), (90.0, True)])
-def test_mig_t_axe_9_the_comparison_allows_at_most_five_percent(new: float, ok: bool) -> None:
-    old = {"calls": 1000, "median_ms": 100.0}
-    assert bench_transactions.compare(old, {"calls": 1000, "median_ms": new})[0] is ok
+def test_mig_t_axe_9_the_ab_comparison_interleaves_both_checkouts(pg_urls: dict[str, str]) -> None:
+    """Smoke test of ``ab`` (this checkout against itself): fresh processes, alternating order, one ratio a pair."""
+    root = Path(__file__).resolve().parents[2]
+    result = bench_transactions.ab(pg_urls["app"], root, root, pairs=2, calls=50, rounds=1, warmup=5)
+    assert [p["order"] for p in result["pairs"]] == [["old", "new"], ["new", "old"]]
+    assert all(p["ratio"] > 0 for p in result["pairs"])
+    assert result["verdict"] in bench_transactions.EXIT
+
+
+@pytest.mark.parametrize(
+    ("ratios", "expected"),
+    [
+        ([1.0, 1.01, 0.99, 1.02, 1.0, 1.03, 0.98, 1.01, 1.0, 1.02], "ok"),
+        ([1.05] * 10, "ok"),  # exactly +5 % passes
+        ([1.08, 1.09, 1.1, 1.07, 1.08, 1.09, 1.08, 1.1, 1.07, 1.09], "too_slow"),
+        ([1.03, 1.04, 1.06, 1.07, 1.05, 1.04, 1.06, 1.07, 1.03, 1.06], "inconclusive"),
+        (
+            [0.7, 1.3, 0.8, 1.2, 1.0, 0.9, 1.1, 1.4, 0.6, 1.0],
+            "too_noisy",
+        ),  # the review's spread of identical code
+    ],
+)
+def test_mig_t_axe_9_the_verdict_is_noise_aware(ratios: list[float], expected: str) -> None:
+    assert bench_transactions.verdict(ratios) == expected
