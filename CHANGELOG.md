@@ -25,6 +25,14 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+### Tests (TABRION QA-21)
+- AC-7 public API check: `python scripts/check_tabrion_api.py` reads `src`, `tests`, `scripts` and `examples` with
+  `ast` and fails on a private Tabrion name (`tabrion._x`, an attribute with a leading underscore on a Tabrion name,
+  `getattr`/`import_module` with a private constant, a star import); with Tabrion installed every used name must be
+  in its module's `__all__`, and `--surface` compares with Tabrion's frozen API snapshot. `--export` writes the used
+  names to `docs/api-consumers.md` (none yet), and `tests/unit/test_tabrion_api_check.py` fails when that file is
+  stale. Tests and tooling only.
+
 - Docs (MUP-ONA B0): the changelog states the release rules (tag scheme `axentra-vX.Y.Z`, SemVer from 0.2,
   aliases removed only in a minor release, no PyPI, tags only after approval). No version change.
 - CI (MUP-ONA A0): every pytest job compares its skipped tests with `tests/ci/skipped-<job>.txt`
