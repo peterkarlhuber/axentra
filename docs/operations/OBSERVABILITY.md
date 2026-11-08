@@ -102,3 +102,10 @@ still run).
 
 Notification delivery runs separately: `axentra notify-dispatch --loop` (or call
 `ax.notify.dispatcher().run_once()` from a job worker).
+
+### Database error records and `exc_info`
+
+When a log record carries a database error, the redaction clears `record.exc_info` and stores the redacted traceback in
+`record.exc_text`. Standard formatters, uvicorn's formatters and Axentra's JSON and text formatters print `exc_text`
+unchanged. Handlers that read the exception object from `exc_info` (for example Sentry or the OpenTelemetry log handler)
+only see the redacted text for these records. Records without a database error keep `exc_info`.
