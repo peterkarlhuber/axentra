@@ -30,6 +30,7 @@ import itertools
 import logging
 import re
 import sqlite3
+import sys
 import threading
 import traceback
 from types import TracebackType
@@ -87,11 +88,19 @@ _KIND_BY_CLASS = {
 #: such a label, or the label in the middle of a line (a message whose newlines were replaced; psycopg puts two
 #: spaces after the colon). From there the text is removed up to the next line of a traceback's structure or the
 #: end of the text, because a value may span several lines (TABRION TB-031, Tabrion review M-2).
+#: The run of blanks before an inline label starts only after a non-blank character: without the look-behind,
+#: every start position inside a long run of blanks rescans the run (quadratic time, review F-3).
 _SERVER_TEXT_START = re.compile(
-    r"^[ \t]*(?:DETAIL|HINT|CONTEXT|QUERY|LINE \d+):|[ \t]*\b(?:DETAIL|HINT|CONTEXT|QUERY): {2}"
+    r"^[ \t]*(?:DETAIL|HINT|CONTEXT|QUERY|LINE \d+):|(?<![ \t])[ \t]*\b(?:DETAIL|HINT|CONTEXT|QUERY): {2}"
 )
-#: Lines that end a removed part. Each must be a whole line of the expected structure, so that a value line which
-#: merely starts like one (``+-SECRET``, ``File "SECRET``) does not end it (Tabrion re-review N-1).
+#: The header line of a formatted traceback. Only after one has been seen in a text does :data:`_BOUNDARY` end
+#: a removed part (review F-4): in free text (a message, a stored ``last_error``) the removal runs to the end.
+_TRACEBACK_HEADER = re.compile(
+    r"[ \t|]*(?:Exception Group )?Traceback \(most recent call last\):[ \t]*(?:\r?\n)?"
+)
+#: Lines that end a removed part inside a traceback. Each must be a whole line of the expected structure, so that
+#: a value line which merely starts like one (``+-SECRET``, ``File "SECRET``) does not end it (Tabrion re-review
+#: N-1).
 _BOUNDARY = re.compile(
     r"[ \t|]*(?:"
     r"Traceback \(most recent call last\):"
@@ -108,6 +117,11 @@ _BOUNDARY = re.compile(
 _ESCAPED_SERVER_TEXT = re.compile(r"(?:\\r)?\\n[ \t]*(?:DETAIL|HINT|CONTEXT|QUERY|LINE \d+):.*")
 #: Cheap test whether a text may hold such a part (the escaped form contains the same labels).
 _SERVER_TEXT_MARKERS = ("DETAIL:", "HINT:", "CONTEXT:")
+#: What a removed server text part is replaced with, so that a truncated message shows that it was truncated
+#: (review F-7).
+SERVER_TEXT_MARK = "[redacted: database server text]"
+#: The two record attributes the filter sets; ``extra=`` may still pass them (review F-6).
+DB_FIELDS = ("db_sqlstate", "db_constraint")
 #: Bounds of the search for database errors inside a log record's arguments and message: container levels below
 #: the argument, and objects looked at (Tabrion review H-2, re-review N-3).
 _MAX_COLLECT_DEPTH = 3
@@ -185,24 +199,28 @@ def strip_server_text(text: str) -> str:
     """``text`` without the ``DETAIL:`` / ``HINT:`` / ``CONTEXT:`` (and ``QUERY:``, ``LINE n:``) parts psycopg
     adds to a server error's message, also in the escaped form of a ``repr``.
 
-    A part is removed from its label up to the next line of a traceback's structure (``Traceback (most recent call
-    last):``, ``File "...", line N``, the chain and exception group lines, SQLAlchemy's ``(Background on this
-    error at: ...)``) or, without one, to the end of the text: a value may span several lines."""
+    A part is replaced by :data:`SERVER_TEXT_MARK` from its label to the end of the text, because a value may
+    span several lines. Only in a formatted traceback (after a ``Traceback (most recent call last):`` header) does
+    the part end earlier, at the next line of the traceback's structure (``File "...", line N``, the chain and
+    exception group lines, SQLAlchemy's ``(Background on this error at: ...)``)."""
     if not any(marker in text for marker in _SERVER_TEXT_MARKERS):
         return text
-    text = _ESCAPED_SERVER_TEXT.sub("", text)
+    text = _ESCAPED_SERVER_TEXT.sub(" " + SERVER_TEXT_MARK, text)
     out: list[str] = []
     skipping = False
+    in_traceback = False
     for line in text.splitlines(keepends=True):
         if skipping:
-            if _BOUNDARY.fullmatch(line) is None:
+            if not in_traceback or _BOUNDARY.fullmatch(line) is None:
                 continue
             skipping = False
+        if not in_traceback and _TRACEBACK_HEADER.fullmatch(line) is not None:
+            in_traceback = True
         start = _SERVER_TEXT_START.search(line)
         if start is not None:
-            kept = line[: start.start()]
-            if kept.strip():
-                out.append(kept.rstrip(" \t") + ("\n" if line.endswith("\n") else ""))
+            kept = line[: start.start()].rstrip(" \t")
+            mark = f"{kept} {SERVER_TEXT_MARK}" if kept.strip() else kept + SERVER_TEXT_MARK
+            out.append(mark + ("\n" if line.endswith("\n") else ""))
             skipping = True
             continue
         out.append(line)
@@ -385,6 +403,37 @@ def _collect(value: object, found: list[BaseException]) -> None:
         stack.extend((child, depth + 1) for child in reversed(children))
 
 
+def _exception_may_hold_server_text(exc: BaseException) -> bool:
+    """True when an exception of ``exc``'s chain carries psycopg server text in its message, ``args`` or notes
+    without being a database error (``raise RuntimeError(f"gave up: {last}")`` after a retry loop, review F-1)."""
+    for e in _chain(exc):
+        if any(_may_hold_server_text(t) for t in _error_texts(e)):
+            return True
+        notes = getattr(e, "__notes__", None)
+        if isinstance(notes, list) and any(_may_hold_server_text(n) for n in notes):
+            return True
+    return False
+
+
+def _scrubbed_mapping(msg: Mapping[Any, Any], found: list[BaseException]) -> dict[Any, Any] | None:
+    """A copy of a mapping message (structlog's event dict) with each value scrubbed, or ``None`` when its text
+    still holds database text afterwards (review F-5)."""
+    out: dict[Any, Any] = {}
+    for key, value in msg.items():
+        if _is_db_exc(value):
+            out[key] = safe_message(value)
+        elif isinstance(value, str):
+            out[key] = scrub_text(value, found)
+        else:
+            text = repr(value)
+            redacted = scrub_text(text, found)
+            out[key] = value if redacted == text else redacted
+    text = str(out)
+    if scrub_text(text, found) != text:
+        return None
+    return out
+
+
 def _plain_record(record: logging.LogRecord) -> bool:
     """True when the record's message cannot carry a database error's text: a ``str`` template and plain
     arguments (exactly ``str``, ``int``, ``float``, ``bool`` or ``None``), none of them with a server text label.
@@ -525,7 +574,15 @@ class DbErrorRedactionFilter(logging.Filter):
 
     def _redact(self, record: logging.LogRecord) -> None:
         exc = record.exc_info[1] if isinstance(record.exc_info, tuple) and len(record.exc_info) == 3 else None
-        found: list[BaseException] = _db_errors_in(exc) if isinstance(exc, BaseException) else []
+        found: list[BaseException] = []
+        if isinstance(exc, BaseException):
+            # The chain, and database errors held in the exceptions' args (``RuntimeError(e)``, review F-1).
+            _collect(exc, found)
+            if not found and _exception_may_hold_server_text(exc):
+                # No database error object, but its text in a message, args or notes (review F-1).
+                record.exc_text = redacted_traceback(exc, record.exc_info[2], [])  # type: ignore[index]
+                record.exc_info = None
+                exc = None
         if not found and _plain_record(record):
             if isinstance(record.exc_text, str) and _may_hold_server_text(record.exc_text):
                 record.exc_text = strip_server_text(record.exc_text)
@@ -542,6 +599,15 @@ class DbErrorRedactionFilter(logging.Filter):
             record.args = {k: safe_message(v) if _is_db_exc(v) else v for k, v in args.items()}
         if isinstance(record.msg, BaseException) and is_db_error(record.msg):
             record.msg = safe_message(record.msg)
+        if isinstance(record.msg, Mapping) and not record.args:
+            # A mapping message stays a mapping (structlog's ProcessorFormatter copies it, review F-5).
+            scrubbed = _scrubbed_mapping(record.msg, found)
+            if scrubbed is not None:
+                if scrubbed != record.msg:
+                    record.msg = scrubbed
+                if found:
+                    self._set_fields(record, primary, found)
+                return
 
         if isinstance(exc, BaseException) and found:
             record.exc_text = redacted_traceback(exc, record.exc_info[2], found)  # type: ignore[index]
@@ -568,9 +634,15 @@ class DbErrorRedactionFilter(logging.Filter):
                 if redacted != message:
                     record.msg, record.args = redacted, None
         if found:
-            sqlstate, constraint = db_error_fields(primary if primary is not None else found[0])
-            record.db_sqlstate = sqlstate
-            record.db_constraint = constraint
+            self._set_fields(record, primary, found)
+
+    @staticmethod
+    def _set_fields(
+        record: logging.LogRecord, primary: BaseException | None, found: list[BaseException]
+    ) -> None:
+        sqlstate, constraint = db_error_fields(primary if primary is not None else found[0])
+        record.db_sqlstate = sqlstate
+        record.db_constraint = constraint
 
 
 #: Loggers that also get the filter itself (besides the record factory), so that records created there are
@@ -581,13 +653,82 @@ _FACTORY_MARK = "_axentra_db_error_redaction"
 _INSTALL_LOCK = threading.Lock()
 
 
+def _redacted_handle_error(self: logging.Handler, record: logging.LogRecord) -> None:
+    """:meth:`logging.Handler.handleError` without database values (review F-2).
+
+    The standard version prints the exception raised in ``emit`` with its whole chain, and its ``__context__`` is
+    the exception that was being handled when the log call was made, often the database error itself. This one
+    prints the same report with :func:`redacted_traceback` and a scrubbed message and arguments."""
+    if not (logging.raiseExceptions and sys.stderr):
+        return
+    _, value, tb = sys.exc_info()
+    try:
+        errors = _db_errors_in(value) if isinstance(value, BaseException) else []
+        _collect(record.args, errors)
+        _collect(record.msg, errors)
+        lines = ["--- Logging error ---"]
+        if isinstance(value, BaseException):
+            try:
+                lines.append(redacted_traceback(value, tb))
+            except Exception:
+                lines.append(_summary(value))
+        with contextlib.suppress(Exception):
+            lines.append(f"Message: {scrub_text(repr(record.msg), errors)}")
+            lines.append(f"Arguments: {scrub_text(repr(record.args), errors)}")
+        sys.stderr.write("\n".join(lines) + "\n")
+    except (RecursionError, OSError):  # pragma: no cover - as the standard version: never raise from here
+        pass
+    except Exception:  # pragma: no cover - a last resort that names no value
+        with contextlib.suppress(Exception):
+            sys.stderr.write("--- Logging error --- (details withheld by DbErrorRedactionFilter)\n")
+    finally:
+        del value, tb
+
+
+setattr(_redacted_handle_error, _FACTORY_MARK, True)
+
+
+def _make_record_keeping_db_fields(original: Any) -> Any:
+    """``Logger.makeRecord`` that accepts ``db_sqlstate``/``db_constraint`` in ``extra`` (review F-6): the record
+    factory has set them already, and the standard version raises ``KeyError`` for an existing attribute. The
+    caller's values win."""
+
+    def make_record(
+        self: logging.Logger,
+        name: str,
+        level: int,
+        fn: str,
+        lno: int,
+        msg: object,
+        args: Any,
+        exc_info: Any,
+        func: str | None = None,
+        extra: Mapping[str, object] | None = None,
+        sinfo: str | None = None,
+    ) -> logging.LogRecord:
+        given: dict[str, object] = {}
+        if isinstance(extra, Mapping) and any(k in extra for k in DB_FIELDS):
+            given = {k: extra[k] for k in DB_FIELDS if k in extra}
+            extra = {k: v for k, v in extra.items() if k not in DB_FIELDS}
+        record: logging.LogRecord = original(
+            self, name, level, fn, lno, msg, args, exc_info, func, extra, sinfo
+        )
+        record.__dict__.update(given)
+        return record
+
+    setattr(make_record, _FACTORY_MARK, True)
+    return make_record
+
+
 def install_db_error_redaction() -> None:
     """Redact database error values from every log record of the process (B-06-1, TABRION MIG-AXE-0).
 
     Wraps the log record factory (:func:`logging.setLogRecordFactory`, chained to the factory in place) so that
     :class:`DbErrorRedactionFilter` runs on each record when it is created, before any handler, formatter or
     ``logging.lastResort`` sees it, whoever configured logging. Also adds the filter to
-    :data:`DB_ERROR_LOGGERS` and ``logging.lastResort``. Installing twice is harmless.
+    :data:`DB_ERROR_LOGGERS` and ``logging.lastResort``. It also replaces :meth:`logging.Handler.handleError` (the
+    report of a failed ``emit``) with one that prints no database values, and lets ``extra=`` carry
+    ``db_sqlstate``/``db_constraint`` (``Logger.makeRecord``). Installing twice is harmless.
     Called by :class:`axentra.platform.Axentra`, ``create_app``, ``configure_logging``, :class:`JobWorker` and
     the CLI.
     """
@@ -603,6 +744,12 @@ def install_db_error_redaction() -> None:
 
             setattr(factory, _FACTORY_MARK, True)
             logging.setLogRecordFactory(factory)
+        if not getattr(logging.Handler.handleError, _FACTORY_MARK, False):
+            logging.Handler.handleError = _redacted_handle_error  # type: ignore[method-assign]
+        if not getattr(logging.Logger.makeRecord, _FACTORY_MARK, False):
+            logging.Logger.makeRecord = _make_record_keeping_db_fields(  # type: ignore[method-assign]
+                logging.Logger.makeRecord
+            )
         targets: list[logging.Filterer] = [logging.getLogger(name) for name in DB_ERROR_LOGGERS]
         if logging.lastResort is not None:
             targets.append(logging.lastResort)

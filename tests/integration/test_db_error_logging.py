@@ -806,3 +806,98 @@ def test_tb031_h1_commit_lost_while_handling_a_unique_violation(
     assert canary not in out and "DETAIL" not in out
     # Both name the lost connection (no SQLSTATE), not the 23505 the handler was handling.
     assert [r.db_sqlstate for r in records] == [None, None]  # type: ignore[attr-defined]
+
+
+# --- Review axe-tb031-review.md: tracebacks without a database error object (F-1), handleError (F-2), F-8 -----
+
+
+def test_f1_job_handler_with_a_retry_loop(world: Any, pg_urls: dict[str, str]) -> None:
+    """F-1: a job handler retries, keeps the last error and raises after the loop (no ``__context__``). The worker
+    logs the failure with its traceback; neither the log nor ``last_error`` carries the value."""
+    from axentra.core.context import Principal
+    from axentra.events import JobWorker
+
+    ax = world.ax
+    sys_principal = Principal.system("test")
+    product = ax.tenancy.create_product(sys_principal, slug="crm", name="CRM")
+    tenant = ax.tenancy.create_tenant(sys_principal, product.id, slug="acme", name="Acme")
+    canaries: list[str] = []
+
+    def handler(ctx: Any) -> None:
+        last: psycopg.Error | None = None
+        for _ in range(2):
+            canary, exc = _db_error(pg_urls["admin"])
+            canaries.append(canary)
+            last = exc
+        raise RuntimeError(f"gave up after 2 attempts: {last}")
+
+    ax.jobs.register("canary.retry", handler)
+    job = ax.jobs.enqueue(sys_principal, product.id, "canary.retry", {}, tenant_id=tenant.id)
+    root = logging.getLogger()
+    saved, level = root.handlers[:], root.level
+    own = io.StringIO()
+    root.handlers[:] = [logging.StreamHandler(own)]
+    root.setLevel(logging.DEBUG)
+    try:
+        assert JobWorker(ax, scheduler=False, housekeeping=False).run_once(maintenance=False) == 1
+    finally:
+        root.handlers[:] = saved
+        root.setLevel(level)
+    out = own.getvalue()
+    assert "Traceback (most recent call last)" in out and "RuntimeError: gave up after 2 attempts" in out
+    assert all(c not in out for c in canaries) and "DETAIL" not in out, out
+    r = world.admin.get(f"/v1/products/{product.id}/jobs/{job.id}")
+    assert r.status_code == 200, r.text
+    assert all(c not in r.text for c in canaries) and "DETAIL" not in r.text
+
+
+@pytest.mark.usefixtures("ax")
+def test_f1_exc_info_without_a_chain(pg_urls: dict[str, str]) -> None:
+    """F-1: the database error, or only its text, in the exception's args or notes; no ``__context__``."""
+    canary, exc = _db_error(pg_urls["admin"])
+    noted = RuntimeError("wrap")
+    noted.add_note(str(exc))
+
+    def log(lg: logging.Logger) -> None:
+        lg.error("a", exc_info=RuntimeError(exc))
+        lg.error("b", exc_info=RuntimeError("batch failed", [exc]))
+        lg.error("c", exc_info=RuntimeError(f"gave up: {exc}"))
+        lg.error("d", exc_info=noted)
+
+    out = _plain_handler_output(log)
+    assert canary not in out and "DETAIL" not in out, out
+    assert out.count("RuntimeError: ") == 4  # never raised, so no frames: one exception line each
+
+
+@pytest.mark.usefixtures("ax")
+def test_f2_failed_emit_while_handling_a_database_error(
+    pg_urls: dict[str, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-2: a log call that fails while the database error is handled reports through ``handleError``."""
+    canary, exc = _db_error(pg_urls["admin"])
+    saved = logging.raiseExceptions
+    logging.raiseExceptions = True
+    try:
+
+        def log(lg: logging.Logger) -> None:
+            try:
+                raise exc
+            except psycopg.Error:
+                lg.error("user %s failed with %s", "bob")  # too few arguments
+
+        _plain_handler_output(log)
+    finally:
+        logging.raiseExceptions = saved
+    err = capsys.readouterr().err
+    assert "--- Logging error ---" in err
+    assert canary not in err and "DETAIL" not in err, err
+    assert "23505" in err
+
+
+@pytest.mark.usefixtures("ax")
+def test_f8_rewritten_label_with_the_error_object(pg_urls: dict[str, str]) -> None:
+    """F-8: the label was rewritten (single spaces), so only the replacement of the known DETAIL value helps."""
+    canary, exc = _db_error(pg_urls["admin"])
+    out = _plain_handler_output(lambda lg: lg.error("x %s / %s", exc, " ".join(str(exc).split())))
+    assert canary not in out, out
+    assert "[redacted]" in out
