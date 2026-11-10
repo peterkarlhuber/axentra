@@ -30,7 +30,7 @@ x-axentra: &axentra
 
 services:
   db:
-    image: postgres:16@sha256:933463a6c8eba2b9f5cd414138738cd8d5519cd2c471214c222652f547a66a32
+    image: postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42
     restart: unless-stopped
     environment:
       POSTGRES_DB: axentra
