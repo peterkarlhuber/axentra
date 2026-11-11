@@ -1,0 +1,160 @@
+{
+  "kinds": {
+    "join": {
+      "after": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "INTRANS"
+      },
+      "after_rollback": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "IDLE"
+      },
+      "inside": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "<product_id>",
+          "axentra.scope": "tenant",
+          "axentra.tenant_id": "<tenant_id>"
+        },
+        "transaction_status": "INTRANS"
+      }
+    },
+    "joined": {
+      "after_joined": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "INTRANS"
+      },
+      "after_transaction": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "INTRANS"
+      },
+      "inside": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "<product_id>",
+          "axentra.scope": "tenant",
+          "axentra.tenant_id": "<tenant_id>"
+        },
+        "transaction_status": "INTRANS"
+      }
+    },
+    "leader_lock": {
+      "held": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "IDLE"
+      }
+    },
+    "on_pool": {
+      "after": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "IDLE"
+      },
+      "inside": {
+        "differs_from_plain": {},
+        "scope": {
+          "axentra.product_id": "<product_id>",
+          "axentra.scope": "tenant",
+          "axentra.tenant_id": "<tenant_id>"
+        },
+        "transaction_status": "INTRANS"
+      }
+    },
+    "owned_pool": {
+      "after": {
+        "differs_from_plain": {
+          "statement_timeout": "30000"
+        },
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "IDLE"
+      },
+      "inside": {
+        "differs_from_plain": {
+          "statement_timeout": "30000"
+        },
+        "scope": {
+          "axentra.product_id": "<product_id>",
+          "axentra.scope": "tenant",
+          "axentra.tenant_id": "<tenant_id>"
+        },
+        "transaction_status": "INTRANS"
+      }
+    },
+    "owned_pool_after_ping": {
+      "after": {
+        "differs_from_plain": {
+          "statement_timeout": "30000"
+        },
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "IDLE"
+      }
+    },
+    "owned_pool_read_only": {
+      "after": {
+        "differs_from_plain": {
+          "statement_timeout": "30000"
+        },
+        "scope": {
+          "axentra.product_id": "",
+          "axentra.scope": "",
+          "axentra.tenant_id": ""
+        },
+        "transaction_status": "IDLE"
+      },
+      "inside": {
+        "differs_from_plain": {
+          "statement_timeout": "30000",
+          "transaction_read_only": "on"
+        },
+        "scope": {
+          "axentra.product_id": "<product_id>",
+          "axentra.scope": "tenant",
+          "axentra.tenant_id": "<tenant_id>"
+        },
+        "transaction_status": "INTRANS"
+      }
+    }
+  },
+  "scope": {
+    "axentra.product_id": "<product_id>",
+    "axentra.scope": "tenant",
+    "axentra.tenant_id": "<tenant_id>"
+  }
+}

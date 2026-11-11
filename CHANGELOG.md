@@ -40,6 +40,24 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Tests (TABRION QA-13)
+- Snapshot tools for rollback evidence of the Tabrion adoption: `python -m tests.evidence.snapshots --url <superuser
+  URL> write|check` creates a database and roles of its own, migrates it as a separate owner role, grants a runtime
+  role (`grant_runtime_role`), writes five canonical JSON snapshots and drops everything again: `catalog` (row-level
+  security per table, policies, the runtime role's privileges, every access control entry of the schema's objects
+  with grantor, grantee including `PUBLIC`, privilege and grant option, column ACLs, role memberships), `roles` (decision table of eight role variants
+  through `inspect_role`, `grant_runtime_role`, `role_info`, `check_role`), `problems` (problem details of every
+  error class, HTTP error answers, OpenAPI `Problem` schemas), `settings` (`SHOW` extract per kind of connection:
+  owned pool, read-only, `on_pool`, `joined`, `join`, leader lock, ping) and `schema` (schema dump from the catalog).
+  The golden files in `tests/evidence/golden/` are from the old code (`ea7aa9f`, `SOURCE.md`);
+  `tests/integration/test_rollback_snapshots.py` checks that the current code writes them and that two runs are
+  identical. Tests and evidence only: no change to the library, RLS, `DbScope` or `join`/`on_pool`.
+- Review fixes (`qa-13-25-review.md` M-1, M-2, L-1, L-2): the catalog snapshot detects a column grant, a grant
+  option, a grant to `PUBLIC` or another role and a new membership (one test each); the login roles of a run get a
+  random password per run (no fixed password in the repository); `check`/`write` report leftovers of a killed run
+  and `cleanup` drops them (only the exact names a run creates); the prefix is validated (`[a-z][a-z0-9_]{0,19}`) and
+  the leftover test matches names exactly instead of with `LIKE`. `catalog.json` was rewritten from `ea7aa9f`.
+
 ### Security (TABRION TB-031)
 - Database error redaction (B-06-1) closes the leaks that the independent review of Tabrion's port of the filter
   (`tab-010-012-review.md`, H-2, M-2, re-review N-1) found in Axentra's filter as well. Before this change, the
