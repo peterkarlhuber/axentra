@@ -20,3 +20,6 @@ written from the old code, before any TABRION MIG-AXE step:
 A pull request that changes a snapshot on purpose (a new migration, or a step whose plan allows the change) rewrites
 the file with the tool and says why; the diff is part of the review. A rollback (revert pull request) is verified by
 the same files: after the revert, `check` must report "snapshots identical" again.
+
+No timing is stored here: a benchmark result is valid only as an interleaved A/B run of the old and the new code
+on one idle machine (`python -m tests.evidence.bench_transactions ab`, review `qa-13-25-review.md` M-5).
