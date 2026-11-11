@@ -5,8 +5,9 @@ name: Nightly
 # next unrelated PR. The test-ID inventory (AP0) is the baseline that later waves compare against.
 on:
   schedule:
-    # Staggered across the repositories (CI-FAST cron table) so that the night runs stay under the job limit.
-    - cron: "45 0 * * *"
+    # Staggered across the repositories (CI-FAST cron table) so that the night runs stay under the job limit. GitHub starts
+    # these scheduled runs about 6 h late on this account (measured 2026-11-08..11), so the crons sit 6 h before the night.
+    - cron: "45 18 * * *"
   workflow_dispatch:
     inputs:
       canary_fail:
