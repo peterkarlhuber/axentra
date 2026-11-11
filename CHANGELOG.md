@@ -40,6 +40,14 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Tests (TABRION QA-17)
+- Dependency policy (AC-2): `dependency-policy.json` is this repository's copy of the dependency policy K-33 from nodestro-studio (only its
+  outgoing edges: `tabrion[postgres]` in the core, `tabrion[testing,postgres]` in `dev`), and `scripts/check_dependency_policy.py` is the unchanged checker from there;
+  `scripts/DEPENDENCY_POLICY_SOURCE.md` records their origin and SHA-256. `python scripts/check_dependency_policy.py`
+  checks `pyproject.toml` (core, every extra and dependency group) against the copy.
+  `tests/architecture/test_dependency_policy.py` checks the checksums, runs the checker and probes forbidden
+  requirements (Orkexa, a platform, Axentra Studio, tabrion by a direct URL (RC-1), the wrong extra). Ruff skips the vendored script (it is linted in nodestro-studio).
+
 ### Tests (TABRION QA-16)
 - Import contracts against the Tabrion edge list K-33 (AC-1), with a mutation probe:
   `tests/architecture/test_forbidden_probe.py` copies the package and runs `lint-imports` on the copy. The unmodified
