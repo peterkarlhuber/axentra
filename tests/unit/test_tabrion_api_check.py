@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check_tabrion_api.py"
 EXPORT = ROOT / "docs" / "api-consumers.md"
 #: SHA-256 of ``scripts/check_tabrion_api.py``, the same in all four repositories.
-SCRIPT_SHA256 = "bc16c3141efb96e1249498ee42f054b75f630c50e0df2c161882ed7f5dd528d8"
+SCRIPT_SHA256 = "7a403418977b8df6338dc8a4ab0970523394588e66ea854329169d200a38040b"
 
 
 def _load() -> ModuleType:
@@ -144,7 +144,7 @@ def test_the_surface_comparison_refuses_names_outside_the_snapshot_and_experimen
     ]
 
 
-# ---- the __all__ check against a fake installed Tabrion ------------------------------------------------------
+# ---- the __all__ check against a fake installed Tabrion ---------------------------------------------------
 
 _FAKE = {
     "__init__.py": '__all__ = ["Database"]\n__version__ = "0"\nDatabase = object\nhidden = 1\n',
