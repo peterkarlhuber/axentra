@@ -49,6 +49,9 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   requirements (Orkexa, a platform, Axentra Studio, tabrion by a direct URL (RC-1), the wrong extra). Ruff skips the vendored script (it is linted in nodestro-studio).
 
 ### Tests (TABRION QA-16)
+- Fixed a flaky check in `tests/integration/test_billing.py::test_fake_checkout_and_webhooks`: the "invalid
+  signature" case replaced the last two hex digits with `00`, which left the signature unchanged 1 time in 256
+  (seen in CI); it now always changes the last digit.
 - Import contracts against the Tabrion edge list K-33 (AC-1), with a mutation probe:
   `tests/architecture/test_forbidden_probe.py` copies the package and runs `lint-imports` on the copy. The unmodified
   copy passes (positive control). Thirteen copies with one forbidden import each (Orkexa, Nodestro, Axentra Studio,
