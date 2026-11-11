@@ -1,0 +1,5807 @@
+{
+  "extensions": [
+    "plpgsql"
+  ],
+  "functions": [
+    {
+      "body_md5": "8184fd1e6cc85cbfb724420e377bffc3",
+      "function": "axentra_jobs_touch()",
+      "language": "plpgsql",
+      "returns": "trigger",
+      "volatility": "v"
+    },
+    {
+      "body_md5": "63db56df8a404c06845e0c3e33e729ad",
+      "function": "axentra_scope_allows(p text, t text)",
+      "language": "sql",
+      "returns": "boolean",
+      "volatility": "s"
+    },
+    {
+      "body_md5": "c2a18096704deb64f5e669124629b90c",
+      "function": "axentra_scope_allows_write(p text, t text)",
+      "language": "sql",
+      "returns": "boolean",
+      "volatility": "s"
+    }
+  ],
+  "migrations": [
+    {
+      "checksum": "7817d7d005eee83a583a11d4aad997b8fd257374d7c87bcb4d735a1126c430ce",
+      "name": "foundation",
+      "namespace": "axentra",
+      "version": 1
+    },
+    {
+      "checksum": "fc8544ab5086dfb5c42816f0f913db1ae4923419dcf1b537612e3a8112df650e",
+      "name": "events",
+      "namespace": "axentra",
+      "version": 2
+    },
+    {
+      "checksum": "86ff46a1d36c34ef3076cd76ad1aa8ca6c65755e3a5326f271786ce5d2550a9d",
+      "name": "storage",
+      "namespace": "axentra",
+      "version": 3
+    },
+    {
+      "checksum": "773cca7558d17dc0e511ea20faa85ff14ee65b3e1616e01d96e06e93d377ce67",
+      "name": "usage_billing",
+      "namespace": "axentra",
+      "version": 4
+    },
+    {
+      "checksum": "f18dc1f80b8c6c39bbf6fd5ce41327393fe15430f66eb6dcb2649015ce87d77c",
+      "name": "notify",
+      "namespace": "axentra",
+      "version": 5
+    },
+    {
+      "checksum": "823f5ccbf49838bee0aec5def7469965f0cc6a20dec9cad9ed1f3d5887bc6682",
+      "name": "search",
+      "namespace": "axentra",
+      "version": 6
+    },
+    {
+      "checksum": "9937ea9faebcef216f9c5e1a4f670935e62a24760bc0acc4806b221bc61e6ae6",
+      "name": "users_without_email",
+      "namespace": "axentra",
+      "version": 7
+    },
+    {
+      "checksum": "dcde8b0375190d7b475a266a21cbd7ef972b209e5c4db8f56e92150ce6763d1f",
+      "name": "product_permissions",
+      "namespace": "axentra",
+      "version": 8
+    },
+    {
+      "checksum": "d177245f7f082cb7be3d03ecf57bcc81a1b5e9e5c9a017e2354b2325068eeb1f",
+      "name": "access_definitions",
+      "namespace": "axentra",
+      "version": 9
+    },
+    {
+      "checksum": "551a0196b226cf141475223dcecb835464f5526f1139624839aad3c681e22035",
+      "name": "notify_inbox",
+      "namespace": "axentra",
+      "version": 10
+    },
+    {
+      "checksum": "182a11421ba289c508d23d897bade0eba8f443777a97be3102b4faf964023679",
+      "name": "tenant_scope_writes",
+      "namespace": "axentra",
+      "version": 11
+    },
+    {
+      "checksum": "51da5d52977a58214c64d4b6f08a33ed864857d4525799cc5ff630a34fcd1b83",
+      "name": "product_invitations",
+      "namespace": "axentra",
+      "version": 12
+    },
+    {
+      "checksum": "ebc371fca0725548e42bfbebcccbf26a5aa8177185383afeda4a650bf6253086",
+      "name": "account_tokens",
+      "namespace": "axentra",
+      "version": 13
+    },
+    {
+      "checksum": "e9060905feb0bf3feb6bdea4f141c1979e602ac3bc4bbf6695a542fe48c4edab",
+      "name": "record_time_indexes",
+      "namespace": "axentra",
+      "version": 14
+    }
+  ],
+  "relations": {
+    "axentra_access_definitions": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "revision",
+          "not_null": true,
+          "type": "bigint"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "content_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::text[]",
+          "generated": "",
+          "identity": "",
+          "name": "roles",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "applied_by",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "applied_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((length(applied_by) <= 200))",
+          "name": "axentra_access_definitions_applied_by_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text))",
+          "name": "axentra_access_definitions_content_hash_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (product_id)",
+          "name": "axentra_access_definitions_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_access_definitions_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((revision >= 1))",
+          "name": "axentra_access_definitions_revision_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_access_definitions_pkey ON public.axentra_access_definitions USING btree (product_id)",
+          "name": "axentra_access_definitions_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_account_tokens": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "purpose",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "token_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "email",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "used_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_account_tokens_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "CHECK ((purpose = ANY (ARRAY['password_reset'::text, 'email_verification'::text])))",
+          "name": "axentra_account_tokens_purpose_check",
+          "type": "c"
+        },
+        {
+          "definition": "UNIQUE (token_hash)",
+          "name": "axentra_account_tokens_token_hash_key",
+          "type": "u"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_account_tokens_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_account_tokens_open ON public.axentra_account_tokens USING btree (user_id, purpose) WHERE (used_at IS NULL)",
+          "name": "axentra_account_tokens_open"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_account_tokens_pkey ON public.axentra_account_tokens USING btree (id)",
+          "name": "axentra_account_tokens_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_account_tokens_token_hash_key ON public.axentra_account_tokens USING btree (token_hash)",
+          "name": "axentra_account_tokens_token_hash_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_api_keys": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "secret_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::text[]",
+          "generated": "",
+          "identity": "",
+          "name": "permissions",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_used_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "revoked_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "replaces",
+          "not_null": false,
+          "type": "text"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_api_keys_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_api_keys_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_api_keys_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_api_keys_pkey ON public.axentra_api_keys USING btree (id)",
+          "name": "axentra_api_keys_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_api_keys_product ON public.axentra_api_keys USING btree (product_id)",
+          "name": "axentra_api_keys_product"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_audit_events": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "occurred_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "actor_kind",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "actor_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "actor_display",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "action",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "target_type",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "target_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'success'::text",
+          "generated": "",
+          "identity": "",
+          "name": "outcome",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "request_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "ip",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "details",
+          "not_null": true,
+          "type": "jsonb"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((outcome = ANY (ARRAY['success'::text, 'denied'::text, 'failure'::text])))",
+          "name": "axentra_audit_events_outcome_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_audit_events_pkey",
+          "type": "p"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_audit_events_action ON public.axentra_audit_events USING btree (action)",
+          "name": "axentra_audit_events_action"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_audit_events_pkey ON public.axentra_audit_events USING btree (id)",
+          "name": "axentra_audit_events_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_audit_events_product ON public.axentra_audit_events USING btree (product_id, occurred_at DESC)",
+          "name": "axentra_audit_events_product"
+        },
+        {
+          "definition": "CREATE INDEX axentra_audit_events_time ON public.axentra_audit_events USING btree (occurred_at DESC, id DESC)",
+          "name": "axentra_audit_events_time"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_billing_overrides": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "entitlements",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "updated_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (product_id, tenant_id)",
+          "name": "axentra_billing_overrides_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_billing_overrides_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_overrides_pkey ON public.axentra_billing_overrides USING btree (product_id, tenant_id)",
+          "name": "axentra_billing_overrides_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_billing_plans": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "true",
+          "generated": "",
+          "identity": "",
+          "name": "active",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "trial_days",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "'[]'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "prices",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "entitlements",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((length(description) <= 2000))",
+          "name": "axentra_billing_plans_description_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((key ~ '^[a-z][a-z0-9_-]{0,62}$'::text))",
+          "name": "axentra_billing_plans_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((length(name) >= 1) AND (length(name) <= 200)))",
+          "name": "axentra_billing_plans_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_billing_plans_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_billing_plans_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, id)",
+          "name": "axentra_billing_plans_product_id_id_key",
+          "type": "u"
+        },
+        {
+          "definition": "UNIQUE (product_id, key)",
+          "name": "axentra_billing_plans_product_id_key_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK (((trial_days >= 0) AND (trial_days <= 365)))",
+          "name": "axentra_billing_plans_trial_days_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_plans_pkey ON public.axentra_billing_plans USING btree (id)",
+          "name": "axentra_billing_plans_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_plans_product_id_id_key ON public.axentra_billing_plans USING btree (product_id, id)",
+          "name": "axentra_billing_plans_product_id_id_key"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_plans_product_id_key_key ON public.axentra_billing_plans USING btree (product_id, key)",
+          "name": "axentra_billing_plans_product_id_key_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_billing_subscriptions": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "plan_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "price",
+          "not_null": false,
+          "type": "jsonb"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "period_anchor",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "current_period_start",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "current_period_end",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "trial_end",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "cancel_at_period_end",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "canceled_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider_customer_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider_subscription_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider_checkout_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_provider_event_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_billing_subscriptions_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, plan_id) REFERENCES axentra_billing_plans(product_id, id)",
+          "name": "axentra_billing_subscriptions_product_id_plan_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_billing_subscriptions_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((provider = ANY (ARRAY['manual'::text, 'fake'::text, 'stripe'::text])))",
+          "name": "axentra_billing_subscriptions_provider_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['trialing'::text, 'active'::text, 'past_due'::text, 'canceled'::text, 'incomplete'::text])))",
+          "name": "axentra_billing_subscriptions_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_subscriptions_current ON public.axentra_billing_subscriptions USING btree (product_id, tenant_id) WHERE (status <> 'canceled'::text)",
+          "name": "axentra_billing_subscriptions_current"
+        },
+        {
+          "definition": "CREATE INDEX axentra_billing_subscriptions_list ON public.axentra_billing_subscriptions USING btree (product_id, created_at DESC, id DESC)",
+          "name": "axentra_billing_subscriptions_list"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_subscriptions_pkey ON public.axentra_billing_subscriptions USING btree (id)",
+          "name": "axentra_billing_subscriptions_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_subscriptions_provider_checkout ON public.axentra_billing_subscriptions USING btree (provider, provider_checkout_id) WHERE (provider_checkout_id IS NOT NULL)",
+          "name": "axentra_billing_subscriptions_provider_checkout"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_subscriptions_provider_sub ON public.axentra_billing_subscriptions USING btree (provider, provider_subscription_id) WHERE (provider_subscription_id IS NOT NULL)",
+          "name": "axentra_billing_subscriptions_provider_sub"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_billing_webhook_events": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "event_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "event_type",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider_created_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "subscription_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "outcome",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "received_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((length(event_id) >= 1) AND (length(event_id) <= 255)))",
+          "name": "axentra_billing_webhook_events_event_id_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (provider, event_id)",
+          "name": "axentra_billing_webhook_events_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_billing_webhook_events_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_billing_webhook_events_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_billing_webhook_events_pkey ON public.axentra_billing_webhook_events USING btree (provider, event_id)",
+          "name": "axentra_billing_webhook_events_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_billing_webhook_events_product ON public.axentra_billing_webhook_events USING btree (product_id, received_at DESC)",
+          "name": "axentra_billing_webhook_events_product"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_events": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "COALESCE(tenant_id, ''::text)",
+          "generated": "s",
+          "identity": "",
+          "name": "tenant_key",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "type",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "data",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "idempotency_key",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "'system'::text",
+          "generated": "",
+          "identity": "",
+          "name": "actor_kind",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "actor_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "request_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "occurred_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "pos",
+          "not_null": false,
+          "type": "bigint"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((idempotency_key IS NULL) OR ((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200))))",
+          "name": "axentra_events_idempotency_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_events_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_events_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_events_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((type ~ '^[a-z][a-z0-9_.:-]{0,149}$'::text))",
+          "name": "axentra_events_type_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_events_idempotency ON public.axentra_events USING btree (product_id, tenant_key, idempotency_key) WHERE (idempotency_key IS NOT NULL)",
+          "name": "axentra_events_idempotency"
+        },
+        {
+          "definition": "CREATE INDEX axentra_events_list ON public.axentra_events USING btree (product_id, id DESC)",
+          "name": "axentra_events_list"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_events_pkey ON public.axentra_events USING btree (id)",
+          "name": "axentra_events_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_events_stream ON public.axentra_events USING btree (product_id, pos)",
+          "name": "axentra_events_stream"
+        },
+        {
+          "definition": "CREATE INDEX axentra_events_tenant ON public.axentra_events USING btree (product_id, tenant_id, id DESC)",
+          "name": "axentra_events_tenant"
+        },
+        {
+          "definition": "CREATE INDEX axentra_events_time ON public.axentra_events USING btree (occurred_at)",
+          "name": "axentra_events_time"
+        },
+        {
+          "definition": "CREATE INDEX axentra_events_unpositioned ON public.axentra_events USING btree (id) WHERE (pos IS NULL)",
+          "name": "axentra_events_unpositioned"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_files": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "content_type",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "size",
+          "not_null": true,
+          "type": "bigint"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "sha256",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "storage_key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "backend",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "metadata",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "'pending'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "deleted_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "object_deleted_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "stored_inert",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "original_content_type",
+          "not_null": false,
+          "type": "text"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((length(name) >= 1) AND (length(name) <= 255)))",
+          "name": "axentra_files_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_files_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_files_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK (((sha256 IS NULL) OR (sha256 ~ '^[0-9a-f]{64}$'::text)))",
+          "name": "axentra_files_sha256_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((size >= 0))",
+          "name": "axentra_files_size_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'deleted'::text])))",
+          "name": "axentra_files_status_check",
+          "type": "c"
+        },
+        {
+          "definition": "UNIQUE (storage_key)",
+          "name": "axentra_files_storage_key_key",
+          "type": "u"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_files_expiry ON public.axentra_files USING btree (expires_at) WHERE ((status = 'active'::text) AND (expires_at IS NOT NULL))",
+          "name": "axentra_files_expiry"
+        },
+        {
+          "definition": "CREATE INDEX axentra_files_list ON public.axentra_files USING btree (product_id, tenant_id, created_at, id) WHERE (status = 'active'::text)",
+          "name": "axentra_files_list"
+        },
+        {
+          "definition": "CREATE INDEX axentra_files_pending ON public.axentra_files USING btree (created_at) WHERE (status = 'pending'::text)",
+          "name": "axentra_files_pending"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_files_pkey ON public.axentra_files USING btree (id)",
+          "name": "axentra_files_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_files_storage_key_key ON public.axentra_files USING btree (storage_key)",
+          "name": "axentra_files_storage_key_key"
+        },
+        {
+          "definition": "CREATE INDEX axentra_files_unpurged ON public.axentra_files USING btree (deleted_at) WHERE ((status = 'deleted'::text) AND (object_deleted_at IS NULL))",
+          "name": "axentra_files_unpurged"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_invitations": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "email",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "role",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "token_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "invited_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "accepted_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "accepted_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "revoked_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_invitations_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_invitations_product_fk",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_invitations_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (token_hash)",
+          "name": "axentra_invitations_token_hash_key",
+          "type": "u"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_invitations_pkey ON public.axentra_invitations USING btree (id)",
+          "name": "axentra_invitations_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_invitations_product_open ON public.axentra_invitations USING btree (product_id, lower(email)) WHERE ((tenant_id IS NULL) AND (accepted_at IS NULL) AND (revoked_at IS NULL))",
+          "name": "axentra_invitations_product_open"
+        },
+        {
+          "definition": "CREATE INDEX axentra_invitations_tenant ON public.axentra_invitations USING btree (product_id, tenant_id)",
+          "name": "axentra_invitations_tenant"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_invitations_token_hash_key ON public.axentra_invitations USING btree (token_hash)",
+          "name": "axentra_invitations_token_hash_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_jobs": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "COALESCE(tenant_id, ''::text)",
+          "generated": "s",
+          "identity": "",
+          "name": "tenant_key",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "kind",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "payload",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "'queued'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "priority",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "run_after",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "attempts",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "5",
+          "generated": "",
+          "identity": "",
+          "name": "max_attempts",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "2",
+          "generated": "",
+          "identity": "",
+          "name": "backoff_base_seconds",
+          "not_null": true,
+          "type": "double precision"
+        },
+        {
+          "default": "3600",
+          "generated": "",
+          "identity": "",
+          "name": "backoff_max_seconds",
+          "not_null": true,
+          "type": "double precision"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "lease_until",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "worker",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "cancel_requested",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_error",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "idempotency_key",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "result",
+          "not_null": false,
+          "type": "jsonb"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "schedule_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "started_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "finished_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "change_pos",
+          "not_null": false,
+          "type": "bigint"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((idempotency_key IS NULL) OR ((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200))))",
+          "name": "axentra_jobs_idempotency_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((kind ~ '^[a-z][a-z0-9_.:-]{0,99}$'::text))",
+          "name": "axentra_jobs_kind_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((max_attempts >= 1) AND (max_attempts <= 100)))",
+          "name": "axentra_jobs_max_attempts_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_jobs_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "CHECK (((priority >= '-100'::integer) AND (priority <= 100)))",
+          "name": "axentra_jobs_priority_check",
+          "type": "c"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_jobs_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_jobs_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'dead'::text, 'cancelled'::text])))",
+          "name": "axentra_jobs_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_jobs_changes ON public.axentra_jobs USING btree (product_id, change_pos)",
+          "name": "axentra_jobs_changes"
+        },
+        {
+          "definition": "CREATE INDEX axentra_jobs_claim ON public.axentra_jobs USING btree (priority DESC, run_after, id) WHERE (status = 'queued'::text)",
+          "name": "axentra_jobs_claim"
+        },
+        {
+          "definition": "CREATE INDEX axentra_jobs_finished ON public.axentra_jobs USING btree (finished_at) WHERE (finished_at IS NOT NULL)",
+          "name": "axentra_jobs_finished"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_jobs_idempotency ON public.axentra_jobs USING btree (product_id, tenant_key, kind, idempotency_key) WHERE (idempotency_key IS NOT NULL)",
+          "name": "axentra_jobs_idempotency"
+        },
+        {
+          "definition": "CREATE INDEX axentra_jobs_lease ON public.axentra_jobs USING btree (lease_until) WHERE (status = 'running'::text)",
+          "name": "axentra_jobs_lease"
+        },
+        {
+          "definition": "CREATE INDEX axentra_jobs_list ON public.axentra_jobs USING btree (product_id, id DESC)",
+          "name": "axentra_jobs_list"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_jobs_pkey ON public.axentra_jobs USING btree (id)",
+          "name": "axentra_jobs_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_jobs_tenant ON public.axentra_jobs USING btree (product_id, tenant_id, id DESC)",
+          "name": "axentra_jobs_tenant"
+        },
+        {
+          "definition": "CREATE INDEX axentra_jobs_unpositioned ON public.axentra_jobs USING btree (id) WHERE (change_pos IS NULL)",
+          "name": "axentra_jobs_unpositioned"
+        }
+      ],
+      "kind": "r",
+      "triggers": [
+        "CREATE TRIGGER axentra_jobs_touch BEFORE UPDATE ON public.axentra_jobs FOR EACH ROW EXECUTE FUNCTION axentra_jobs_touch()"
+      ]
+    },
+    "axentra_login_states": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "state_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "nonce",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "code_verifier",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'/'::text",
+          "generated": "",
+          "identity": "",
+          "name": "return_to",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "invitation_token",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "host_context",
+          "not_null": false,
+          "type": "text"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (state_hash)",
+          "name": "axentra_login_states_pkey",
+          "type": "p"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_login_states_pkey ON public.axentra_login_states USING btree (state_hash)",
+          "name": "axentra_login_states_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_memberships": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "role",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_memberships_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_memberships_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (tenant_id, user_id)",
+          "name": "axentra_memberships_tenant_id_user_id_key",
+          "type": "u"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_memberships_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_memberships_pkey ON public.axentra_memberships USING btree (id)",
+          "name": "axentra_memberships_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_memberships_tenant_id_user_id_key ON public.axentra_memberships USING btree (tenant_id, user_id)",
+          "name": "axentra_memberships_tenant_id_user_id_key"
+        },
+        {
+          "definition": "CREATE INDEX axentra_memberships_user ON public.axentra_memberships USING btree (user_id)",
+          "name": "axentra_memberships_user"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_notify_mailbox": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "message_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "sender",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "recipient",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "subject_enc",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "body_text_enc",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "body_html_enc",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider_message_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_notify_mailbox_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_notify_mailbox_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_notify_mailbox_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_notify_mailbox_list ON public.axentra_notify_mailbox USING btree (product_id, created_at DESC, id DESC)",
+          "name": "axentra_notify_mailbox_list"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_mailbox_pkey ON public.axentra_notify_mailbox USING btree (id)",
+          "name": "axentra_notify_mailbox_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_notify_messages": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "template_key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "template_version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "'email'::text",
+          "generated": "",
+          "identity": "",
+          "name": "channel",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "category",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "recipient",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "recipient_user_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "locale",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "subject_enc",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "body_text_enc",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "body_html_enc",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "sensitive",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "attempts",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "max_attempts",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "next_attempt_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "lease_until",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "claim_token",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_error",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider_message_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "idempotency_key",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "request_hash",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "sent_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "content_purged_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "read_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text, 'push'::text, 'inbox'::text])))",
+          "name": "axentra_notify_messages_channel_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_notify_messages_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_notify_messages_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, idempotency_key)",
+          "name": "axentra_notify_messages_product_id_idempotency_key_key",
+          "type": "u"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_notify_messages_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (recipient_user_id) REFERENCES axentra_users(id) ON DELETE SET NULL",
+          "name": "axentra_notify_messages_recipient_user_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['queued'::text, 'sending'::text, 'sent'::text, 'failed'::text, 'suppressed'::text])))",
+          "name": "axentra_notify_messages_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_notify_messages_due ON public.axentra_notify_messages USING btree (next_attempt_at) WHERE (status = 'queued'::text)",
+          "name": "axentra_notify_messages_due"
+        },
+        {
+          "definition": "CREATE INDEX axentra_notify_messages_inbox ON public.axentra_notify_messages USING btree (product_id, recipient_user_id, created_at DESC, id DESC) WHERE (channel = 'inbox'::text)",
+          "name": "axentra_notify_messages_inbox"
+        },
+        {
+          "definition": "CREATE INDEX axentra_notify_messages_lease ON public.axentra_notify_messages USING btree (lease_until) WHERE (status = 'sending'::text)",
+          "name": "axentra_notify_messages_lease"
+        },
+        {
+          "definition": "CREATE INDEX axentra_notify_messages_list ON public.axentra_notify_messages USING btree (product_id, created_at DESC, id DESC)",
+          "name": "axentra_notify_messages_list"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_messages_pkey ON public.axentra_notify_messages USING btree (id)",
+          "name": "axentra_notify_messages_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_messages_product_id_idempotency_key_key ON public.axentra_notify_messages USING btree (product_id, idempotency_key)",
+          "name": "axentra_notify_messages_product_id_idempotency_key_key"
+        },
+        {
+          "definition": "CREATE INDEX axentra_notify_messages_tenant ON public.axentra_notify_messages USING btree (product_id, tenant_id, created_at DESC)",
+          "name": "axentra_notify_messages_tenant"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_notify_preferences": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::text[]",
+          "generated": "",
+          "identity": "",
+          "name": "opted_out",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_notify_preferences_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_notify_preferences_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_notify_preferences_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_notify_preferences_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_preferences_key ON public.axentra_notify_preferences USING btree (product_id, user_id, COALESCE(tenant_id, ''::text))",
+          "name": "axentra_notify_preferences_key"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_preferences_pkey ON public.axentra_notify_preferences USING btree (id)",
+          "name": "axentra_notify_preferences_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_notify_templates": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'email'::text",
+          "generated": "",
+          "identity": "",
+          "name": "channel",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'transactional'::text",
+          "generated": "",
+          "identity": "",
+          "name": "category",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::text[]",
+          "generated": "",
+          "identity": "",
+          "name": "variables",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "sample_data",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "variants",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "sensitive",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "updated_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((category ~ '^[a-z][a-z0-9_]{1,40}$'::text))",
+          "name": "axentra_notify_templates_category_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((channel = ANY (ARRAY['email'::text, 'sms'::text, 'push'::text, 'inbox'::text])))",
+          "name": "axentra_notify_templates_channel_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((key ~ '^[a-z][a-z0-9_.-]{1,62}$'::text))",
+          "name": "axentra_notify_templates_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_notify_templates_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_notify_templates_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, key)",
+          "name": "axentra_notify_templates_product_id_key_key",
+          "type": "u"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_templates_pkey ON public.axentra_notify_templates USING btree (id)",
+          "name": "axentra_notify_templates_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_notify_templates_product_id_key_key ON public.axentra_notify_templates USING btree (product_id, key)",
+          "name": "axentra_notify_templates_product_id_key_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_platform_roles": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "role",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (user_id)",
+          "name": "axentra_platform_roles_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "CHECK ((role = ANY (ARRAY['platform_admin'::text, 'platform_viewer'::text])))",
+          "name": "axentra_platform_roles_role_check",
+          "type": "c"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_platform_roles_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_platform_roles_pkey ON public.axentra_platform_roles USING btree (user_id)",
+          "name": "axentra_platform_roles_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_product_members": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "role",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (product_id, user_id)",
+          "name": "axentra_product_members_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_product_members_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_product_members_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_product_members_pkey ON public.axentra_product_members USING btree (product_id, user_id)",
+          "name": "axentra_product_members_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_product_members_user ON public.axentra_product_members USING btree (user_id)",
+          "name": "axentra_product_members_user"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_product_permissions": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "scope",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "read_like",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": "'{}'::text[]",
+          "generated": "",
+          "identity": "",
+          "name": "default_roles",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "declared_by",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "retired_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((declared_by = ANY (ARRAY['code'::text, 'api'::text])))",
+          "name": "axentra_product_permissions_declared_by_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((length(description) <= 500))",
+          "name": "axentra_product_permissions_description_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((length(name) <= 128) AND (name ~ '^[a-z][a-z0-9_-]*\\.[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*:[a-z][a-z0-9_]*$'::text)))",
+          "name": "axentra_product_permissions_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (product_id, name)",
+          "name": "axentra_product_permissions_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_product_permissions_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((scope = ANY (ARRAY['product'::text, 'tenant'::text])))",
+          "name": "axentra_product_permissions_scope_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_product_permissions_pkey ON public.axentra_product_permissions USING btree (product_id, name)",
+          "name": "axentra_product_permissions_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_products": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "slug",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'active'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "settings",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((length(name) >= 1) AND (length(name) <= 200)))",
+          "name": "axentra_products_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_products_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{1,62}$'::text))",
+          "name": "axentra_products_slug_check",
+          "type": "c"
+        },
+        {
+          "definition": "UNIQUE (slug)",
+          "name": "axentra_products_slug_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'archived'::text])))",
+          "name": "axentra_products_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_products_pkey ON public.axentra_products USING btree (id)",
+          "name": "axentra_products_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_products_slug_key ON public.axentra_products USING btree (slug)",
+          "name": "axentra_products_slug_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_rate_limits": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "bucket",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "window_start",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "hits",
+          "not_null": true,
+          "type": "integer"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (bucket, window_start)",
+          "name": "axentra_rate_limits_pkey",
+          "type": "p"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_rate_limits_pkey ON public.axentra_rate_limits USING btree (bucket, window_start)",
+          "name": "axentra_rate_limits_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_records": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "collection",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "data",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "updated_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((collection ~ '^[a-z][a-z0-9_]{0,62}$'::text))",
+          "name": "axentra_records_collection_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_records_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_records_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_records_created ON public.axentra_records USING btree (product_id, tenant_id, collection, created_at, id)",
+          "name": "axentra_records_created"
+        },
+        {
+          "definition": "CREATE INDEX axentra_records_data ON public.axentra_records USING gin (data jsonb_path_ops)",
+          "name": "axentra_records_data"
+        },
+        {
+          "definition": "CREATE INDEX axentra_records_list ON public.axentra_records USING btree (product_id, tenant_id, collection, id)",
+          "name": "axentra_records_list"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_records_pkey ON public.axentra_records USING btree (id)",
+          "name": "axentra_records_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_records_updated ON public.axentra_records USING btree (product_id, tenant_id, collection, updated_at, id)",
+          "name": "axentra_records_updated"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_roles": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "scope",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::text[]",
+          "generated": "",
+          "identity": "",
+          "name": "permissions",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((key ~ '^[a-z][a-z0-9_]{1,40}$'::text))",
+          "name": "axentra_roles_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_roles_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_roles_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, key)",
+          "name": "axentra_roles_product_id_key_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((scope = ANY (ARRAY['product'::text, 'tenant'::text])))",
+          "name": "axentra_roles_scope_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_roles_pkey ON public.axentra_roles USING btree (id)",
+          "name": "axentra_roles_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_roles_product_id_key_key ON public.axentra_roles USING btree (product_id, key)",
+          "name": "axentra_roles_product_id_key_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_schedule_firings": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "schedule_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "slot",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "job_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "fired_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (schedule_id, slot)",
+          "name": "axentra_schedule_firings_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_schedule_firings_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_schedule_firings_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (schedule_id) REFERENCES axentra_schedules(id) ON DELETE CASCADE",
+          "name": "axentra_schedule_firings_schedule_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_schedule_firings_pkey ON public.axentra_schedule_firings USING btree (schedule_id, slot)",
+          "name": "axentra_schedule_firings_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_schedule_firings_time ON public.axentra_schedule_firings USING btree (fired_at)",
+          "name": "axentra_schedule_firings_time"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_schedules": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "kind",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "payload",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "interval_seconds",
+          "not_null": false,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "cron",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "true",
+          "generated": "",
+          "identity": "",
+          "name": "enabled",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "priority",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "5",
+          "generated": "",
+          "identity": "",
+          "name": "max_attempts",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "next_run_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_run_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_job_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((interval_seconds IS NULL) <> (cron IS NULL)))",
+          "name": "axentra_schedules_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((interval_seconds IS NULL) OR ((interval_seconds >= 10) AND (interval_seconds <= 31622400))))",
+          "name": "axentra_schedules_interval_seconds_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((kind ~ '^[a-z][a-z0-9_.:-]{0,99}$'::text))",
+          "name": "axentra_schedules_kind_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((max_attempts >= 1) AND (max_attempts <= 100)))",
+          "name": "axentra_schedules_max_attempts_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((length(name) >= 1) AND (length(name) <= 200)))",
+          "name": "axentra_schedules_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_schedules_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "CHECK (((priority >= '-100'::integer) AND (priority <= 100)))",
+          "name": "axentra_schedules_priority_check",
+          "type": "c"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_schedules_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_schedules_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_schedules_due ON public.axentra_schedules USING btree (next_run_at) WHERE enabled",
+          "name": "axentra_schedules_due"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_schedules_pkey ON public.axentra_schedules USING btree (id)",
+          "name": "axentra_schedules_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_schedules_product ON public.axentra_schedules USING btree (product_id, id)",
+          "name": "axentra_schedules_product"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_schema_migrations": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "namespace",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "checksum",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "applied_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (namespace, version)",
+          "name": "axentra_schema_migrations_pkey",
+          "type": "p"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_schema_migrations_pkey ON public.axentra_schema_migrations USING btree (namespace, version)",
+          "name": "axentra_schema_migrations_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_search_documents": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "kind",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "ref_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "title",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "body",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "metadata",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "'simple'::regconfig",
+          "generated": "",
+          "identity": "",
+          "name": "language",
+          "not_null": true,
+          "type": "regconfig"
+        },
+        {
+          "default": "(setweight(to_tsvector(language, title), 'A'::\"char\") || setweight(to_tsvector(language, body), 'B'::\"char\"))",
+          "generated": "s",
+          "identity": "",
+          "name": "search_vector",
+          "not_null": false,
+          "type": "tsvector"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "updated_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((length(body) <= 1000000))",
+          "name": "axentra_search_documents_body_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((kind ~ '^[a-z][a-z0-9_.-]{0,62}$'::text))",
+          "name": "axentra_search_documents_kind_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((jsonb_typeof(metadata) = 'object'::text))",
+          "name": "axentra_search_documents_metadata_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_search_documents_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_search_documents_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, tenant_id, kind, ref_id)",
+          "name": "axentra_search_documents_product_id_tenant_id_kind_ref_id_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((ref_id ~ '^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,199}$'::text))",
+          "name": "axentra_search_documents_ref_id_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((length(title) <= 1000))",
+          "name": "axentra_search_documents_title_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_search_documents_pkey ON public.axentra_search_documents USING btree (id)",
+          "name": "axentra_search_documents_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_search_documents_product_id_tenant_id_kind_ref_id_key ON public.axentra_search_documents USING btree (product_id, tenant_id, kind, ref_id)",
+          "name": "axentra_search_documents_product_id_tenant_id_kind_ref_id_key"
+        },
+        {
+          "definition": "CREATE INDEX axentra_search_documents_vector ON public.axentra_search_documents USING gin (search_vector)",
+          "name": "axentra_search_documents_vector"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_sessions": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "token_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "csrf_token",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "auth_method",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "ip",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "user_agent",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "last_seen_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "revoked_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_sessions_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "UNIQUE (token_hash)",
+          "name": "axentra_sessions_token_hash_key",
+          "type": "u"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_sessions_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_sessions_pkey ON public.axentra_sessions USING btree (id)",
+          "name": "axentra_sessions_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_sessions_token_hash_key ON public.axentra_sessions USING btree (token_hash)",
+          "name": "axentra_sessions_token_hash_key"
+        },
+        {
+          "definition": "CREATE INDEX axentra_sessions_user ON public.axentra_sessions USING btree (user_id) WHERE (revoked_at IS NULL)",
+          "name": "axentra_sessions_user"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_setup_tokens": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "token_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "used_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (token_hash)",
+          "name": "axentra_setup_tokens_pkey",
+          "type": "p"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_setup_tokens_pkey ON public.axentra_setup_tokens USING btree (token_hash)",
+          "name": "axentra_setup_tokens_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_storage_quotas": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "quota_bytes",
+          "not_null": false,
+          "type": "bigint"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "quota_files",
+          "not_null": false,
+          "type": "integer"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "updated_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (product_id, tenant_id)",
+          "name": "axentra_storage_quotas_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_storage_quotas_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK (((quota_bytes IS NULL) OR (quota_bytes >= 0)))",
+          "name": "axentra_storage_quotas_quota_bytes_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((quota_files IS NULL) OR (quota_files >= 0)))",
+          "name": "axentra_storage_quotas_quota_files_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_storage_quotas_pkey ON public.axentra_storage_quotas USING btree (product_id, tenant_id)",
+          "name": "axentra_storage_quotas_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_storage_usage": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "bytes_used",
+          "not_null": true,
+          "type": "bigint"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "files_used",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((bytes_used >= 0))",
+          "name": "axentra_storage_usage_bytes_used_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((files_used >= 0))",
+          "name": "axentra_storage_usage_files_used_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (product_id, tenant_id)",
+          "name": "axentra_storage_usage_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_storage_usage_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_storage_usage_pkey ON public.axentra_storage_usage USING btree (product_id, tenant_id)",
+          "name": "axentra_storage_usage_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_stream_seq": {
+      "kind": "S"
+    },
+    "axentra_tenants": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "slug",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'active'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "settings",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((length(name) >= 1) AND (length(name) <= 200)))",
+          "name": "axentra_tenants_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_tenants_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_tenants_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, id)",
+          "name": "axentra_tenants_product_id_id_key",
+          "type": "u"
+        },
+        {
+          "definition": "UNIQUE (product_id, slug)",
+          "name": "axentra_tenants_product_id_slug_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{1,62}$'::text))",
+          "name": "axentra_tenants_slug_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text])))",
+          "name": "axentra_tenants_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_tenants_pkey ON public.axentra_tenants USING btree (id)",
+          "name": "axentra_tenants_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_tenants_product_id_id_key ON public.axentra_tenants USING btree (product_id, id)",
+          "name": "axentra_tenants_product_id_id_key"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_tenants_product_id_slug_key ON public.axentra_tenants USING btree (product_id, slug)",
+          "name": "axentra_tenants_product_id_slug_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_usage_counters": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "meter_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "granularity",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "period_start",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "period_end",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "value",
+          "not_null": true,
+          "type": "numeric"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "event_count",
+          "not_null": true,
+          "type": "bigint"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((granularity = ANY (ARRAY['period'::text, 'day'::text])))",
+          "name": "axentra_usage_counters_granularity_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (product_id, tenant_id, meter_id, granularity, period_start)",
+          "name": "axentra_usage_counters_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, meter_id) REFERENCES axentra_usage_meters(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_counters_product_id_meter_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_counters_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_counters_pkey ON public.axentra_usage_counters USING btree (product_id, tenant_id, meter_id, granularity, period_start)",
+          "name": "axentra_usage_counters_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_usage_counters_product ON public.axentra_usage_counters USING btree (product_id, meter_id, granularity, period_start)",
+          "name": "axentra_usage_counters_product"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_usage_events": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "meter_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "quantity",
+          "not_null": true,
+          "type": "numeric"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "idempotency_key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "request_hash",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "occurred_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "recorded_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "period_start",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "properties",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "reservation_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "actor_id",
+          "not_null": true,
+          "type": "text"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 200)))",
+          "name": "axentra_usage_events_idempotency_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_usage_events_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, meter_id) REFERENCES axentra_usage_meters(product_id, id)",
+          "name": "axentra_usage_events_product_id_meter_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_events_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, tenant_id, idempotency_key)",
+          "name": "axentra_usage_events_product_id_tenant_id_idempotency_key_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((quantity >= (0)::numeric))",
+          "name": "axentra_usage_events_quantity_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_usage_events_list ON public.axentra_usage_events USING btree (product_id, tenant_id, occurred_at DESC, id DESC)",
+          "name": "axentra_usage_events_list"
+        },
+        {
+          "definition": "CREATE INDEX axentra_usage_events_meter ON public.axentra_usage_events USING btree (product_id, meter_id)",
+          "name": "axentra_usage_events_meter"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_events_pkey ON public.axentra_usage_events USING btree (id)",
+          "name": "axentra_usage_events_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_events_product_id_tenant_id_idempotency_key_key ON public.axentra_usage_events USING btree (product_id, tenant_id, idempotency_key)",
+          "name": "axentra_usage_events_product_id_tenant_id_idempotency_key_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_usage_meters": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "key",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "unit",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'sum'::text",
+          "generated": "",
+          "identity": "",
+          "name": "aggregation",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'month'::text",
+          "generated": "",
+          "identity": "",
+          "name": "reset_period",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "default_limit",
+          "not_null": false,
+          "type": "numeric"
+        },
+        {
+          "default": "'hard'::text",
+          "generated": "",
+          "identity": "",
+          "name": "default_enforcement",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "true",
+          "generated": "",
+          "identity": "",
+          "name": "active",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((aggregation = ANY (ARRAY['sum'::text, 'max'::text, 'last'::text])))",
+          "name": "axentra_usage_meters_aggregation_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((default_enforcement = ANY (ARRAY['hard'::text, 'soft'::text])))",
+          "name": "axentra_usage_meters_default_enforcement_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((default_limit IS NULL) OR (default_limit >= (0)::numeric)))",
+          "name": "axentra_usage_meters_default_limit_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((length(description) <= 2000))",
+          "name": "axentra_usage_meters_description_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((key ~ '^[a-z][a-z0-9_.]{0,62}$'::text))",
+          "name": "axentra_usage_meters_key_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((length(name) <= 200))",
+          "name": "axentra_usage_meters_name_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_usage_meters_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_usage_meters_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, id)",
+          "name": "axentra_usage_meters_product_id_id_key",
+          "type": "u"
+        },
+        {
+          "definition": "UNIQUE (product_id, key)",
+          "name": "axentra_usage_meters_product_id_key_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((reset_period = ANY (ARRAY['none'::text, 'day'::text, 'month'::text, 'billing_period'::text])))",
+          "name": "axentra_usage_meters_reset_period_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((length(unit) <= 40))",
+          "name": "axentra_usage_meters_unit_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_meters_pkey ON public.axentra_usage_meters USING btree (id)",
+          "name": "axentra_usage_meters_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_meters_product_id_id_key ON public.axentra_usage_meters USING btree (product_id, id)",
+          "name": "axentra_usage_meters_product_id_id_key"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_meters_product_id_key_key ON public.axentra_usage_meters USING btree (product_id, key)",
+          "name": "axentra_usage_meters_product_id_key_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_usage_quotas": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "meter_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "limit_value",
+          "not_null": false,
+          "type": "numeric"
+        },
+        {
+          "default": "'hard'::text",
+          "generated": "",
+          "identity": "",
+          "name": "enforcement",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "updated_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK ((enforcement = ANY (ARRAY['hard'::text, 'soft'::text])))",
+          "name": "axentra_usage_quotas_enforcement_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK (((limit_value IS NULL) OR (limit_value >= (0)::numeric)))",
+          "name": "axentra_usage_quotas_limit_value_check",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (product_id, tenant_id, meter_id)",
+          "name": "axentra_usage_quotas_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, meter_id) REFERENCES axentra_usage_meters(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_quotas_product_id_meter_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_quotas_product_id_tenant_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_quotas_pkey ON public.axentra_usage_quotas USING btree (product_id, tenant_id, meter_id)",
+          "name": "axentra_usage_quotas_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_usage_reservations": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "meter_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "quantity",
+          "not_null": true,
+          "type": "numeric"
+        },
+        {
+          "default": "'active'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "period_start",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "expires_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "idempotency_key",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "request_hash",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "event_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "committed_quantity",
+          "not_null": false,
+          "type": "numeric"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_usage_reservations_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, meter_id) REFERENCES axentra_usage_meters(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_reservations_product_id_meter_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_usage_reservations_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "UNIQUE (product_id, tenant_id, idempotency_key)",
+          "name": "axentra_usage_reservations_product_id_tenant_id_idempotency_key",
+          "type": "u"
+        },
+        {
+          "definition": "CHECK ((quantity > (0)::numeric))",
+          "name": "axentra_usage_reservations_quantity_check",
+          "type": "c"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'committed'::text, 'released'::text, 'expired'::text])))",
+          "name": "axentra_usage_reservations_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_usage_reservations_active ON public.axentra_usage_reservations USING btree (product_id, tenant_id, meter_id, period_start) WHERE (status = 'active'::text)",
+          "name": "axentra_usage_reservations_active"
+        },
+        {
+          "definition": "CREATE INDEX axentra_usage_reservations_expiry ON public.axentra_usage_reservations USING btree (expires_at) WHERE (status = 'active'::text)",
+          "name": "axentra_usage_reservations_expiry"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_reservations_pkey ON public.axentra_usage_reservations USING btree (id)",
+          "name": "axentra_usage_reservations_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_usage_reservations_product_id_tenant_id_idempotency_key ON public.axentra_usage_reservations USING btree (product_id, tenant_id, idempotency_key)",
+          "name": "axentra_usage_reservations_product_id_tenant_id_idempotency_key"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_user_identities": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "user_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "provider",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "subject",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "email",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_user_identities_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "UNIQUE (provider, subject)",
+          "name": "axentra_user_identities_provider_subject_key",
+          "type": "u"
+        },
+        {
+          "definition": "FOREIGN KEY (user_id) REFERENCES axentra_users(id) ON DELETE CASCADE",
+          "name": "axentra_user_identities_user_id_fkey",
+          "type": "f"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_user_identities_pkey ON public.axentra_user_identities USING btree (id)",
+          "name": "axentra_user_identities_pkey"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_user_identities_provider_subject_key ON public.axentra_user_identities USING btree (provider, subject)",
+          "name": "axentra_user_identities_provider_subject_key"
+        },
+        {
+          "definition": "CREATE INDEX axentra_user_identities_user ON public.axentra_user_identities USING btree (user_id)",
+          "name": "axentra_user_identities_user"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_users": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "email",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "name",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'active'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "password_hash",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "'en'::text",
+          "generated": "",
+          "identity": "",
+          "name": "locale",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "'{}'::jsonb",
+          "generated": "",
+          "identity": "",
+          "name": "preferences",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_login_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "email_verified_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "CHECK (((email IS NULL) OR (email <> ''::text)))",
+          "name": "axentra_users_email_not_blank",
+          "type": "c"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_users_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text])))",
+          "name": "axentra_users_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_users_email ON public.axentra_users USING btree (lower(email))",
+          "name": "axentra_users_email"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_users_pkey ON public.axentra_users USING btree (id)",
+          "name": "axentra_users_pkey"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_webhook_deliveries": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "endpoint_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "event_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "event_type",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "payload",
+          "not_null": true,
+          "type": "jsonb"
+        },
+        {
+          "default": "'pending'::text",
+          "generated": "",
+          "identity": "",
+          "name": "status",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "0",
+          "generated": "",
+          "identity": "",
+          "name": "attempts",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "response_code",
+          "not_null": false,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "response_body",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "duration_ms",
+          "not_null": false,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "last_error",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "next_attempt_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "job_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "delivered_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "FOREIGN KEY (endpoint_id) REFERENCES axentra_webhook_endpoints(id) ON DELETE CASCADE",
+          "name": "axentra_webhook_deliveries_endpoint_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (event_id) REFERENCES axentra_events(id) ON DELETE CASCADE",
+          "name": "axentra_webhook_deliveries_event_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_webhook_deliveries_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_webhook_deliveries_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_webhook_deliveries_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK ((status = ANY (ARRAY['pending'::text, 'succeeded'::text, 'failed'::text, 'dead'::text])))",
+          "name": "axentra_webhook_deliveries_status_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE INDEX axentra_webhook_deliveries_endpoint ON public.axentra_webhook_deliveries USING btree (endpoint_id, id DESC)",
+          "name": "axentra_webhook_deliveries_endpoint"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_webhook_deliveries_once ON public.axentra_webhook_deliveries USING btree (endpoint_id, event_id) WHERE (event_id IS NOT NULL)",
+          "name": "axentra_webhook_deliveries_once"
+        },
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_webhook_deliveries_pkey ON public.axentra_webhook_deliveries USING btree (id)",
+          "name": "axentra_webhook_deliveries_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_webhook_deliveries_time ON public.axentra_webhook_deliveries USING btree (created_at)",
+          "name": "axentra_webhook_deliveries_time"
+        }
+      ],
+      "kind": "r"
+    },
+    "axentra_webhook_endpoints": {
+      "columns": [
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "product_id",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "tenant_id",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "url",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": "''::text",
+          "generated": "",
+          "identity": "",
+          "name": "description",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "event_types",
+          "not_null": true,
+          "type": "text[]"
+        },
+        {
+          "default": "true",
+          "generated": "",
+          "identity": "",
+          "name": "enabled",
+          "not_null": true,
+          "type": "boolean"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "secret_enc",
+          "not_null": true,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "previous_secret_enc",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "previous_secret_expires_at",
+          "not_null": false,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "1",
+          "generated": "",
+          "identity": "",
+          "name": "version",
+          "not_null": true,
+          "type": "integer"
+        },
+        {
+          "default": null,
+          "generated": "",
+          "identity": "",
+          "name": "created_by",
+          "not_null": false,
+          "type": "text"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "created_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        },
+        {
+          "default": "now()",
+          "generated": "",
+          "identity": "",
+          "name": "updated_at",
+          "not_null": true,
+          "type": "timestamp with time zone"
+        }
+      ],
+      "constraints": [
+        {
+          "definition": "PRIMARY KEY (id)",
+          "name": "axentra_webhook_endpoints_pkey",
+          "type": "p"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id) REFERENCES axentra_products(id) ON DELETE CASCADE",
+          "name": "axentra_webhook_endpoints_product_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "FOREIGN KEY (product_id, tenant_id) REFERENCES axentra_tenants(product_id, id) ON DELETE CASCADE",
+          "name": "axentra_webhook_endpoints_product_id_tenant_id_fkey",
+          "type": "f"
+        },
+        {
+          "definition": "CHECK (((length(url) >= 8) AND (length(url) <= 2000)))",
+          "name": "axentra_webhook_endpoints_url_check",
+          "type": "c"
+        }
+      ],
+      "indexes": [
+        {
+          "definition": "CREATE UNIQUE INDEX axentra_webhook_endpoints_pkey ON public.axentra_webhook_endpoints USING btree (id)",
+          "name": "axentra_webhook_endpoints_pkey"
+        },
+        {
+          "definition": "CREATE INDEX axentra_webhook_endpoints_product ON public.axentra_webhook_endpoints USING btree (product_id, id)",
+          "name": "axentra_webhook_endpoints_product"
+        }
+      ],
+      "kind": "r"
+    }
+  }
+}

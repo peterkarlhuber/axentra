@@ -1,0 +1,601 @@
+{
+  "table": {
+    "bypass_rls": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "code": "configuration_error",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "code": "configuration_error",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": true,
+            "superuser": false,
+            "table_owner": false
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": true,
+            "superuser": false,
+            "table_owner": false
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "the runtime role '<role:bypass_rls>' has BYPASSRLS: row-level security would not apply to it",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": true,
+          "can_create": false,
+          "connect": true,
+          "owned_tables": [],
+          "owner": "<owner>",
+          "restricted": false,
+          "role": "<role:bypass_rls>",
+          "schema": "public",
+          "superuser": false,
+          "tables": 43
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": true,
+          "superuser": false,
+          "table_owner": false
+        }
+      }
+    },
+    "connecting_owner": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "code": "configuration_error",
+          "message": "the database role owns tables protected by row-level security and could switch it off; run migrations with a separate owner role (database.migration_url_ref) and use a role without ownership at runtime, or set database.allow_table_owner = true",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "'<owner>' is the connecting (owner) role; name the separate runtime role",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": false,
+          "can_create": true,
+          "connect": true,
+          "owned_tables": [
+            "axentra_access_definitions",
+            "axentra_account_tokens",
+            "axentra_api_keys",
+            "axentra_audit_events",
+            "axentra_billing_overrides",
+            "axentra_billing_plans",
+            "axentra_billing_subscriptions",
+            "axentra_billing_webhook_events",
+            "axentra_events",
+            "axentra_files",
+            "axentra_invitations",
+            "axentra_jobs",
+            "axentra_login_states",
+            "axentra_memberships",
+            "axentra_notify_mailbox",
+            "axentra_notify_messages",
+            "axentra_notify_preferences",
+            "axentra_notify_templates",
+            "axentra_platform_roles",
+            "axentra_product_members",
+            "axentra_product_permissions",
+            "axentra_products",
+            "axentra_rate_limits",
+            "axentra_records",
+            "axentra_roles",
+            "axentra_schedule_firings",
+            "axentra_schedules",
+            "axentra_schema_migrations",
+            "axentra_search_documents",
+            "axentra_sessions",
+            "axentra_setup_tokens",
+            "axentra_storage_quotas",
+            "axentra_storage_usage",
+            "axentra_tenants",
+            "axentra_usage_counters",
+            "axentra_usage_events",
+            "axentra_usage_meters",
+            "axentra_usage_quotas",
+            "axentra_usage_reservations",
+            "axentra_user_identities",
+            "axentra_users",
+            "axentra_webhook_deliveries",
+            "axentra_webhook_endpoints"
+          ],
+          "owner": "<owner>",
+          "restricted": false,
+          "role": "<owner>",
+          "schema": "public",
+          "superuser": false,
+          "tables": 44
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": false,
+          "superuser": false,
+          "table_owner": true
+        }
+      }
+    },
+    "missing": {
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "the database role '<role:missing>' does not exist",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "code": "configuration_error",
+        "message": "the database role '<role:missing>' does not exist",
+        "refused": "ConfigurationError"
+      }
+    },
+    "owner_member": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "code": "configuration_error",
+          "message": "the database role owns tables protected by row-level security and could switch it off; run migrations with a separate owner role (database.migration_url_ref) and use a role without ownership at runtime, or set database.allow_table_owner = true",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "the runtime role '<role:owner_member>' owns tables (axentra_access_definitions, axentra_account_tokens, axentra_api_keys, axentra_audit_events, axentra_billing_overrides): row-level security would not apply to it",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": false,
+          "can_create": true,
+          "connect": true,
+          "owned_tables": [
+            "axentra_access_definitions",
+            "axentra_account_tokens",
+            "axentra_api_keys",
+            "axentra_audit_events",
+            "axentra_billing_overrides",
+            "axentra_billing_plans",
+            "axentra_billing_subscriptions",
+            "axentra_billing_webhook_events",
+            "axentra_events",
+            "axentra_files",
+            "axentra_invitations",
+            "axentra_jobs",
+            "axentra_login_states",
+            "axentra_memberships",
+            "axentra_notify_mailbox",
+            "axentra_notify_messages",
+            "axentra_notify_preferences",
+            "axentra_notify_templates",
+            "axentra_platform_roles",
+            "axentra_product_members",
+            "axentra_product_permissions",
+            "axentra_products",
+            "axentra_rate_limits",
+            "axentra_records",
+            "axentra_roles",
+            "axentra_schedule_firings",
+            "axentra_schedules",
+            "axentra_schema_migrations",
+            "axentra_search_documents",
+            "axentra_sessions",
+            "axentra_setup_tokens",
+            "axentra_storage_quotas",
+            "axentra_storage_usage",
+            "axentra_tenants",
+            "axentra_usage_counters",
+            "axentra_usage_events",
+            "axentra_usage_meters",
+            "axentra_usage_quotas",
+            "axentra_usage_reservations",
+            "axentra_user_identities",
+            "axentra_users",
+            "axentra_webhook_deliveries",
+            "axentra_webhook_endpoints"
+          ],
+          "owner": "<owner>",
+          "restricted": false,
+          "role": "<role:owner_member>",
+          "schema": "public",
+          "superuser": false,
+          "tables": 44
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": false,
+          "superuser": false,
+          "table_owner": true
+        }
+      }
+    },
+    "restricted": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": false
+          }
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": false
+          }
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": false
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": false
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "ok": {
+          "bypass_rls": false,
+          "can_create": false,
+          "connect": true,
+          "owned_tables": [],
+          "owner": "<owner>",
+          "restricted": true,
+          "role": "<role:restricted>",
+          "schema": "public",
+          "superuser": false,
+          "tables": 43
+        }
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": false,
+          "can_create": false,
+          "connect": true,
+          "owned_tables": [],
+          "owner": "<owner>",
+          "restricted": true,
+          "role": "<role:restricted>",
+          "schema": "public",
+          "superuser": false,
+          "tables": 43
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": false,
+          "superuser": false,
+          "table_owner": false
+        }
+      }
+    },
+    "superuser": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "code": "configuration_error",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "code": "configuration_error",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": true,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": true,
+            "table_owner": true
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "the runtime role '<role:superuser>' is a superuser and owns tables (axentra_access_definitions, axentra_account_tokens, axentra_api_keys, axentra_audit_events, axentra_billing_overrides): row-level security would not apply to it",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": false,
+          "can_create": true,
+          "connect": true,
+          "owned_tables": [
+            "axentra_access_definitions",
+            "axentra_account_tokens",
+            "axentra_api_keys",
+            "axentra_audit_events",
+            "axentra_billing_overrides",
+            "axentra_billing_plans",
+            "axentra_billing_subscriptions",
+            "axentra_billing_webhook_events",
+            "axentra_events",
+            "axentra_files",
+            "axentra_invitations",
+            "axentra_jobs",
+            "axentra_login_states",
+            "axentra_memberships",
+            "axentra_notify_mailbox",
+            "axentra_notify_messages",
+            "axentra_notify_preferences",
+            "axentra_notify_templates",
+            "axentra_platform_roles",
+            "axentra_product_members",
+            "axentra_product_permissions",
+            "axentra_products",
+            "axentra_rate_limits",
+            "axentra_records",
+            "axentra_roles",
+            "axentra_schedule_firings",
+            "axentra_schedules",
+            "axentra_schema_migrations",
+            "axentra_search_documents",
+            "axentra_sessions",
+            "axentra_setup_tokens",
+            "axentra_storage_quotas",
+            "axentra_storage_usage",
+            "axentra_tenants",
+            "axentra_usage_counters",
+            "axentra_usage_events",
+            "axentra_usage_meters",
+            "axentra_usage_quotas",
+            "axentra_usage_reservations",
+            "axentra_user_identities",
+            "axentra_users",
+            "axentra_webhook_deliveries",
+            "axentra_webhook_endpoints"
+          ],
+          "owner": "<owner>",
+          "restricted": false,
+          "role": "<role:superuser>",
+          "schema": "public",
+          "superuser": true,
+          "tables": 43
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": false,
+          "superuser": true,
+          "table_owner": true
+        }
+      }
+    },
+    "superuser_bypass_rls": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "code": "configuration_error",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "code": "configuration_error",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": true,
+            "superuser": true,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": true,
+            "superuser": true,
+            "table_owner": true
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "the runtime role '<role:superuser_bypass_rls>' is a superuser and has BYPASSRLS and owns tables (axentra_access_definitions, axentra_account_tokens, axentra_api_keys, axentra_audit_events, axentra_billing_overrides): row-level security would not apply to it",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": true,
+          "can_create": true,
+          "connect": true,
+          "owned_tables": [
+            "axentra_access_definitions",
+            "axentra_account_tokens",
+            "axentra_api_keys",
+            "axentra_audit_events",
+            "axentra_billing_overrides",
+            "axentra_billing_plans",
+            "axentra_billing_subscriptions",
+            "axentra_billing_webhook_events",
+            "axentra_events",
+            "axentra_files",
+            "axentra_invitations",
+            "axentra_jobs",
+            "axentra_login_states",
+            "axentra_memberships",
+            "axentra_notify_mailbox",
+            "axentra_notify_messages",
+            "axentra_notify_preferences",
+            "axentra_notify_templates",
+            "axentra_platform_roles",
+            "axentra_product_members",
+            "axentra_product_permissions",
+            "axentra_products",
+            "axentra_rate_limits",
+            "axentra_records",
+            "axentra_roles",
+            "axentra_schedule_firings",
+            "axentra_schedules",
+            "axentra_schema_migrations",
+            "axentra_search_documents",
+            "axentra_sessions",
+            "axentra_setup_tokens",
+            "axentra_storage_quotas",
+            "axentra_storage_usage",
+            "axentra_tenants",
+            "axentra_usage_counters",
+            "axentra_usage_events",
+            "axentra_usage_meters",
+            "axentra_usage_quotas",
+            "axentra_usage_reservations",
+            "axentra_user_identities",
+            "axentra_users",
+            "axentra_webhook_deliveries",
+            "axentra_webhook_endpoints"
+          ],
+          "owner": "<owner>",
+          "restricted": false,
+          "role": "<role:superuser_bypass_rls>",
+          "schema": "public",
+          "superuser": true,
+          "tables": 43
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": true,
+          "superuser": true,
+          "table_owner": true
+        }
+      }
+    },
+    "table_owner": {
+      "check_role": {
+        "allow_superuser=False,allow_table_owner=False": {
+          "code": "configuration_error",
+          "message": "the database role owns tables protected by row-level security and could switch it off; run migrations with a separate owner role (database.migration_url_ref) and use a role without ownership at runtime, or set database.allow_table_owner = true",
+          "refused": "ConfigurationError"
+        },
+        "allow_superuser=False,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=False": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        },
+        "allow_superuser=True,allow_table_owner=True": {
+          "ok": {
+            "bypass_rls": false,
+            "superuser": false,
+            "table_owner": true
+          }
+        }
+      },
+      "grant_runtime_role": {
+        "code": "configuration_error",
+        "message": "the runtime role '<role:table_owner>' owns tables (<owned_table>): row-level security would not apply to it",
+        "refused": "ConfigurationError"
+      },
+      "inspect_role": {
+        "ok": {
+          "bypass_rls": false,
+          "can_create": false,
+          "connect": true,
+          "owned_tables": [
+            "<owned_table>"
+          ],
+          "owner": "<owner>",
+          "restricted": false,
+          "role": "<role:table_owner>",
+          "schema": "public",
+          "superuser": false,
+          "tables": 44
+        }
+      },
+      "role_info": {
+        "ok": {
+          "bypass_rls": false,
+          "superuser": false,
+          "table_owner": true
+        }
+      }
+    }
+  },
+  "variants": [
+    "restricted",
+    "superuser",
+    "bypass_rls",
+    "superuser_bypass_rls",
+    "table_owner",
+    "owner_member",
+    "connecting_owner",
+    "missing"
+  ]
+}

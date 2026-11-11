@@ -1,0 +1,772 @@
+{
+  "classes": {
+    "axentra.billing.models.PaymentProviderError": {
+      "class": {
+        "code": "payment_provider_error",
+        "status": 502,
+        "title": "Payment provider error"
+      },
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    },
+    "axentra.billing.models.PaymentProviderNotConfigured": {
+      "class": {
+        "code": "payment_provider_not_configured",
+        "status": 409,
+        "title": "Payment provider not configured"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "payment_provider_not_configured",
+        "detail": "Payment provider not configured",
+        "request_id": null,
+        "status": 409,
+        "title": "Payment provider not configured",
+        "type": "urn:axentra:problem:payment_provider_not_configured"
+      }
+    },
+    "axentra.billing.models.WebhookSignatureInvalid": {
+      "class": {
+        "code": "invalid_signature",
+        "status": 400,
+        "title": "Invalid webhook signature"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "invalid_signature",
+        "detail": "Invalid webhook signature",
+        "request_id": null,
+        "status": 400,
+        "title": "Invalid webhook signature",
+        "type": "urn:axentra:problem:invalid_signature"
+      }
+    },
+    "axentra.core.errors.ApiKeyCreatorLostAccess": {
+      "class": {
+        "code": "api_key_creator_lost_access",
+        "status": 403,
+        "title": "API key creator lost access"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "api_key_creator_lost_access",
+        "detail": "API key creator lost access",
+        "request_id": null,
+        "status": 403,
+        "title": "API key creator lost access",
+        "type": "urn:axentra:problem:api_key_creator_lost_access"
+      }
+    },
+    "axentra.core.errors.AxentraError": {
+      "class": {
+        "code": "internal",
+        "status": 500,
+        "title": "Internal error"
+      },
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    },
+    "axentra.core.errors.BackdatingNotPermitted": {
+      "class": {
+        "code": "backdating_not_permitted",
+        "status": 403,
+        "title": "Backdating not permitted"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "backdating_not_permitted",
+        "detail": "Backdating not permitted",
+        "request_id": null,
+        "status": 403,
+        "title": "Backdating not permitted",
+        "type": "urn:axentra:problem:backdating_not_permitted"
+      }
+    },
+    "axentra.core.errors.ConfigurationError": {
+      "class": {
+        "code": "configuration_error",
+        "status": 500,
+        "title": "Configuration error"
+      },
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    },
+    "axentra.core.errors.Conflict": {
+      "class": {
+        "code": "conflict",
+        "status": 409,
+        "title": "Conflict"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "conflict",
+        "detail": "Conflict",
+        "request_id": null,
+        "status": 409,
+        "title": "Conflict",
+        "type": "urn:axentra:problem:conflict"
+      }
+    },
+    "axentra.core.errors.EmailTaken": {
+      "class": {
+        "code": "email_taken",
+        "status": 409,
+        "title": "Email address in use"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "email_taken",
+        "detail": "Email address in use",
+        "request_id": null,
+        "status": 409,
+        "title": "Email address in use",
+        "type": "urn:axentra:problem:email_taken"
+      }
+    },
+    "axentra.core.errors.Forbidden": {
+      "class": {
+        "code": "forbidden",
+        "status": 403,
+        "title": "Not permitted"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "forbidden",
+        "detail": "Not permitted",
+        "request_id": null,
+        "status": 403,
+        "title": "Not permitted",
+        "type": "urn:axentra:problem:forbidden"
+      }
+    },
+    "axentra.core.errors.InvalidCursor": {
+      "class": {
+        "code": "invalid_cursor",
+        "status": 400,
+        "title": "Invalid cursor"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "invalid_cursor",
+        "detail": "invalid cursor",
+        "request_id": null,
+        "status": 400,
+        "title": "Invalid cursor",
+        "type": "urn:axentra:problem:invalid_cursor"
+      }
+    },
+    "axentra.core.errors.InvalidToken": {
+      "class": {
+        "code": "invalid_token",
+        "status": 400,
+        "title": "Invalid or expired link"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "invalid_token",
+        "detail": "the link is invalid, expired or was already used",
+        "request_id": null,
+        "status": 400,
+        "title": "Invalid or expired link",
+        "type": "urn:axentra:problem:invalid_token"
+      }
+    },
+    "axentra.core.errors.ModeNotSupported": {
+      "class": {
+        "code": "mode_not_supported",
+        "status": 409,
+        "title": "Not supported in this deployment mode"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "mode_not_supported",
+        "detail": "Not supported in this deployment mode",
+        "request_id": null,
+        "status": 409,
+        "title": "Not supported in this deployment mode",
+        "type": "urn:axentra:problem:mode_not_supported"
+      }
+    },
+    "axentra.core.errors.ModuleDisabled": {
+      "class": {
+        "code": "module_disabled",
+        "status": 404,
+        "title": "Module not enabled"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "module_disabled",
+        "detail": "Module not enabled",
+        "request_id": null,
+        "status": 404,
+        "title": "Module not enabled",
+        "type": "urn:axentra:problem:module_disabled"
+      }
+    },
+    "axentra.core.errors.NotFound": {
+      "class": {
+        "code": "not_found",
+        "status": 404,
+        "title": "Not found"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "not_found",
+        "detail": "Not found",
+        "request_id": null,
+        "status": 404,
+        "title": "Not found",
+        "type": "urn:axentra:problem:not_found"
+      }
+    },
+    "axentra.core.errors.PayloadTooLarge": {
+      "class": {
+        "code": "payload_too_large",
+        "status": 413,
+        "title": "Payload too large"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "payload_too_large",
+        "detail": "Payload too large",
+        "request_id": null,
+        "status": 413,
+        "title": "Payload too large",
+        "type": "urn:axentra:problem:payload_too_large"
+      }
+    },
+    "axentra.core.errors.PreconditionFailed": {
+      "class": {
+        "code": "precondition_failed",
+        "status": 412,
+        "title": "Precondition failed"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "precondition_failed",
+        "detail": "Precondition failed",
+        "request_id": null,
+        "status": 412,
+        "title": "Precondition failed",
+        "type": "urn:axentra:problem:precondition_failed"
+      }
+    },
+    "axentra.core.errors.QuotaExceeded": {
+      "class": {
+        "code": "quota_exceeded",
+        "status": 429,
+        "title": "Quota exceeded"
+      },
+      "headers": {
+        "Retry-After": "60"
+      },
+      "internal": false,
+      "problem": {
+        "code": "quota_exceeded",
+        "detail": "Quota exceeded",
+        "request_id": null,
+        "status": 429,
+        "title": "Quota exceeded",
+        "type": "urn:axentra:problem:quota_exceeded"
+      }
+    },
+    "axentra.core.errors.RateLimited": {
+      "class": {
+        "code": "rate_limited",
+        "status": 429,
+        "title": "Too many requests"
+      },
+      "headers": {
+        "Retry-After": "60"
+      },
+      "internal": false,
+      "problem": {
+        "code": "rate_limited",
+        "detail": "Too many requests",
+        "request_id": null,
+        "status": 429,
+        "title": "Too many requests",
+        "type": "urn:axentra:problem:rate_limited"
+      }
+    },
+    "axentra.core.errors.ReauthenticationRequired": {
+      "class": {
+        "code": "reauthentication_required",
+        "status": 403,
+        "title": "Not permitted"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "reauthentication_required",
+        "detail": "Not permitted",
+        "request_id": null,
+        "status": 403,
+        "title": "Not permitted",
+        "type": "urn:axentra:problem:reauthentication_required"
+      }
+    },
+    "axentra.core.errors.SetupAlreadyCompleted": {
+      "class": {
+        "code": "setup_already_completed",
+        "status": 409,
+        "title": "Setup already completed"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "setup_already_completed",
+        "detail": "Setup already completed",
+        "request_id": null,
+        "status": 409,
+        "title": "Setup already completed",
+        "type": "urn:axentra:problem:setup_already_completed"
+      }
+    },
+    "axentra.core.errors.Unauthenticated": {
+      "class": {
+        "code": "unauthenticated",
+        "status": 401,
+        "title": "Authentication required"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "unauthenticated",
+        "detail": "Authentication required",
+        "request_id": null,
+        "status": 401,
+        "title": "Authentication required",
+        "type": "urn:axentra:problem:unauthenticated"
+      }
+    },
+    "axentra.core.errors.UnsupportedMediaType": {
+      "class": {
+        "code": "unsupported_media_type",
+        "status": 415,
+        "title": "Unsupported media type"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "unsupported_media_type",
+        "detail": "Unsupported media type",
+        "request_id": null,
+        "status": 415,
+        "title": "Unsupported media type",
+        "type": "urn:axentra:problem:unsupported_media_type"
+      }
+    },
+    "axentra.core.errors.ValidationFailed": {
+      "class": {
+        "code": "validation_failed",
+        "status": 422,
+        "title": "Validation failed"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "validation_failed",
+        "detail": "Validation failed",
+        "request_id": null,
+        "status": 422,
+        "title": "Validation failed",
+        "type": "urn:axentra:problem:validation_failed"
+      }
+    },
+    "axentra.data.migrations.SchemaNotCurrent": {
+      "class": {
+        "code": "schema_not_current",
+        "status": 503,
+        "title": "Database schema not current"
+      },
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    },
+    "axentra.events.http_client.TargetRefused": {
+      "class": {
+        "code": "validation_failed",
+        "status": 422,
+        "title": "Validation failed"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "validation_failed",
+        "detail": "Validation failed",
+        "request_id": null,
+        "status": 422,
+        "title": "Validation failed",
+        "type": "urn:axentra:problem:validation_failed"
+      }
+    },
+    "axentra.events.http_client.TargetUnresolvable": {
+      "class": {
+        "code": "validation_failed",
+        "status": 422,
+        "title": "Validation failed"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "validation_failed",
+        "detail": "Validation failed",
+        "request_id": null,
+        "status": 422,
+        "title": "Validation failed",
+        "type": "urn:axentra:problem:validation_failed"
+      }
+    },
+    "axentra.storage.backends.ObjectNotFound": {
+      "class": {
+        "code": "not_found",
+        "status": 404,
+        "title": "Not found"
+      },
+      "headers": {},
+      "internal": false,
+      "problem": {
+        "code": "not_found",
+        "detail": "Not found",
+        "request_id": null,
+        "status": 404,
+        "title": "Not found",
+        "type": "urn:axentra:problem:not_found"
+      }
+    }
+  },
+  "http": {
+    "csrf_missing": {
+      "body": {
+        "code": "forbidden",
+        "detail": "missing or invalid CSRF token",
+        "request_id": "<req_id>",
+        "status": 403,
+        "title": "Not permitted",
+        "type": "urn:axentra:problem:forbidden"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 403
+    },
+    "invalid_cursor": {
+      "body": {
+        "code": "invalid_cursor",
+        "detail": "invalid cursor",
+        "request_id": "<req_id>",
+        "status": 400,
+        "title": "Invalid cursor",
+        "type": "urn:axentra:problem:invalid_cursor"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 400
+    },
+    "invalid_setup_token": {
+      "body": {
+        "code": "unauthenticated",
+        "detail": "the setup token is invalid or expired",
+        "request_id": "<req_id>",
+        "status": 401,
+        "title": "Authentication required",
+        "type": "urn:axentra:problem:unauthenticated"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 401
+    },
+    "method_not_allowed": {
+      "body": {
+        "code": "method_not_allowed",
+        "detail": "Method Not Allowed",
+        "request_id": "<req_id>",
+        "status": 405,
+        "title": "Method not allowed",
+        "type": "urn:axentra:problem:method_not_allowed"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 405
+    },
+    "product_not_found": {
+      "body": {
+        "code": "not_found",
+        "detail": "product not found",
+        "request_id": "<req_id>",
+        "status": 404,
+        "title": "Not found",
+        "type": "urn:axentra:problem:not_found"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 404
+    },
+    "product_slug_taken": {
+      "body": {
+        "code": "conflict",
+        "detail": "a product with this slug exists",
+        "request_id": "<req_id>",
+        "status": 409,
+        "title": "Conflict",
+        "type": "urn:axentra:problem:conflict"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 409
+    },
+    "setup_again": {
+      "body": {
+        "code": "unauthenticated",
+        "detail": "the setup token is invalid or expired",
+        "request_id": "<req_id>",
+        "status": 401,
+        "title": "Authentication required",
+        "type": "urn:axentra:problem:unauthenticated"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 401
+    },
+    "tenant_slug_taken": {
+      "body": {
+        "code": "conflict",
+        "detail": "a tenant with this slug exists in the product",
+        "request_id": "<req_id>",
+        "status": 409,
+        "title": "Conflict",
+        "type": "urn:axentra:problem:conflict"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 409
+    },
+    "unauthenticated": {
+      "body": {
+        "code": "unauthenticated",
+        "detail": "Authentication required",
+        "request_id": "<req_id>",
+        "status": 401,
+        "title": "Authentication required",
+        "type": "urn:axentra:problem:unauthenticated"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 401
+    },
+    "unknown_route": {
+      "body": {
+        "code": "not_found",
+        "detail": "Not Found",
+        "request_id": "<req_id>",
+        "status": 404,
+        "title": "Not found",
+        "type": "urn:axentra:problem:not_found"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 404
+    },
+    "validation_failed": {
+      "body": {
+        "code": "validation_failed",
+        "detail": "The request is invalid.",
+        "errors": [
+          {
+            "loc": [
+              "body",
+              "email"
+            ],
+            "msg": "Field required"
+          },
+          {
+            "loc": [
+              "body",
+              "password"
+            ],
+            "msg": "Field required"
+          }
+        ],
+        "request_id": "<req_id>",
+        "status": 422,
+        "title": "Validation failed",
+        "type": "urn:axentra:problem:validation_failed"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 422
+    },
+    "wrong_password": {
+      "body": {
+        "code": "unauthenticated",
+        "detail": "wrong email or password",
+        "request_id": "<req_id>",
+        "status": 401,
+        "title": "Authentication required",
+        "type": "urn:axentra:problem:unauthenticated"
+      },
+      "content_type": "application/problem+json",
+      "retry_after": null,
+      "status": 401
+    }
+  },
+  "openapi_schemas": {
+    "Problem": {
+      "additionalProperties": true,
+      "description": "RFC 9457 problem details, the body of every error response. Clients switch on `code` (stable), never on `title`, `detail` or `type`. Some errors add members, documented with the operation (for example `errors` for validation failures, `reason` for refused invitations or password policy refusals, `permission` for `api_key_creator_lost_access`).",
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable error code",
+          "example": "not_found",
+          "type": "string"
+        },
+        "detail": {
+          "description": "English explanation for this occurrence (no secrets)",
+          "type": "string"
+        },
+        "errors": {
+          "description": "Validation failures (`validation_failed`): where (`loc`, e.g. `[\"body\", \"email\"]`) and what",
+          "items": {
+            "$ref": "#/components/schemas/ProblemFieldError"
+          },
+          "type": "array"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The request id (also in the `X-Request-ID` response header)"
+        },
+        "status": {
+          "description": "The HTTP status code",
+          "type": "integer"
+        },
+        "title": {
+          "description": "Short English summary of the code",
+          "type": "string"
+        },
+        "type": {
+          "description": "`urn:axentra:problem:<code>`",
+          "example": "urn:axentra:problem:not_found",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "title",
+        "status",
+        "code",
+        "detail"
+      ],
+      "title": "Problem",
+      "type": "object"
+    },
+    "ProblemFieldError": {
+      "properties": {
+        "loc": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "msg": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "loc",
+        "msg"
+      ],
+      "title": "ProblemFieldError",
+      "type": "object"
+    }
+  },
+  "other_exceptions": {
+    "operational_error": {
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    },
+    "unique_violation": {
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    },
+    "value_error": {
+      "headers": {},
+      "internal": true,
+      "problem": {
+        "code": "internal",
+        "detail": "An internal error occurred.",
+        "request_id": null,
+        "status": 500,
+        "title": "Internal error",
+        "type": "urn:axentra:problem:internal"
+      }
+    }
+  }
+}
