@@ -68,6 +68,10 @@ export AXENTRA_TEST_DATABASE_URL=postgresql://postgres:pg@127.0.0.1:5432/postgre
   Studio origin and CSRF header), `single_world` (single-product mode), `ax_factory(**overrides)`
   for custom settings. Every test starts with truncated `axentra_*` tables.
 - Markers: `postgres` (needs the database), `slow`.
+- Rollback evidence (TABRION QA-13): `python -m tests.evidence.snapshots --url <superuser URL> check` compares the
+  catalog, role decision table, problem details, `SHOW` extract and schema of a fresh database with the golden files
+  of the old code in `tests/evidence/golden/` (`write` rewrites them; see `SOURCE.md` there). The run creates and
+  drops its own database and roles (`--prefix`, default `axentra_ev_`; the test uses `AXENTRA_TEST_EVIDENCE_PREFIX`).
 
 ## Checks
 
