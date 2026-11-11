@@ -64,10 +64,15 @@ def test_wrong_password_is_rejected_and_audited(world):
     assert "password" not in str(events[0]["details"]).replace("'method': 'password'", "")
 
 
-def test_login_rate_limit(ax_factory):
+def test_login_rate_limit(ax_factory, monkeypatch):
     from axentra.api.app import create_app
 
     ax = ax_factory(security={"login_rate_per_minute": 3})
+    # Pin the one-minute window (as in test_I4_login_throttling_is_atomic): five attempts that straddle a
+    # minute boundary land in two fixed windows and the fifth one is not limited (nightly 2026-11-11).
+    with ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        window = tx.scalar("SELECT date_trunc('minute', now())")
+    monkeypatch.setattr(ax.identity, "_WINDOW", f"'{window.isoformat()}'::timestamptz")
     app = create_app(axentra=ax, start=False)
     b = Browser(app)
     codes = [

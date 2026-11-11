@@ -25,14 +25,13 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
-### Tests (TABRION QA-21)
-- AC-7 public API check: `python scripts/check_tabrion_api.py` reads `src`, `tests`, `scripts` and `examples` with
-  `ast` and fails on a private Tabrion name (`tabrion._x`, an attribute with a leading underscore on a Tabrion name,
-  `getattr`/`import_module` with a private constant, a star import); with Tabrion installed every used name must be
-  in its module's `__all__`, and `--surface` compares with Tabrion's frozen API snapshot. `--export` writes the used
-  names to `docs/api-consumers.md` (none yet), and `tests/unit/test_tabrion_api_check.py` fails when that file is
-  stale. Tests and tooling only.
-
+- Tests (TABRION QA-21): AC-7 public API check. `python scripts/check_tabrion_api.py` reads `src`, `tests`,
+  `scripts` and `examples` with `ast` and fails on a private Tabrion name (`tabrion._x`, an attribute with a leading
+  underscore on a Tabrion name, `getattr`/`import_module` with a private constant, a star import). Every used name
+  must be in its module's `__all__` in the installed Tabrion (a used name without an installed Tabrion fails), and
+  `--surface` compares with Tabrion's frozen API snapshot and refuses experimental (`X`) names. `--export` writes
+  the used names to `docs/api-consumers.md` (none yet), and `tests/unit/test_tabrion_api_check.py` fails when that
+  file is stale or missing. Tests and tooling only.
 - Docs (MUP-ONA B0): the changelog states the release rules (tag scheme `axentra-vX.Y.Z`, SemVer from 0.2,
   aliases removed only in a minor release, no PyPI, tags only after approval). No version change.
 - CI (MUP-ONA A0): every pytest job compares its skipped tests with `tests/ci/skipped-<job>.txt`
@@ -47,6 +46,43 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   file's `known_differences`. No code or test dependency on Nodestro; import-linter unchanged.
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
+
+### Tests (TABRION QA-25)
+- Security evidence for the Tabrion adoption (document 07, section 8): `tests/integration/test_adoption_security.py`
+  holds MIG-T-AXE-1..9 against the old code. The tests check: no scope on the same pooled connection after every
+  transaction path; the recorded statements of the helpers set the scope only transaction-locally, with a grep rule
+  in `tests/unit/test_adoption_scope_rules.py`; errors in the middle of a transaction return clean idle connections;
+  nested joins on a shared pool restore the scope and borrow nothing; the role decision table, FORCE RLS and the
+  problem details equal the QA-13 snapshots; database-error canaries reach no answer, log or audit event; and a lost
+  write runs exactly once through the fault-injection proxy `tests/evidence/faults.py`. The scoped-transaction
+  benchmark `tests/evidence/bench_transactions.py` (`run`, interleaved A/B `ab` with a +5 % limit) completes this.
+  Tests only.
+- Review fixes (`qa-13-25-review.md` M-3, M-4, M-5, L-3, L-4, L-5, I-4): the MIG-T-AXE-7 canary also runs through a
+  table without row-level security (`axentra_users`, generic 500 path), with a positive control that the server's
+  `DETAIL` carried the canary (the RLS cases now pin that their `DETAIL` stays empty); the grep rule and the
+  statement recorder of MIG-T-AXE-2 check a `set_config` flag passed as a parameter (`%s`, `%(local)s`); the
+  benchmark compares old and new code in interleaved A/B pairs (fresh process per measurement, alternating order) by
+  the quartiles of the per-pair ratios (`ok`, `too_slow`, `inconclusive`, `too_noisy`), replacing the single-run
+  `compare` and the stored timing; the recorder also sees `executemany` and every statement of a multi-statement
+  string; the fault proxy closes live connections on `close()` and accepts only a local server (it disables TLS).
+
+### Tests (TABRION QA-13)
+- Snapshot tools for rollback evidence of the Tabrion adoption: `python -m tests.evidence.snapshots --url <superuser
+  URL> write|check` creates a database and roles of its own, migrates it as a separate owner role, grants a runtime
+  role (`grant_runtime_role`), writes five canonical JSON snapshots and drops everything again: `catalog` (row-level
+  security per table, policies, the runtime role's privileges, every access control entry of the schema's objects
+  with grantor, grantee including `PUBLIC`, privilege and grant option, column ACLs, role memberships), `roles` (decision table of eight role variants
+  through `inspect_role`, `grant_runtime_role`, `role_info`, `check_role`), `problems` (problem details of every
+  error class, HTTP error answers, OpenAPI `Problem` schemas), `settings` (`SHOW` extract per kind of connection:
+  owned pool, read-only, `on_pool`, `joined`, `join`, leader lock, ping) and `schema` (schema dump from the catalog).
+  The golden files in `tests/evidence/golden/` are from the old code (`ea7aa9f`, `SOURCE.md`);
+  `tests/integration/test_rollback_snapshots.py` checks that the current code writes them and that two runs are
+  identical. Tests and evidence only: no change to the library, RLS, `DbScope` or `join`/`on_pool`.
+- Review fixes (`qa-13-25-review.md` M-1, M-2, L-1, L-2): the catalog snapshot detects a column grant, a grant
+  option, a grant to `PUBLIC` or another role and a new membership (one test each); the login roles of a run get a
+  random password per run (no fixed password in the repository); `check`/`write` report leftovers of a killed run
+  and `cleanup` drops them (only the exact names a run creates); the prefix is validated (`[a-z][a-z0-9_]{0,19}`) and
+  the leftover test matches names exactly instead of with `LIKE`. `catalog.json` was rewritten from `ea7aa9f`.
 
 ### Security (TABRION TB-031)
 - Database error redaction (B-06-1) closes the leaks that the independent review of Tabrion's port of the filter
