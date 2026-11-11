@@ -311,7 +311,10 @@ def test_fake_checkout_and_webhooks(fake_world):
     anon = TestClient(w.app)
     # Invalid signature, wrong secret, expired timestamp, missing header.
     body, headers = fake.complete_checkout(co["checkout_id"])
-    assert _hook(anon, body, {"Stripe-Signature": headers["Stripe-Signature"][:-2] + "00"}).status_code == 400
+    signature = headers["Stripe-Signature"]
+    # Change the last hex digit so the signature always differs (replacing it with "00" kept it 1 time in 256).
+    tampered = signature[:-1] + ("1" if signature[-1] == "0" else "0")
+    assert _hook(anon, body, {"Stripe-Signature": tampered}).status_code == 400
     assert _hook(anon, body, {}).status_code == 400
     b2, h2 = fake.signed_event("checkout.session.completed", {"id": co["checkout_id"]}, secret="wrong")
     assert _hook(anon, b2, h2).status_code == 400
