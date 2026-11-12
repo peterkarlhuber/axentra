@@ -47,6 +47,19 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Docs: the Nodestro migration plan states that it was carried out and notes where the implemented switches and
   rollback differ from the plan (sections 4.6 and 8).
 
+### Tests (TABRION QA-16)
+- Fixed a flaky check in `tests/integration/test_billing.py::test_fake_checkout_and_webhooks`: the "invalid
+  signature" case replaced the last two hex digits with `00`, which left the signature unchanged 1 time in 256
+  (seen in CI); it now always changes the last digit.
+- Import contracts against the Tabrion edge list K-33 (AC-1), with a mutation probe:
+  `tests/architecture/test_forbidden_probe.py` copies the package and runs `lint-imports` on the copy. The unmodified
+  copy passes (positive control). Thirteen copies with one forbidden import each (Orkexa, Nodestro, Axentra Studio,
+  the HTTP layer and web frameworks in domain modules, billing in usage, upper layers in core) must fail and name the
+  broken contract, so every contract has at least one red probe. Imports of `tabrion` from the data layer and the
+  core stay green (K-33: `axentra` -> `tabrion[postgres]` is a required edge), and no contract forbids or ignores a
+  `tabrion` module. An AST scan rejects `orkexa*`, `nodestro*`, `levuvo*` and `*_studio` imports by prefix, which
+  import-linter cannot express. The contracts in `pyproject.toml` are unchanged. Tests only.
+
 ### Tests (TABRION QA-25)
 - Security evidence for the Tabrion adoption (document 07, section 8): `tests/integration/test_adoption_security.py`
   holds MIG-T-AXE-1..9 against the old code. The tests check: no scope on the same pooled connection after every
