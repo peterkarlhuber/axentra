@@ -25,6 +25,10 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Fixed (TABRION QA-21): `scripts/check_tabrion_api.py --surface` no longer reports enum members and dataclass
+  fields as missing. Tabrion's `docs/api/surface.json` lists them in the parent entry (`members`, `fields`), so a
+  name such as `tabrion.TLSMode.AUTO` is now checked against its parent's entry and passes when the parent is stable
+  (`S`). Tooling only.
 - Tests (TABRION QA-21): AC-7 public API check. `python scripts/check_tabrion_api.py` reads `src`, `tests`,
   `scripts` and `examples` with `ast` and fails on a private Tabrion name (`tabrion._x`, an attribute with a leading
   underscore on a Tabrion name, `getattr`/`import_module` with a private constant, a star import). Every used name
