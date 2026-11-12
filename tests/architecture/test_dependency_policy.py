@@ -39,7 +39,9 @@ def _checker() -> Any:
 def test_the_copies_are_unchanged(path: Path) -> None:
     recorded = re.search(rf"`{re.escape(path.name)}`: `([0-9a-f]{{64}})`", SOURCE.read_text(encoding="utf-8"))
     assert recorded is not None, f"{path.name} is not recorded in {SOURCE.name}"
-    assert hashlib.sha256(path.read_bytes()).hexdigest() == recorded[1]
+    # A Windows checkout may turn LF into CRLF (core.autocrlf); the recorded SHA-256 is of the LF file.
+    content = path.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(content).hexdigest() == recorded[1]
 
 
 def test_the_manifest_follows_the_policy() -> None:
