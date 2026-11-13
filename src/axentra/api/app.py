@@ -35,6 +35,7 @@ from axentra.config.settings import Settings, load_settings
 from axentra.core.db_errors import install_db_error_redaction
 from axentra.core.errors import AxentraError, ConfigurationError
 from axentra.core.ids import new_id
+from axentra.core.redaction import redact_text
 from axentra.platform import Axentra
 
 logger = logging.getLogger("axentra.http")
@@ -269,14 +270,16 @@ def create_app(
             metrics.observe_request(
                 request.method, request.scope.get("route"), response.status_code, duration
             )
+        # The path can carry a credential (``/v1/files/download/<signed token>``): log it redacted (B-01).
+        path = redact_text(request.url.path)
         logger.info(
             "%s %s %s",
             request.method,
-            request.url.path,
+            path,
             response.status_code,
             extra={
                 "method": request.method,
-                "path": request.url.path,
+                "path": path,
                 "status": response.status_code,
                 "duration_ms": round(duration, 1),
             },

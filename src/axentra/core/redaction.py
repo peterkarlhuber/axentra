@@ -49,6 +49,11 @@ _PATTERNS = [
     re.compile(f"axk{_enc('_')}[a-z0-9]+{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra API keys
     re.compile(f"axinv{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra invitation tokens
     re.compile(f"whsec{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra webhook signing secrets
+    # Signed download tokens ``d1.<kid>.<payload>.<mac>`` (storage/tokens.py), such as the last segment of
+    # ``/v1/files/download/<token>`` in a request line.
+    re.compile(
+        f"(?:(?<![A-Za-z0-9_-])|(?<=%[0-9A-Fa-f]{{2}}))d1{_enc('.')}[A-Za-z0-9]+{_enc('.')}{_URLSAFE_CHAR}{{8,}}{_enc('.')}{_URLSAFE_CHAR}{{16,}}"
+    ),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWTs
 ]
