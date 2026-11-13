@@ -28,6 +28,15 @@ from taskboard.app import create_taskboard_app, taskboard_migrations  # noqa: E4
 from taskboard.service import SYSTEM, TaskboardService  # noqa: E402
 from tests.conftest import make_settings, pg_urls, tabrion_role_setup, truncate_all  # noqa: E402, F401
 
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The Tabrion fixtures that ``pg_urls`` requests. tests/conftest.py activates the plugin, but it is not loaded
+    when this directory runs alone (``pytest examples/taskboard/tests``); ``pytest_plugins`` here would be refused
+    when both directories run (pytest allows it only in a top-level conftest)."""
+    if not config.pluginmanager.has_plugin("tabrion.testing"):
+        config.pluginmanager.import_plugin("tabrion.testing")
+
+
 from axentra.data.database import DbScope  # noqa: E402
 from axentra.platform import Axentra  # noqa: E402
 
