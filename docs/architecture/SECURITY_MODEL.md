@@ -520,7 +520,8 @@ endpoints created in process by system callers are not bounded.
 
 `axentra.core.redaction` removes secrets from logs, problem details and audit details: values of
 keys matching `password|secret|token|api_key|authorization|cookie|private_key|credential|signature|csrf`
-are replaced with `[redacted]`, and token-like strings (Axentra API keys and invitation tokens,
+are replaced with `[redacted]`, and token-like strings (Axentra API keys `axk_...`, the one-time tokens
+`axinv_`, `axpinv_`, `axpwr_`, `axemv_` and `axsetup_`, signed download tokens `d1.<kid>.<payload>.<mac>`,
 webhook signing secrets `whsec_...`, `Bearer ...`, JWTs, passwords in `postgres://user:pass@` URLs),
 the credentials of `Authorization: Basic ...`, the value of a `Cookie:` / `Set-Cookie:` header and of
 Axentra's session and login cookies (`[__Host-]axentra-session=`, `[__Host-]axentra-login=`), the values
