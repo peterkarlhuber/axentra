@@ -49,6 +49,10 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   (`axentra.core.db_errors.redacted_excepthook` as `sys.excepthook`, unless one is set already), and
   `tests/unit/test_db_error_text_rules.py` keeps Axentra's logging calls on error objects instead of
   pre-formatted text (MIG-AXE-0 review follow-up L-2).
+- Fixed: the `fake` billing provider counted its checkout ids from 1 in every process, so after a restart of the
+  API a new checkout reused a stored id and failed with HTTP 500 (unique `provider_checkout`). Its ids now carry
+  the subscription id (`cs_fake_000001_<subscription id>`, likewise `cus_fake_...` and `sub_fake_...`). Found
+  while preparing the local QA test version of Axentra Studio.
 - Changed (TABRION MIG-AXE-1, tests only): the PostgreSQL test fixtures run on Tabrion's `tabrion.testing`
   (`tabrion_postgres_database`, `truncate_tables`). `pg_urls`, `truncate_all`, `make_settings`, the role names
   `axentra_test_app`/`axentra_test_owner`, `AXENTRA_TEST_DATABASE_URL`, `AXENTRA_TEST_SPLIT_ROLES` and the skip
