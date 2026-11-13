@@ -139,16 +139,22 @@ def test_pyproject_names_tabrion_by_final_range_only() -> None:
 
 
 def test_installed_tabrion_is_the_pin() -> None:
-    """When Tabrion came from Git (pip writes ``direct_url.json``), it is the pinned commit and version."""
+    """An installed Tabrion from Git (pip writes ``direct_url.json`` with ``vcs_info``) is the pinned commit and
+    version; one from anywhere else (a wheel, a later package index, V-B) is a final version inside every range."""
     try:
         dist = metadata.distribution("tabrion")
     except metadata.PackageNotFoundError:
         return  # not installed: nothing to compare (the file checks above still ran)
     sha, _ = pin_problems(REQUIREMENTS.read_text(encoding="utf-8"))
     direct = dist.read_text("direct_url.json")
-    if direct is not None and "vcs_info" in json.loads(direct):
-        assert json.loads(direct)["vcs_info"].get("commit_id") == sha
-    assert dist.version == FINAL_RELEASES.get(sha or "")
+    vcs = json.loads(direct).get("vcs_info") if direct is not None else None
+    if vcs is not None:
+        assert vcs.get("commit_id") == sha
+        assert dist.version == FINAL_RELEASES.get(sha or "")
+    else:
+        version = Version(dist.version)
+        assert not (version.is_prerelease or version.is_devrelease), dist.version
+        assert range_problems(_pyproject(), dist.version) == []
 
 
 GOOD = "tabrion @ git+https://github.com/peterkarlhuber/tabrion.git@d5821faa8742dea012abda3b663549c038d76543"

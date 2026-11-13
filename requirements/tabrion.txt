@@ -1,7 +1,8 @@
 # Tabrion source for installs without a package index (TABRION VER-1, variant V-B0 of migration plan 06 section 6.4).
 #
 # pyproject.toml names Tabrion only by a final range (for example `tabrion[testing,postgres]>=0.1,<0.2`, RC-1); this
-# file says where that version comes from. Install it together with Axentra, with -r (never -c) and pip 25.0 or newer:
+# file says where that version comes from. Install it together with Axentra, with -r (never -c) and pip 25.0 or newer
+# (the supported minimum by policy; CI tests pip 25.0 and the current pip):
 #
 #   pip install -r requirements/tabrion.txt -e ".[dev]"
 #   pip install -r requirements/tabrion.txt "axentra @ git+https://github.com/peterkarlhuber/axentra.git@<commit>"

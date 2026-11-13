@@ -23,7 +23,8 @@ Axentra names [Tabrion](https://github.com/peterkarlhuber/tabrion) only by a ver
 (for example `tabrion[testing,postgres]>=0.1,<0.2`), never by a direct URL. Tabrion is not on a package index, so
 `requirements/tabrion.txt` says where the version comes from: one pin on the commit SHA of a final Tabrion release
 (TABRION VER-1). Always install it in the same command as Axentra, with `-r` (not `-c`) and pip 25.0 or newer
-(older pip refuses the combination); CI runs with pip 25.0 and the current pip. Without it pip looks for Tabrion on
+(the supported minimum by policy, plan 06 section 6.4; older pip is not tested and constraint files with a direct
+URL fail); CI runs with pip 25.0 and the current pip. Without it pip looks for Tabrion on
 PyPI and fails. `tests/unit/test_tabrion_requirements.py` checks the file (one pin, full SHA of a final release) and
 the ranges (no direct URL, no pre-release specifier). A Tabrion update changes the pin and, for a new minor, the
 ranges, after Axentra's CI is green against it.

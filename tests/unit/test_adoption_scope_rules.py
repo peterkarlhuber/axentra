@@ -50,7 +50,7 @@ REVIEWED_FINDINGS = {
     "tabrion/_sa/events.py: session-wide setting default_transaction_read_only is not allowed:"
     " set_config('default_transaction_read_only', 'on', false)": 1,
 }
-SET_CONFIG = re.compile(r"set_config\(\s*(?P<name>'[^']*'|%s|%\(\w+\)s|\{\w*\})\s*,(?P<value>(?:%\(\w+\)s|[^,()])*),\s*(?P<local>%s|%\(\w+\)s|\{\w*\}|\w+)\s*\)",
+SET_CONFIG = re.compile(r"set_config\(\s*(?P<name>'[^']*'|%s|%\(\w+\)s|\{\w*\})\s*,(?P<value>(?:%\(\w+\)s|'[^']*'|\[[^\]]*\]|\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)|[^,()'\[\]])*),\s*(?P<local>%s|%\(\w+\)s|\{\w*\}|\w+)\s*\)",
                         re.IGNORECASE)  # fmt: skip
 #: A ``SET`` statement at the start of a string or SQL line (``UPDATE ... SET col =`` is not one).
 SET_STATEMENT = re.compile(r"""(?:^|["'`;])\s*SET\s+(?!LOCAL\b|TRANSACTION\b|CONSTRAINTS\b)(?:SESSION\s+)?(?P<name>[A-Za-z_][\w.]*)""",
@@ -126,6 +126,10 @@ def test_no_session_wide_scope_or_unlisted_session_setting() -> None:
         "SELECT set_config('axentra.scope', %s, is_local)",
         "SELECT set_config('axentra.scope', %s, %s)",
         "SELECT set_config('axentra.tenant_id', %s, %(local)s)",
+        # Values with calls, commas inside parentheses, string literals and arrays (review M-1 of #76).
+        "SELECT set_config('axentra.tenant_id', coalesce(%s, ''), false)",
+        "SELECT set_config('axentra.scope', CASE WHEN x = ANY (ARRAY['a', 'b']) THEN 'p, q' ELSE f(g(%s), 1) END, false)",
+        "SELECT set_config('work_mem', concat(%s, 'MB'), false)",
         "SELECT set_config('axentra.product_id', %s, {local})",
         "SELECT set_config('work_mem', %s, false)",
         '"SET axentra.tenant_id = 1"',
