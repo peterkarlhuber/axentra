@@ -32,7 +32,9 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
+      # TABRION VER-1: pyproject.toml names Tabrion by a range only; requirements/tabrion.txt says where it comes
+      # from (one pin on a final release). It must be in the same pip command as the project (-r, never -c).
+      - run: pip install -r requirements/tabrion.txt -e ".[dev]"
       - run: ruff check src tests examples
       - run: ruff format --check src tests examples
       - run: mypy
@@ -80,7 +82,9 @@ jobs:
       - name: Python version
         run: python -VV
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
+      # TABRION VER-1: pyproject.toml names Tabrion by a range only; requirements/tabrion.txt says where it comes
+      # from (one pin on a final release). It must be in the same pip command as the project (-r, never -c).
+      - run: pip install -r requirements/tabrion.txt -e ".[dev]"
       - name: PostgreSQL client matching the server (backup/restore test)
         run: |
           sudo apt-get update -q
@@ -99,6 +103,47 @@ jobs:
         with:
           name: test-results-py${{ matrix.python }}-pg${{ matrix.postgres }}
           path: junit-test.xml
+
+  pip-compat:
+    # TABRION VER-1 (plan 06 section 6.4): the documented install, `-r requirements/tabrion.txt` together with the
+    # project, works with the minimum supported pip (25.0; 23.3 and 24.0 refuse the combination) and the current one,
+    # in a fresh environment without the pip cache, and resolves Tabrion to the pinned commit.
+    name: Install with pip ${{ matrix.pip }} (Tabrion pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15 # new job (TABRION VER-1): two installs and one test file
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { pip: "25.0", spec: "pip==25.0" }
+          - { pip: "current", spec: "pip" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Development install (editable, dev extra)
+        env:
+          PIP_SPEC: ${{ matrix.spec }}
+        run: |
+          python -m venv /tmp/dev
+          /tmp/dev/bin/python -m pip install --upgrade "$PIP_SPEC"
+          /tmp/dev/bin/pip --version
+          /tmp/dev/bin/pip install --no-cache-dir -r requirements/tabrion.txt -e ".[dev]"
+          /tmp/dev/bin/pip check
+          /tmp/dev/bin/python -m pytest -q -p no:cacheprovider tests/unit/test_tabrion_requirements.py
+      - name: Library install (wheel from this checkout, no extras)
+        env:
+          PIP_SPEC: ${{ matrix.spec }}
+        run: |
+          python -m venv /tmp/lib
+          /tmp/lib/bin/python -m pip install --upgrade "$PIP_SPEC"
+          /tmp/lib/bin/pip install --no-cache-dir -r requirements/tabrion.txt .
+          /tmp/lib/bin/pip check
+          /tmp/lib/bin/python -c "import axentra, tabrion; print('axentra', axentra.__version__, 'tabrion', tabrion.__version__)"
+          ! /tmp/lib/bin/python -c "import pytest" 2>/dev/null
 
   sdk-typescript:
     name: TypeScript SDK (generated types, unit tests, build)

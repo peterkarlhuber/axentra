@@ -48,7 +48,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]" -e "./sdk/python[test]"
+          pip install -r requirements/tabrion.txt -e ".[dev]" -e "./sdk/python[test]"  # TABRION VER-1
       - name: Collect the test IDs (test-ids-python.txt)
         run: python -m pytest --collect-only -q -p no:cacheprovider > "$GITHUB_WORKSPACE/test-ids-python.txt" || true
       - name: Collect the test IDs (test-ids-sdk-python.txt)

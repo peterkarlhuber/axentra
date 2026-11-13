@@ -25,6 +25,10 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- CI (TABRION VER-1): the lint and test jobs and the nightly inventory install `-r requirements/tabrion.txt`
+  together with `-e ".[dev]"`; the new job "Install with pip 25.0 / current (Tabrion pin)" runs the development and
+  the library install with the minimum supported and the current pip and checks the pinned Tabrion commit. Both
+  entries are mandatory in `.github/ci-manifest.json`.
 - Added (TABRION VER-1): `requirements/tabrion.txt`, the one source of Tabrion for installs without a package
   index: a single pin on the final Tabrion v0.1.0 commit (`d5821faa8742dea012abda3b663549c038d76543`). Install it
   with `-r` in the same command as Axentra, with pip 25.0 or newer (`pip install -r requirements/tabrion.txt -e
