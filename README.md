@@ -29,7 +29,9 @@ implemented and tested, with evidence and the acceptance criteria status:
 ## Two ways to use it
 
 Axentra is not published on PyPI yet; install it from the
-repository at a commit, or from a checkout (`pip install -e ".[server]"`).
+repository at a commit, or from a checkout (`pip install -e ".[server]"`). Tabrion, which Axentra names by a
+version range, is not on PyPI either: add `-r requirements/tabrion.txt` (from the same commit) to the install
+command, with pip 25.0 or newer (see [docs/development/DEVELOPMENT.md](docs/development/DEVELOPMENT.md#tabrion)).
 
 | | Library | HTTP API |
 |---|---|---|
@@ -121,7 +123,7 @@ read [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md).
 ### Local virtual environment
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"     # or: uv venv && uv pip install -e ".[dev]"
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements/tabrion.txt -e ".[dev]"  # pip >= 25.0; or uv pip install ...
 createdb axentra                                                   # a local PostgreSQL
 export AXENTRA__DATABASE__URL=postgresql://$USER@127.0.0.1:5432/axentra
 .venv/bin/axentra migrate

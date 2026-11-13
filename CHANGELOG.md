@@ -25,6 +25,11 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Added (TABRION VER-1): `requirements/tabrion.txt`, the one source of Tabrion for installs without a package
+  index: a single pin on the final Tabrion v0.1.0 commit (`d5821faa8742dea012abda3b663549c038d76543`). Install it
+  with `-r` in the same command as Axentra, with pip 25.0 or newer (`pip install -r requirements/tabrion.txt -e
+  ".[dev]"`). `pyproject.toml` names Tabrion only by a final range (RC-1, RC-8), which
+  `tests/unit/test_tabrion_requirements.py` checks together with the pin. No dependency changes yet.
 - Fixed (TABRION QA-21): `scripts/check_tabrion_api.py --surface` no longer reports enum members and dataclass
   fields as missing. Tabrion's `docs/api/surface.json` lists them in the parent entry (`members`, `fields`), so a
   name such as `tabrion.TLSMode.AUTO` is now checked against its parent's entry and passes when the parent is stable
