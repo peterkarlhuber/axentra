@@ -71,6 +71,7 @@ review, no penetration test).
 | Pri | Area | Item |
 |---|---|---|
 | P1 | identity | Data subject tooling: user data export and erasure/anonymization across users, memberships, audit |
+| P2 | identity | No API to create a user with a password: accounts come only from first-run setup, OIDC sign-in or `POST /v1/users/external` (SSO only). Tools that need password test users (the Axentra Studio QA kit, `qakit/runtime/create_test_users.py` in axentra-studio) call `identity.create_user` of the library. An admin endpoint (or invitations that let the invitee set a password for a new account) would close the gap |
 | P2 | identity | OIDC providers without `email_verified` (Entra ID v2 usually omits it): an explicit, per-provider opt-in (e.g. single-tenant directories only, or mapping a verified-email claim) instead of refusing with `email_not_verified`; must not reopen the "nOAuth" takeover. Documented in `modules/IDENTITY.md`, no setting yet |
 | P2 | identity | MFA for password logins: TOTP (design ready in `architecture/MFA_TOTP_DESIGN.md`: enrollment, recovery codes, two-step login, step-up, admin reset, Studio screens, tests; not implemented) and WebAuthn/passkeys later. An implementation is new authentication code and needs an independent security review before it ships |
 | P3 | realtime | WebSockets (only SSE exists, polling-based) |
