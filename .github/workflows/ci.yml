@@ -368,6 +368,7 @@ jobs:
           cache: pip
       # TABRION MIG-AXE-3: requirements/tabrion.txt for the runtime dependency on Tabrion. pip-audit cannot audit
       # Tabrion (not on PyPI) and reports it as skipped; its own CI audits it.
+      - run: python -m pip install --upgrade pip
       - run: pip install -r requirements/tabrion.txt -e ".[server,oidc,s3]" pip-audit==2.10.1 bandit
       - run: bandit -q -r src -c pyproject.toml
       # Known vulnerabilities in the installed dependencies (the pattern of nodestro-runtime's CI). Blocking: an

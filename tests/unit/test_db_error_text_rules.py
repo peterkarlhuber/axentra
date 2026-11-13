@@ -41,6 +41,10 @@ def _preformatted(node: ast.expr) -> str | None:
     return None
 
 
+#: Attributes that hold an error's text (or parts of it) rather than the error object.
+TEXT_ATTRIBUTES = frozenset({"args", "message_detail", "message_hint", "message_primary", "context"})
+
+
 def _text_of_object(node: ast.expr) -> str | None:
     if (
         isinstance(node, ast.Call)
@@ -48,6 +52,12 @@ def _text_of_object(node: ast.expr) -> str | None:
         and node.func.id in ("str", "repr", "ascii")
     ):
         return f"{node.func.id}(...) as an argument"
+    if isinstance(node, ast.JoinedStr):
+        return "f-string argument"
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod)):
+        return "argument built by concatenation or %"
+    if isinstance(node, ast.Attribute) and node.attr in TEXT_ATTRIBUTES:
+        return f".{node.attr} as an argument"
     return None
 
 
@@ -85,6 +95,11 @@ def test_axentra_logs_error_objects_not_their_text() -> None:
         'logging.getLogger("x").error(f"{exc}")',
         'self.logger.info(f"{exc}")',
         'logger.log(40, f"{exc}")',
+        'logger.error("insert failed: %s", f"{exc}")',
+        'logger.error("insert failed: %s", "x: " + str(exc))',
+        'logger.error("insert failed: %s", prefix + text)',
+        'logger.error("insert failed: %s", exc.args)',
+        'logger.error("insert failed: %s", exc.diag.message_detail)',
     ],
 )
 def test_the_rule_finds_preformatted_text(source: str) -> None:
