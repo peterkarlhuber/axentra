@@ -210,6 +210,14 @@ All decisions go through `axentra.access.authorizer.Authorizer`:
    only and cannot make itself an owner; a `tenant_admin` cannot demote, remove or create
    `tenant_owner`s (it has the same permissions, but not the owner rank); a custom role with
    `product_members:manage` cannot grant roles stronger than itself. Violations answer `403`.
+   Role *definitions* are bounded the same way: with `roles:manage` a caller can only put
+   permissions it holds itself (its product-level grant, which for product roles includes the
+   tenant permissions they hold in all tenants) into a custom role, when creating it or adding to
+   it, and it can change or delete only roles whose current permissions are all within its grant.
+   So an operator cannot widen its own role, and a `product_admin` cannot define roles with the
+   owner-only `product_members:manage` or `permissions:manage`; product owners, platform admins
+   and system code can define any role. Roles stored before this check are not migrated: a role
+   above its editor's grant simply cannot be changed by that editor any more.
 9. **No user directory for tenant admins.** Adding an existing user directly (`POST
    .../members` with `email` or `user_id`, `owner_user_id` when creating a tenant, `POST
    /v1/products/{id}/members`) resolves only users the caller can already see: platform admins
@@ -592,7 +600,7 @@ listed in `PUBLIC_ROUTES` and are only registered unauthenticated in `public` mo
 | Threat | Mitigation | Residual risk / notes |
 |---|---|---|
 | IDOR / BOLA (foreign ids in the path) | Authorizer checks every product/tenant id against the principal; unrelated scopes return `404`; queries filter by product and tenant; RLS confines unfiltered queries; cross-tenant and cross-product tests | Platform-scope queries rely on code review; global users table is not under RLS |
-| Privilege escalation | Deny by default; platform permissions never granted to keys or product roles; product-defined permissions validated per product, ignored when retired, declared over HTTP only with `permissions:manage` (owners); key creators cannot grant what they lack; role ceiling on member and operator changes; owner rank; derived keys capped by the parent's expiry and revoked with it; job handlers confined to declared and enqueuer permissions; last-owner/admin guards with row locks | Product roles hold tenant permissions in all tenants by design; keys created by users outlive the user's membership |
+| Privilege escalation | Deny by default; platform permissions never granted to keys or product roles; product-defined permissions validated per product, ignored when retired, declared over HTTP only with `permissions:manage` (owners); key creators cannot grant what they lack; role ceiling on member and operator changes and on role definitions; owner rank; derived keys capped by the parent's expiry and revoked with it; job handlers confined to declared and enqueuer permissions; last-owner/admin guards with row locks | Product roles hold tenant permissions in all tenants by design; keys created by users outlive the user's membership |
 | CSRF | SameSite=Lax cookie, CSRF header token for unsafe cookie requests, Origin allow-list, login CSRF check | Browsers that send no `Origin` rely on the CSRF token alone (sufficient) |
 | XSS | The API returns JSON only (`application/json`, `application/problem+json`) with `nosniff` and a `default-src 'none'` CSP; cookies are HttpOnly | Frontends (product UIs, Studio) must escape data themselves; `/v1/docs` loads Swagger UI assets from a CDN without the strict CSP |
 | SQL injection | Parameterized queries only (psycopg placeholders); dynamic identifiers come from fixed allow-lists (sort fields, regex-checked field names); JSON filters passed as bound `jsonb` | Product code using `ax.db` must follow the same rule |
