@@ -232,7 +232,9 @@ All decisions go through `axentra.access.authorizer.Authorizer`:
     handler's principal holds the kind's declared permission set (default for undeclared kinds:
     all product and tenant permissions, i.e. trusted kinds that only operators or product code
     enqueue), intersected, for jobs a user or API key enqueued through the API, with what that
-    enqueuer holds in the job's scope when the handler runs.
+    enqueuer holds in the job's scope when the handler runs. Jobs fired by a schedule use the
+    schedule's `created_by`, which moves to whoever changes the schedule's kind or payload or turns
+    it on, so editing someone else's schedule never borrows that person's permissions.
 11. **Idempotency replays.** A repeated `Idempotency-Key` returns the stored job or event only
     for the same request (kind/type, tenant, payload/data, priority) and only to its creator or to
     a caller who may read jobs/events (`jobs:read`); anything else is `409` without the stored

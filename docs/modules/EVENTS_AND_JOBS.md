@@ -101,6 +101,11 @@ cannot reach another product or tenant. (The authorizer treats a system actor wi
   nothing). Jobs fired by a schedule (`created_by = schedule:<id>`) follow the same rule with the
   schedule's creator: once the creator lost access (or the schedule was deleted) the handler holds
   no permissions; schedules created in process (`Principal.system`) keep the kind's permissions.
+  A schedule's "creator" is its `created_by`: whoever last decided what it runs. When another
+  caller changes its `kind` or `payload`, or turns a disabled schedule on (`PATCH`), that caller
+  becomes `created_by` (audited as `events.schedule.update` with `created_by` from/to), so the jobs
+  it fires from then on, and those already queued, act with the editor's permissions, never with
+  the original creator's. Changing only the name, timing, priority or attempts keeps `created_by`.
   `ctx.transaction()` is raw database access in the job's scope (RLS applies) and is not
   limited by these permissions, so handlers must still treat the payload as untrusted input.
 
