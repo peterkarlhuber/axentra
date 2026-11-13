@@ -72,7 +72,19 @@ def test_fake_provider_is_deterministic():
     a, b = FakeProvider("s"), FakeProvider("s")
     req = CheckoutRequest("sub_1", "prd_1", "ten_1", "pro", "price_1", 0, "https://x/", "https://x/")
     assert a.create_checkout(req) == b.create_checkout(req)
-    assert a.create_checkout(req).checkout_id == "cs_fake_000002"
+    assert a.create_checkout(req).checkout_id == "cs_fake_000002_sub_1"
+
+
+def test_fake_provider_ids_survive_a_restart():
+    # A new process starts counting at 1 again; the subscription id keeps the checkout id unique.
+    first = FakeProvider("s").create_checkout(
+        CheckoutRequest("sub_a", "prd_1", "ten_1", "pro", "price_1", 0, "https://x/", "https://x/")
+    )
+    after_restart = FakeProvider("s").create_checkout(
+        CheckoutRequest("sub_b", "prd_1", "ten_1", "pro", "price_1", 0, "https://x/", "https://x/")
+    )
+    assert first.checkout_id != after_restart.checkout_id
+    assert first.customer_id != after_restart.customer_id
 
 
 REQ = CheckoutRequest(

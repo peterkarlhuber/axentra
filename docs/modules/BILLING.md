@@ -56,7 +56,7 @@ event of the same name (outbox, delivered at least once).
 | Provider | Behaviour |
 |---|---|
 | `ManualProvider` | Checkout completes locally (`completed: true`, no URL). The operator sets statuses. No webhooks; the webhook route returns `404`. |
-| `FakeProvider` | A deterministic test double. Checkout returns `cs_fake_000001` and `https://checkout.fake.invalid/...`. `signed_event()` and `complete_checkout()` produce webhook bodies signed with the Stripe scheme and the fake's own secret (`billing.webhook_secret_ref`, or a random one per process). |
+| `FakeProvider` | A deterministic test double. Checkout returns `cs_fake_000001_<subscription id>` (unique across process restarts) and `https://checkout.fake.invalid/...`. `signed_event()` and `complete_checkout()` produce webhook bodies signed with the Stripe scheme and the fake's own secret (`billing.webhook_secret_ref`, or a random one per process). |
 | `StripeProvider` | httpx calls to `api.stripe.com`: create customer, create Checkout Session (`mode=subscription`, trial days, metadata), cancel (now or at period end), resume. It refuses to run unless `billing.provider = "stripe"`, `api_key_ref` resolves to a Stripe secret key and, for live keys, `live_payments = true`. POSTs carry idempotency keys. Errors never contain the key or the provider's message. Tests use only `httpx.MockTransport`. |
 
 Plan changes for Stripe subscriptions are made in Stripe (for example the customer portal).

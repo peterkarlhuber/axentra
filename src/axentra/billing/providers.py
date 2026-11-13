@@ -148,7 +148,10 @@ class ManualProvider:
 
 
 class FakeProvider:
-    """Deterministic test double of a Stripe-like provider (ids count up per instance)."""
+    """Deterministic test double of a Stripe-like provider.
+
+    Ids count up per instance and carry the subscription id of the request, so they stay unique across
+    process restarts (the database requires a unique checkout id per subscription)."""
 
     name = "fake"
 
@@ -161,9 +164,9 @@ class FakeProvider:
         self.checkouts: dict[str, CheckoutRequest] = {}
 
     def create_checkout(self, request: CheckoutRequest) -> ProviderCheckout:
-        n = next(self._seq)
-        checkout_id = f"cs_fake_{n:06d}"
-        customer = request.customer_id or f"cus_fake_{n:06d}"
+        suffix = f"{next(self._seq):06d}_{request.subscription_id}"
+        checkout_id = f"cs_fake_{suffix}"
+        customer = request.customer_id or f"cus_fake_{suffix}"
         self.checkouts[checkout_id] = request
         self.calls.append(("create_checkout", {"checkout_id": checkout_id, "plan": request.plan_key}))
         return ProviderCheckout(
@@ -212,7 +215,7 @@ class FakeProvider:
     def complete_checkout(self, checkout_id: str, **kw: Any) -> tuple[bytes, dict[str, str]]:
         """``checkout.session.completed`` for a checkout created by this instance."""
         req = self.checkouts[checkout_id]
-        n = checkout_id.rsplit("_", 1)[1]
+        n = checkout_id.removeprefix("cs_fake_")
         obj = {
             "id": checkout_id,
             "object": "checkout.session",
