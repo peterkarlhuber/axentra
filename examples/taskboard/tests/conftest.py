@@ -1,7 +1,8 @@
 """Fixtures for the Taskboard tests.
 
-They reuse the repository's PostgreSQL fixtures (``tests/conftest.py``): a fresh database per test
-session and a NON-superuser role, so row-level security is enforced on Taskboard's own tables.
+They reuse the repository's PostgreSQL fixtures (``tests/conftest.py``, on ``tabrion.testing``): a fresh
+database per test session and a NON-superuser role, so row-level security is enforced on Taskboard's own
+tables. ``tabrion_role_setup`` is imported too, so that the roles are Axentra's in this directory as well.
 Without ``AXENTRA_TEST_DATABASE_URL`` the tests are skipped (and reported as skipped).
 """
 
@@ -25,7 +26,16 @@ for p in (str(TASKBOARD_ROOT), str(REPO_ROOT)):
 from fastapi.testclient import TestClient  # noqa: E402
 from taskboard.app import create_taskboard_app, taskboard_migrations  # noqa: E402
 from taskboard.service import SYSTEM, TaskboardService  # noqa: E402
-from tests.conftest import make_settings, pg_urls, truncate_all  # noqa: E402, F401
+from tests.conftest import make_settings, pg_urls, tabrion_role_setup, truncate_all  # noqa: E402, F401
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The Tabrion fixtures that ``pg_urls`` requests. tests/conftest.py activates the plugin, but it is not loaded
+    when this directory runs alone (``pytest examples/taskboard/tests``); ``pytest_plugins`` here would be refused
+    when both directories run (pytest allows it only in a top-level conftest)."""
+    if not config.pluginmanager.has_plugin("tabrion.testing"):
+        config.pluginmanager.import_plugin("tabrion.testing")
+
 
 from axentra.data.database import DbScope  # noqa: E402
 from axentra.platform import Axentra  # noqa: E402

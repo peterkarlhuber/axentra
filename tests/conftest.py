@@ -10,6 +10,14 @@ Without the variable, integration tests are skipped and reported as skipped.
 ``database.migration_url``), and the application role ``axentra_test_app`` owns nothing and only
 has the privileges of ``axentra db grant-runtime-role`` (so it cannot even switch RLS off).
 Without it, ``pg_urls["owner"]`` is the application role.
+
+The database and its roles come from Tabrion's test fixtures (TABRION MIG-AXE-1, ``tabrion.testing``):
+``tabrion_postgres_database`` creates the database ``axentra_test_<hex>`` and the roles
+(``LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION``, random passwords), owns
+schema ``public`` with the owner role, revokes ``CREATE`` on it from ``PUBLIC``, and drops the database
+and the roles at the end of the session. The roles must not exist before the run (a leftover from an
+older run fails with a clear message; drop it with ``DROP ROLE``). Axentra's own migrations and
+``grant_runtime_role`` stay here.
 """
 
 from __future__ import annotations
@@ -17,15 +25,19 @@ from __future__ import annotations
 from collections.abc import Iterator
 import logging
 import os
-import uuid
 
-import psycopg
-from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
 import pytest
+from tabrion.testing import PostgresDatabaseHandle, RoleSetup, configure, truncate_tables
+
+pytest_plugins = ["tabrion.testing"]
+
+# The variable names stay Axentra's: the URL is AXENTRA_TEST_DATABASE_URL, and the require variable
+# AXENTRA_REQUIRE_POSTGRES=1 turns a missing database into an error instead of a skip.
+configure(env_prefix="AXENTRA", postgres_env=["AXENTRA_TEST_DATABASE_URL"], schema_prefix="axentra_test_")
 
 ADMIN_URL = os.environ.get("AXENTRA_TEST_DATABASE_URL")
 APP_ROLE = "axentra_test_app"
-APP_PASSWORD = "axentra-test-pw"
 OWNER_ROLE = "axentra_test_owner"
 SPLIT_ROLES = os.environ.get("AXENTRA_TEST_SPLIT_ROLES") == "1"
 
@@ -55,60 +67,40 @@ def _with_db(url: str, dbname: str, user: str | None = None, password: str | Non
 
 
 @pytest.fixture(scope="session")
-def pg_urls() -> Iterator[dict[str, str]]:
+def tabrion_role_setup() -> RoleSetup:
+    """The role names QA-25 relies on (``APP_ROLE``); a separate owner only with ``AXENTRA_TEST_SPLIT_ROLES=1``."""
+    return RoleSetup(app=APP_ROLE, owner=OWNER_ROLE if SPLIT_ROLES else None, split=SPLIT_ROLES)
+
+
+@pytest.fixture(scope="session")
+def pg_urls(request: pytest.FixtureRequest) -> dict[str, str]:
     if not ADMIN_URL:
         pytest.skip("AXENTRA_TEST_DATABASE_URL is not set; PostgreSQL integration tests not executed")
-    dbname = f"axentra_test_{uuid.uuid4().hex[:8]}"
-    roles = [APP_ROLE, OWNER_ROLE] if SPLIT_ROLES else [APP_ROLE]
-    with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
-        for role in roles:
-            exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
-            if not exists:
-                conn.execute(
-                    sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(
-                        sql.Identifier(role), sql.Literal(APP_PASSWORD)
-                    )
-                )
-        conn.execute(
-            sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(dbname), sql.Identifier(roles[-1]))
-        )
+    # Requested here, after the check above, so that the skip message stays Axentra's.
+    db: PostgresDatabaseHandle = request.getfixturevalue("tabrion_postgres_database")
+    owner_role = conninfo_to_dict(db.owner_url)["user"]
     urls = {
-        "admin": _with_db(ADMIN_URL, dbname),
-        "app": _with_db(ADMIN_URL, dbname, APP_ROLE, APP_PASSWORD),
-        "owner": _with_db(ADMIN_URL, dbname, roles[-1], APP_PASSWORD),
-        "owner_role": roles[-1],
-        "server_admin": ADMIN_URL,
-        "dbname": dbname,
+        "admin": db.url,
+        "app": db.app_url,
+        "owner": db.owner_url,
+        "owner_role": str(owner_role),
+        "server_admin": request.getfixturevalue("tabrion_postgres_url"),
+        "dbname": db.name,
     }
     from axentra.data.migrations import MigrationRunner
 
-    if SPLIT_ROLES:
-        with psycopg.connect(urls["admin"], autocommit=True) as conn:
-            conn.execute(sql.SQL("ALTER SCHEMA public OWNER TO {}").format(sql.Identifier(OWNER_ROLE)))
-            conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
     MigrationRunner(urls["owner"]).migrate()
-    if SPLIT_ROLES:
+    if db.app_url != db.owner_url:
         from axentra.data.roles import grant_runtime_role
 
-        assert grant_runtime_role(urls["owner"], APP_ROLE).restricted
-    yield urls
-    with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
-        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(dbname)))
+        app_role = conninfo_to_dict(db.app_url)["user"]
+        assert grant_runtime_role(urls["owner"], str(app_role)).restricted
+    return urls
 
 
 def truncate_all(admin_url: str) -> None:
-    with psycopg.connect(admin_url, autocommit=True) as conn:
-        tables = [
-            r[0]
-            for r in conn.execute(
-                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename LIKE 'axentra_%%'"
-                " AND tablename <> 'axentra_schema_migrations'"
-            ).fetchall()
-        ]
-        if tables:
-            conn.execute(
-                sql.SQL("TRUNCATE {} CASCADE").format(sql.SQL(", ").join(sql.Identifier(t) for t in tables))
-            )
+    """Empty Axentra's tables (``axentra_%`` in ``public``) but keep the migration history."""
+    truncate_tables(admin_url, schema="public", like="axentra_%", exclude=("axentra_schema_migrations",))
 
 
 def make_settings(pg_urls: dict[str, str], **overrides):  # type: ignore[no-untyped-def]

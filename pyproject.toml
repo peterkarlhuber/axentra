@@ -60,6 +60,9 @@ dev = [
     "opentelemetry-sdk>=1.25",
     # Only for the tests of the optional structlog processor (axentra.core.db_errors); not a runtime dependency.
     "structlog>=24",
+    # The PostgreSQL test fixtures of tests/conftest.py (TABRION MIG-AXE-1). A range only (RC-1): Tabrion is not on
+    # a package index, so install with `pip install -r requirements/tabrion.txt -e ".[dev]"` (pip 25.0 or newer).
+    "tabrion[testing,postgres]>=0.1,<0.2",
 ]
 
 [project.scripts]
@@ -138,11 +141,14 @@ source_modules = [
 ]
 forbidden_modules = ["axentra.api", "axentra.cli", "fastapi", "starlette", "uvicorn"]
 
+# Also forbids Tabrion Studio (TABRION MIG-AXE-1, plan 06 section 7.4); the name stays, tests refer to it.
 [[tool.importlinter.contracts]]
 name = "Axentra never depends on Nodestro, orkexa or Axentra Studio"
 type = "forbidden"
 source_modules = ["axentra"]
-forbidden_modules = ["nodestro_runtime", "nodestro_api", "nodestro_studio", "nodestro", "orkexa", "axentra_studio"]
+forbidden_modules = [
+    "nodestro_runtime", "nodestro_api", "nodestro_studio", "nodestro", "orkexa", "axentra_studio", "tabrion_studio",
+]
 
 [[tool.importlinter.contracts]]
 name = "Usage never depends on billing"
