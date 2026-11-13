@@ -19,7 +19,7 @@ import re
 import tomllib
 
 from packaging.requirements import InvalidRequirement, Requirement
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -85,6 +85,13 @@ def tabrion_requirements(pyproject: dict) -> list[tuple[str, Requirement | None]
     return found
 
 
+def _version(text: str) -> Version | None:
+    try:
+        return Version(text)
+    except InvalidVersion:
+        return None
+
+
 def range_problems(pyproject: dict, pinned_version: str | None) -> list[str]:
     """RC-1 and RC-8 for the Tabrion requirements of a parsed ``pyproject.toml``."""
     problems = []
@@ -98,7 +105,12 @@ def range_problems(pyproject: dict, pinned_version: str | None) -> list[str]:
         specs = {(s.operator, s.version) for s in req.specifier}
         lower = [v for op, v in specs if op == ">="]
         upper = [v for op, v in specs if op == "<"]
-        if any(Version(v).is_prerelease or Version(v).is_devrelease for _, v in specs):
+        versions = [_version(v) for _, v in specs]
+        if any(v is None for v in versions) or {op for op, _ in specs} - {">=", "<"}:
+            problems.append(
+                f"{where}: {req} has a specifier that is not a plain version bound (only '>=0.N,<0.(N+1)')"
+            )
+        elif any(v is not None and (v.is_prerelease or v.is_devrelease) for v in versions):
             problems.append(f"{where}: {req} has a pre-release specifier (RC-8)")
         elif len(specs) != 2 or len(lower) != 1 or len(upper) != 1:
             problems.append(f"{where}: {req} is not a range '>=0.N,<0.(N+1)'")
@@ -187,6 +199,14 @@ def test_good_pin_variants_pass() -> None:
         (["tabrion>=0.2,<0.3"], []),  # the pinned 0.1.0 is outside
         (["tabrion"], []),  # unversioned
         (["tabrion[postgres]>=0.1,<0.2 @@"], []),  # does not parse
+        (["tabrion==0.1.*"], []),  # a wildcard, not a version
+        (["tabrion===0.1.0"], []),  # arbitrary equality
+        (["tabrion>=0.1,<0.2,!=0.1.3"], []),  # an extra exclusion: not exactly one minor line
+        (["tabrion>=0.1.0,<0.2"], []),  # three-part lower bound: not the canonical shape
+        (["tabrion~=0.1"], []),  # compatible release: wider than 0.1 (allows 0.9)
+        (["tabrion>0.1,<0.2"], []),  # exclusive lower bound
+        (["tabrion>=0.1,<=0.2"], []),  # inclusive upper bound
+        (["tabrion>=1.0,<1.1"], []),  # not a 0.x range
     ],
 )
 def test_bad_ranges_are_refused(deps: list[str], dev: list[str]) -> None:

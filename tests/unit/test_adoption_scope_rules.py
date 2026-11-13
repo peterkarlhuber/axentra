@@ -20,6 +20,7 @@ The part 2 of MIG-T-AXE-2 records the statements Axentra's helpers really run
 
 from __future__ import annotations
 
+from collections import Counter
 from importlib.util import find_spec
 from pathlib import Path
 import re
@@ -34,6 +35,20 @@ SESSION_ALLOWED = {"statement_timeout", "lock_timeout", "idle_in_transaction_ses
 DYNAMIC_SESSION_SITES = {
     # MigrationRunner: the runner's own lock_timeout / statement_timeout around a no-transaction migration.
     "axentra/data/migrations.py": 1,
+    # Tabrion v0.1.0 tabrion.postgres.configure (_apply, and its docstring): set_config(%s, %s, false) of
+    # SessionSettings, whose names are a fixed list (the four timeouts, application_name, search_path, TimeZone);
+    # reviewed for TABRION VER-1 (CI installs Tabrion).
+    "tabrion/postgres/__init__.py": 2,
+}
+#: Findings in Tabrion's source, each checked by hand (TABRION VER-1, Tabrion v0.1.0): finding -> count. A Tabrion
+#: update that changes them fails the test, so the new sites are reviewed before the pin moves.
+REVIEWED_FINDINGS = {
+    # Docstrings and comments that explain SET ROLE (contract I-20 of role_info and grant_runtime_role); no statement.
+    "tabrion/postgres/roles.py: `SET ROLE": 3,
+    # tabrion.sqlalchemy's read-only profile turns default_transaction_read_only on for its own connections: it only
+    # makes a session stricter and carries no scope. Axentra does not use tabrion.sqlalchemy.
+    "tabrion/_sa/events.py: session-wide setting default_transaction_read_only is not allowed:"
+    " set_config('default_transaction_read_only', 'on', false)": 1,
 }
 SET_CONFIG = re.compile(r"set_config\(\s*(?P<name>'[^']*'|%s|%\(\w+\)s|\{\w*\})\s*,(?P<value>(?:%\(\w+\)s|[^,()])*),\s*(?P<local>%s|%\(\w+\)s|\{\w*\}|\w+)\s*\)",
                         re.IGNORECASE)  # fmt: skip
@@ -91,13 +106,17 @@ def violations(path: str, text: str) -> tuple[list[str], int]:
 def test_no_session_wide_scope_or_unlisted_session_setting() -> None:
     found: list[str] = []
     dynamic: dict[str, int] = {}
+    scanned = set()
     for path, text in sources():
+        scanned.add(path)
         problems, count = violations(path, text)
         found += problems
         if count:
             dynamic[path] = count
-    assert found == []
-    assert dynamic == DYNAMIC_SESSION_SITES
+    # The reviewed entries of files this run scanned (Tabrion's only when it is installed).
+    reviewed = {k: v for k, v in REVIEWED_FINDINGS.items() if k.split(": ", 1)[0] in scanned}
+    assert dict(Counter(found)) == reviewed
+    assert dynamic == {k: v for k, v in DYNAMIC_SESSION_SITES.items() if k in scanned}
 
 
 @pytest.mark.parametrize(

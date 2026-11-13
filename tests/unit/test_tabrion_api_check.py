@@ -16,6 +16,7 @@ import importlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 from types import ModuleType
 
@@ -253,16 +254,23 @@ def test_used_names_without_an_installed_tabrion_fail_loudly(monkeypatch: pytest
     assert "tabrion is not installed" in problem
 
 
-def test_a_directory_named_tabrion_is_not_an_installed_tabrion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    if importlib.util.find_spec("tabrion") is not None:
-        pytest.skip("a real Tabrion is installed; a namespace directory cannot shadow it")
+def test_a_directory_named_tabrion_is_not_an_installed_tabrion(tmp_path: Path) -> None:
+    """In a fresh interpreter without site-packages (``-I -S``), so that it also runs where CI installed a real
+    Tabrion (TABRION VER-1), which a namespace directory could not shadow."""
     (tmp_path / "tabrion").mkdir()
-    monkeypatch.syspath_prepend(str(tmp_path))
-    importlib.invalidate_caches()
-    assert importlib.util.find_spec("tabrion") is not None  # found, as a namespace package
-    assert not check.tabrion_installed()
+    code = (
+        "import importlib.util, sys\n"
+        f"sys.path.insert(0, {str(tmp_path)!r})\n"
+        f"spec = importlib.util.spec_from_file_location('check_tabrion_api', {str(SCRIPT)!r})\n"
+        "mod = importlib.util.module_from_spec(spec); sys.modules[spec.name] = mod; spec.loader.exec_module(mod)\n"
+        "assert importlib.util.find_spec('tabrion') is not None  # found, as a namespace package\n"
+        "print(mod.tabrion_installed())\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code], capture_output=True, text=True, check=False, timeout=60
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False"
 
 
 def test_the_export_lists_each_name_with_its_files() -> None:
