@@ -29,6 +29,12 @@ PyPI and fails. `tests/unit/test_tabrion_requirements.py` checks the file (one p
 the ranges (no direct URL, no pre-release specifier). A Tabrion update changes the pin and, for a new minor, the
 ranges, after Axentra's CI is green against it.
 
+The `dev` extra needs Tabrion for the PostgreSQL test fixtures (`tests/conftest.py` on `tabrion.testing`,
+TABRION MIG-AXE-1). They create the roles `axentra_test_app` (and `axentra_test_owner` with
+`AXENTRA_TEST_SPLIT_ROLES=1`) with random passwords and drop them after the run; a role of that name left over from
+an older run (before MIG-AXE-1 the roles were kept) fails the run with a clear message, so drop it once:
+`psql "$AXENTRA_TEST_DATABASE_URL" -c "DROP ROLE IF EXISTS axentra_test_app, axentra_test_owner"`.
+
 `dev` installs the `server` and `oidc` extras plus pytest, mypy, ruff, import-linter, moto and
 boto3.
 

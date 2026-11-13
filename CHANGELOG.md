@@ -25,6 +25,12 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Changed (TABRION MIG-AXE-1, tests only): the PostgreSQL test fixtures run on Tabrion's `tabrion.testing`
+  (`tabrion_postgres_database`, `truncate_tables`). `pg_urls`, `truncate_all`, `make_settings`, the role names
+  `axentra_test_app`/`axentra_test_owner`, `AXENTRA_TEST_DATABASE_URL`, `AXENTRA_TEST_SPLIT_ROLES` and the skip
+  message stay. The test roles now get random passwords and are dropped after the session; a role left over by an
+  older run fails the run with a clear message. The `dev` extra adds `tabrion[testing,postgres]>=0.1,<0.2`, so a
+  development install needs `-r requirements/tabrion.txt`. The import contract also forbids `tabrion_studio`.
 - CI (TABRION VER-1): the lint and test jobs and the nightly inventory install `-r requirements/tabrion.txt`
   together with `-e ".[dev]"`; the new job "Install with pip 25.0 / current (Tabrion pin)" runs the development and
   the library install with the minimum supported and the current pip and checks the pinned Tabrion commit. Both

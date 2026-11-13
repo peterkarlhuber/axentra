@@ -97,6 +97,7 @@ def test_unmodified_copy_is_kept(tmp_path: Path) -> None:
         ("api/app.py", "import nodestro_api", NO_PLATFORM),
         ("identity/service.py", "import nodestro", NO_PLATFORM),
         ("remote.py", "import axentra_studio", NO_PLATFORM),
+        ("data/database.py", "import tabrion_studio", NO_PLATFORM),
         ("core/db_errors.py", "import fastapi", DOMAIN),
         ("identity/tokens.py", "import starlette.requests", DOMAIN),
         ("platform.py", "import axentra.api.app", DOMAIN),
@@ -148,10 +149,16 @@ def test_platform_contract_follows_k33() -> None:
         "nodestro_api",
         "nodestro_studio",
         "axentra_studio",
+        "tabrion_studio",
     } <= (forbidden)
-    assert not {name for name in forbidden if name.startswith("tabrion")}
+    # tabrion_studio is forbidden (plan 06 section 7.4); tabrion itself, a K-33 edge, never is.
+    assert not {name for name in forbidden if name.startswith("tabrion") and name != "tabrion_studio"}
     for other in _contracts():
-        assert not {name for name in other["forbidden_modules"] if str(name).startswith("tabrion")}  # type: ignore[attr-defined]
+        assert not {
+            name
+            for name in other["forbidden_modules"]
+            if str(name) == "tabrion" or str(name).startswith("tabrion.")
+        }  # type: ignore[attr-defined]
 
 
 def test_no_contract_ignores_imports() -> None:
