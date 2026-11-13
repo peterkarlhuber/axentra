@@ -21,10 +21,12 @@ Axentra Studio can manage the product through that API.
 ## 1. Install
 
 ```bash
-pip install "axentra[server]"          # library + FastAPI pieces; add [oidc], [s3], [otel] as needed
+pip install -r requirements/tabrion.txt "axentra[server]"  # library + FastAPI pieces; add [oidc], [s3], [otel] as needed
 ```
 
-In this repository: `pip install -e ".[dev]" && pip install -e examples/taskboard`.
+Tabrion, which Axentra requires, is not on a package index: `requirements/tabrion.txt` (from the Axentra commit you
+install, pip 25.0 or newer) says where it comes from. In this repository:
+`pip install -r requirements/tabrion.txt -e ".[dev]" && pip install -e examples/taskboard`.
 
 ## 2. Configure
 

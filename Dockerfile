@@ -6,8 +6,10 @@
 #
 # Every installed distribution is pinned by version AND hash (pip --require-hashes): the runtime
 # dependencies from deploy/locks/server.txt (EXTRAS=server) or deploy/locks/full.txt (any other
-# EXTRAS), the build backend (hatchling) from deploy/locks/build.txt. Regenerate them with
-# scripts/update_locks.sh. The image carries a CycloneDX SBOM at /opt/axentra/sbom.cdx.json.
+# EXTRAS), the build backend (hatchling) from deploy/locks/build.txt, and Tabrion, which is not on a
+# package index, as the source archive of its pinned commit from deploy/locks/tabrion.txt (built offline
+# like Axentra's own wheel). Regenerate them with scripts/update_locks.sh. The image carries a CycloneDX
+# SBOM at /opt/axentra/sbom.cdx.json.
 # The image runs as an unprivileged user (uid/gid 10001) and contains no compiler or build tools.
 
 # The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
@@ -23,7 +25,9 @@ COPY deploy/locks deploy/locks
 COPY deploy/sbom.py deploy/sbom.py
 # The wheel of Axentra itself is built offline (no build isolation) with the hash-pinned backend,
 # in a separate venv that does not reach the image.
-RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.txt
+RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.txt \
+    && /opt/build/bin/pip wheel --require-hashes --no-deps --no-build-isolation -w /tmp/wheels \
+       -r deploy/locks/tabrion.txt
 COPY pyproject.toml README.md LICENSE CHANGELOG.md NOTICE.md ./
 COPY src ./src
 RUN /opt/build/bin/pip wheel --no-deps --no-build-isolation --no-index -w /tmp/wheels /src
@@ -31,6 +35,7 @@ ARG EXTRAS=server
 # pip check fails when the chosen lock lacks a dependency of the requested extras.
 RUN lock=deploy/locks/full.txt; if [ "${EXTRAS}" = "server" ]; then lock=deploy/locks/server.txt; fi \
     && /opt/axentra/bin/pip install --require-hashes --no-deps -r "${lock}" \
+    && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/tabrion-*.whl)" \
     && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/axentra-*.whl)[${EXTRAS}]" \
     && /opt/axentra/bin/pip check \
     && /opt/axentra/bin/axentra --version \

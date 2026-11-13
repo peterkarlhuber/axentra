@@ -4,7 +4,8 @@
 #   docker build -f examples/taskboard/Dockerfile -t taskboard:local .
 #
 # Installs Axentra from this repository (pinned by deploy/constraints.txt) plus the Taskboard
-# package; runs as an unprivileged user like the Axentra image.
+# package; runs as an unprivileged user like the Axentra image. Tabrion is not on a package index:
+# it comes first, from the hash-pinned source archive of deploy/locks/tabrion.txt.
 
 # The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
 
@@ -15,10 +16,12 @@ ENV PIP_NO_CACHE_DIR=1 \
 RUN python -m venv /opt/taskboard
 WORKDIR /src
 COPY deploy/constraints.txt deploy/constraints.txt
+COPY deploy/locks/tabrion.txt deploy/locks/tabrion.txt
 COPY pyproject.toml README.md LICENSE CHANGELOG.md NOTICE.md ./
 COPY src ./src
 COPY examples/taskboard ./examples/taskboard
-RUN /opt/taskboard/bin/pip install --constraint deploy/constraints.txt "/src[server]" \
+RUN /opt/taskboard/bin/pip install --require-hashes --no-deps -r deploy/locks/tabrion.txt \
+    && /opt/taskboard/bin/pip install --constraint deploy/constraints.txt "/src[server]" \
     && /opt/taskboard/bin/pip install --no-deps ./examples/taskboard \
     && /opt/taskboard/bin/taskboard --help > /dev/null
 

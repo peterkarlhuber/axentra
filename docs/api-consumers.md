@@ -6,6 +6,10 @@ is used.
 
 | Name | Used in |
 |---|---|
+| `tabrion.errors` | `tests/unit/test_db_errors.py` |
+| `tabrion.errors.DbErrorRedactionFilter` | `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
+| `tabrion.errors.classify` | `src/axentra/cli.py` |
+| `tabrion.errors.safe_message` | `src/axentra/cli.py`, `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
 | `tabrion.testing.PostgresDatabaseHandle` | `tests/conftest.py` |
 | `tabrion.testing.RoleSetup` | `tests/conftest.py` |
 | `tabrion.testing.configure` | `tests/conftest.py` |

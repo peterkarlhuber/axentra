@@ -35,7 +35,7 @@ import uuid
 import psycopg
 
 from axentra.core.context import Actor, ActorKind, Principal
-from axentra.core.db_errors import install_db_error_redaction
+from axentra.core.db_errors import install_db_error_redaction, safe_error_text
 from axentra.data.database import DbScope, Tx
 from axentra.events.jobs import (
     DEFAULT_HANDLER_PERMISSIONS,
@@ -208,7 +208,8 @@ class JobWorker:
                 return
             result = handler(ctx)
         except JobCancelled as exc:
-            self.queue.fail(job.id, self.name, f"cancelled: {exc}", cancelled=True)
+            # Stored as last_error: a reason that quotes a database error loses its values (B-06-1).
+            self.queue.fail(job.id, self.name, f"cancelled: {safe_error_text(exc)}", cancelled=True)
         except PermanentJobError as exc:
             self.queue.fail(job.id, self.name, format_error(exc), permanent=True)
         except RetryJob as exc:

@@ -28,7 +28,9 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
   `deploy/locks/server.txt` for `EXTRAS=server`, `deploy/locks/full.txt` for any other `EXTRAS`
   (it holds the dependencies of all extras), and the build backend (hatchling) from
   `deploy/locks/build.txt`, which builds Axentra's own wheel offline in a separate venv that does
-  not reach the image. `pip check` in the build fails when a lock lacks a dependency of the
+  not reach the image. Tabrion is not on a package index: `deploy/locks/tabrion.txt` pins the
+  source archive of the commit that `requirements/tabrion.txt` names by hash, and the build stage
+  builds its wheel offline with the same backend. `pip check` in the build fails when a lock lacks a dependency of the
   requested extras. The versions follow `deploy/constraints.txt` (used for installs without the
   image); after a change to it or to the dependencies, regenerate the locks with
   `scripts/update_locks.sh` (needs `uv`); CI's `scripts/check_locks.py` refuses locks that drift
@@ -136,7 +138,7 @@ TLS; `.env.example` uses `development` so that plain HTTP on localhost works.
 ## Without containers
 
 ```bash
-pip install --constraint deploy/constraints.txt "axentra[server]"
+pip install --constraint deploy/constraints.txt -r requirements/tabrion.txt "axentra[server]"  # pip >= 25.0
 AXENTRA_CONFIG=/etc/axentra/axentra.toml axentra migrate          # as the owner role
 AXENTRA_CONFIG=/etc/axentra/axentra.toml axentra serve --host 0.0.0.0 --port 8080
 ```

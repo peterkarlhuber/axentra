@@ -203,7 +203,8 @@ jobs:
           python -m venv /tmp/client && /tmp/client/bin/pip install "./sdk/python[test]"
           ! /tmp/client/bin/python -c "import axentra" 2>/dev/null
           cd sdk/python && /tmp/client/bin/python -m pytest -q -p no:cacheprovider tests/unit
-      - run: pip install -e ".[server]" -e "./sdk/python[test]"
+      # TABRION MIG-AXE-3: Axentra requires Tabrion at runtime; requirements/tabrion.txt says where it comes from.
+      - run: pip install -r requirements/tabrion.txt -e ".[server]" -e "./sdk/python[test]"
       - name: Lint, types, generated sync client
         working-directory: sdk/python
         run: |
@@ -245,7 +246,8 @@ jobs:
           cache: npm
           cache-dependency-path: sdk/typescript/package-lock.json
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[server]" -e "./sdk/python[test]"
+      # TABRION MIG-AXE-3: Axentra requires Tabrion at runtime; requirements/tabrion.txt says where it comes from.
+      - run: pip install -r requirements/tabrion.txt -e ".[server]" -e "./sdk/python[test]"
       - run: npm ci --no-audit --no-fund
         working-directory: sdk/typescript
       - name: Start a PostgreSQL-backed server and run both SDK e2e suites
@@ -266,14 +268,17 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip build
       - run: python -m build
+      # TABRION MIG-AXE-3: Axentra requires Tabrion at runtime, which is not on a package index (VER-1, V-B0).
       - name: Install the core wheel without extras and import the library
         run: |
-          python -m venv /tmp/core && /tmp/core/bin/pip install dist/*.whl
+          python -m venv /tmp/core && /tmp/core/bin/python -m pip install -q --upgrade pip
+          /tmp/core/bin/pip install -r requirements/tabrion.txt dist/*.whl
           /tmp/core/bin/python -c "import axentra.platform, axentra.identity, axentra.tenancy; print('core ok')"
           ! /tmp/core/bin/python -c "import fastapi" 2>/dev/null
       - name: Install with the server extra (no Studio, no Nodestro, no orkexa)
         run: |
-          python -m venv /tmp/srv && /tmp/srv/bin/pip install "$(ls dist/*.whl)[server]"
+          python -m venv /tmp/srv && /tmp/srv/bin/python -m pip install -q --upgrade pip
+          /tmp/srv/bin/pip install -r requirements/tabrion.txt "$(ls dist/*.whl)[server]"
           /tmp/srv/bin/axentra --version
           /tmp/srv/bin/pip freeze | tee /tmp/freeze.txt
           ! grep -Ei "nodestro|orkexa|axentra-studio" /tmp/freeze.txt
@@ -361,7 +366,9 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-      - run: pip install -e ".[server,oidc,s3]" pip-audit==2.10.1 bandit
+      # TABRION MIG-AXE-3: requirements/tabrion.txt for the runtime dependency on Tabrion. pip-audit cannot audit
+      # Tabrion (not on PyPI) and reports it as skipped; its own CI audits it.
+      - run: pip install -r requirements/tabrion.txt -e ".[server,oidc,s3]" pip-audit==2.10.1 bandit
       - run: bandit -q -r src -c pyproject.toml
       # Known vulnerabilities in the installed dependencies (the pattern of nodestro-runtime's CI). Blocking: an
       # advisory that was reviewed and cannot be fixed yet goes into PIP_AUDIT_IGNORE (space-separated IDs, each

@@ -103,7 +103,8 @@ would start `ax.billing.create_checkout` instead.
 
 ```bash
 # From the repository root: a virtualenv with Axentra and the example.
-python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/pip install -e examples/taskboard
+python3.12 -m venv .venv && .venv/bin/pip install --upgrade "pip>=25.0"
+.venv/bin/pip install -r requirements/tabrion.txt -e ".[dev]" && .venv/bin/pip install -e examples/taskboard
 createdb taskboard
 export AXENTRA_CONFIG=examples/taskboard/taskboard.toml
 export AXENTRA__DATABASE__URL=postgresql://$USER@127.0.0.1:5432/taskboard   # development only

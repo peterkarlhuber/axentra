@@ -67,7 +67,7 @@ external identities, product invitations and permission declarations. Anything e
 ## Development
 
 ```bash
-pip install -e "../..[dev]" -e ".[test]"          # from sdk/python; the server is a TEST dependency
+pip install -r ../../requirements/tabrion.txt -e "../..[dev]" -e ".[test]"  # from sdk/python; the server is a TEST dependency
 python scripts/unasync.py                         # regenerate the sync client after editing _async/
 AXENTRA_TEST_DATABASE_URL=postgresql://postgres:pg@127.0.0.1:5432/postgres pytest
 ruff check src tests && mypy
