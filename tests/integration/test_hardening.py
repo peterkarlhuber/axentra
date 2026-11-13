@@ -306,6 +306,45 @@ def test_body_size_limit_returns_413_problem(ax_factory):
     assert r.status_code == 413
 
 
+def test_nul_characters_in_input_are_a_422_problem(world: World, caplog):
+    """B-04: a NUL reaches no query. It used to fail in the database driver with ``500 internal``."""
+    import logging
+
+    from fastapi.testclient import TestClient
+
+    caplog.set_level(logging.ERROR)
+    anon = TestClient(world.app, headers={"Origin": "http://studio.test"})
+    r = anon.post("/v1/auth/login/password", json={"email": "a\x00@example.com", "password": "x" * 12})
+    assert r.status_code == 422 and r.headers["content-type"] == "application/problem+json", r.text
+    assert r.json()["code"] == "validation_failed"
+    assert r.json()["detail"] == "text must not contain NUL characters"
+    # Also in a chunked JSON body, split inside the escape.
+    raw = b'{"email": "a\\u0000@example.com", "password": "xxxxxxxxxxxx"}'
+    r = anon.post(
+        "/v1/auth/login/password",
+        content=iter([raw[:15], raw[15:]]),
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 422 and r.json()["code"] == "validation_failed"
+    # An escaped backslash followed by the text "u0000" is no NUL.
+    r = anon.post("/v1/auth/login/password", json={"email": "a\\u0000@example.com", "password": "x" * 12})
+    assert r.status_code == 401
+    pid = world.admin.post("/v1/products", json={"slug": "crm", "name": "CRM"}).json()["id"]
+    tid = world.admin.post(f"/v1/products/{pid}/tenants", json={"slug": "acme", "name": "Acme"}).json()["id"]
+    base = f"/v1/products/{pid}/tenants/{tid}/records/items"
+    r = world.admin.post(base, json={"title": "nul \x00 inside"})
+    assert r.status_code == 422 and r.json()["code"] == "validation_failed"
+    assert world.admin.post(base, json={"title": "tab\tand\nnewline"}).status_code == 201
+    r = world.admin.get(f"/v1/products/{pid}%00/tenants")
+    assert r.status_code == 422 and r.json()["code"] == "validation_failed"
+    r = world.admin.get(f"/v1/products/{pid}/tenants", params={"cursor": "a\x00b"})
+    assert r.status_code == 422 and r.json()["code"] == "validation_failed"
+    # File contents may hold NUL bytes.
+    files = {"file": ("bin.dat", io.BytesIO(b"a\x00b"), "application/octet-stream")}
+    assert world.admin.post(f"/v1/products/{pid}/tenants/{tid}/files", files=files).status_code == 201
+    assert not [rec for rec in caplog.records if rec.levelno >= logging.ERROR]
+
+
 def test_rate_limit_per_credential_and_ip(ax_factory):
     ax = ax_factory(security={"rate_limit_per_minute": 3, "rate_limit_ip_per_minute": 8})
     app = create_app(axentra=ax, start=False)

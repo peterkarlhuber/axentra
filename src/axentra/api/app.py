@@ -115,6 +115,7 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
         TokenBuckets,
         has_own_body_limit,
     )
+    from axentra.api.nul_guard import NulInputMiddleware
 
     sec = ax.settings.security
     exempt = [
@@ -149,6 +150,8 @@ def _install_limits(app: FastAPI, ax: Axentra) -> None:
             session_cookie=lambda: session_cookie_name(ax),
             only=HEAVY_READ_PATHS,
         )
+    # Outermost of these: a NUL in path, query or JSON body is a 422 before any limit is charged (B-04).
+    app.add_middleware(NulInputMiddleware)
 
 
 def check_routes(app: FastAPI) -> int:
