@@ -295,6 +295,46 @@ def test_platform_user_is_not_linked_by_verified_email(make_world, role: str) ->
     assert b.get("/v1/auth/session").json()["user"]["id"] == uid
 
 
+def test_email_link_stops_working_when_the_user_gets_a_platform_role(make_world) -> None:  # type: ignore[no-untyped-def]
+    """I5 also for an older link: an identity linked by email does not reach the account once it is a platform user."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    b, r = w.login(subject="ops-sub", email="ops@example.com")  # linked by email while an ordinary user
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) == "explicit_link_required"
+    assert b.client.cookies.get(SESSION_COOKIE) is None
+    # A platform admin confirms the existing link; then it works.
+    r = w.admin.post(f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "ops-sub"})
+    assert r.status_code == 201, r.text
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+    # Confirming again, or linking it to another user, is a conflict.
+    assert (
+        w.admin.post(
+            f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "ops-sub"}
+        ).status_code
+        == 409
+    )
+    other = w.user("other@example.com")
+    assert (
+        w.admin.post(
+            f"/v1/users/{other}/identities", json={"provider": ISSUER, "subject": "ops-sub"}
+        ).status_code
+        == 409
+    )
+
+
+def test_signup_identity_keeps_working_after_promotion(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    b, r = w.login(subject="new-sub", email="new@example.com")  # creates the account
+    uid = b.get("/v1/auth/session").json()["user"]["id"]
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_viewer"}).status_code == 200
+    b, r = w.login(subject="new-sub", email="new@example.com")
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
 def test_bootstrap_admin_is_not_linked_by_verified_email(make_world) -> None:  # type: ignore[no-untyped-def]
     w = make_world()
     _, r = w.login(subject="admin-sub", email=ADMIN_EMAIL)

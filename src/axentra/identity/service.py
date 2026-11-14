@@ -78,6 +78,17 @@ def normalize_email(email: str) -> str:
     return f"{local}@{domain.lower()}"
 
 
+def _refuse_platform_email_link(provider: str) -> None:
+    """Owner decision I5: a link by verified email never reaches a user with a platform role."""
+    logger.warning(
+        "OIDC login refused: provider %s links a platform user by email; link it explicitly", provider
+    )
+    raise Forbidden(
+        "this account must be linked to the identity provider by a platform admin",
+        extra={"reason": "explicit_link_required"},
+    )
+
+
 class IdentityService:
     def __init__(self, db: Database, settings: Settings, audit: AuditLog) -> None:
         self.db = db
@@ -1031,11 +1042,21 @@ class IdentityService:
         """
         with self.db.transaction(DbScope.platform()) as tx:
             row = tx.one(
-                "SELECT user_id FROM axentra_user_identities WHERE provider = %s AND subject = %s",
+                "SELECT i.user_id, i.linked_by, pr.role AS platform_role FROM axentra_user_identities i"
+                " LEFT JOIN axentra_platform_roles pr ON pr.user_id = i.user_id"
+                " WHERE i.provider = %s AND i.subject = %s",
                 (provider, subject),
             )
             if row:
                 user_id: str = row["user_id"]
+                if (
+                    row["platform_role"]
+                    and row["linked_by"] in ("email", "unknown")
+                    and not link_platform_users_by_verified_email
+                ):
+                    # Linked by email (or before link methods were recorded) and the user has a platform
+                    # role now: the link counts only once a platform admin confirms it (I5).
+                    _refuse_platform_email_link(provider)
             else:
                 verified = bool(email and email_verified)
                 if verified:
@@ -1054,14 +1075,7 @@ class IdentityService:
                 how = "created"
                 if existing and link_by_verified_email:
                     if existing["platform_role"] and not link_platform_users_by_verified_email:
-                        logger.warning(
-                            "OIDC login refused: provider %s would link a platform user by email; link it explicitly",
-                            provider,
-                        )
-                        raise Forbidden(
-                            "this account must be linked to the identity provider by a platform admin",
-                            extra={"reason": "explicit_link_required"},
-                        )
+                        _refuse_platform_email_link(provider)
                     user_id = existing["id"]
                     how = "linked_by_email"
                 elif existing:
@@ -1085,9 +1099,16 @@ class IdentityService:
                 else:
                     raise Forbidden("no account exists for this login", extra={"reason": "signup_disabled"})
                 tx.execute(
-                    "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
-                    " VALUES (%s, %s, %s, %s, %s)",
-                    (new_id("uid"), user_id, provider, subject, email if verified else ""),
+                    "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email, linked_by)"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (
+                        new_id("uid"),
+                        user_id,
+                        provider,
+                        subject,
+                        email if verified else "",
+                        "email" if how == "linked_by_email" else "signup",
+                    ),
                 )
                 self.audit.record(
                     tx,
@@ -1145,8 +1166,8 @@ class IdentityService:
                 raise Conflict("this external identity is already linked")
             user_id = self.create_user(tx, email=user_email, name=name, email_verified=True)
             tx.execute(
-                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
-                " VALUES (%s, %s, %s, %s, %s)",
+                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email, linked_by)"
+                " VALUES (%s, %s, %s, %s, %s, 'explicit')",
                 (new_id("uid"), user_id, provider, subject, (email or "").strip()[:320]),
             )
             self.audit.record(
@@ -1162,19 +1183,25 @@ class IdentityService:
     def link_identity(self, principal: Principal, user_id: str, *, provider: str, subject: str) -> None:
         """Link an external identity to an existing user (for migrations and imports).
 
-        Refuses an identity that is already linked (to this or another user, ``409``) and an
-        unknown user (``404``). Platform admins (or a system principal) only; audited as
-        ``identity.external.link``."""
+        Refuses an identity that is linked to another user (``409``) and an unknown user (``404``).
+        For an identity that is already linked to this user by verified email (or from before link
+        methods were recorded), it confirms the link, which a user with a platform role needs to sign
+        in with it (I5); an explicitly linked one gives ``409``. Platform admins (or a system
+        principal) only; audited as ``identity.external.link``."""
         self._require_platform_admin(principal)
         self._check_identity(provider, subject)
         with self.db.transaction(DbScope.platform()) as tx:
             tx.one_or_404("SELECT id FROM axentra_users WHERE id = %s FOR UPDATE", (user_id,), what="user")
             inserted = tx.one(
-                "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES (%s, %s, %s, %s)"
-                " ON CONFLICT (provider, subject) DO NOTHING RETURNING id",
+                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, linked_by)"
+                " VALUES (%s, %s, %s, %s, 'explicit') ON CONFLICT (provider, subject) DO NOTHING RETURNING id",
                 (new_id("uid"), user_id, provider, subject),
             )
-            if inserted is None:
+            if inserted is None and not tx.one(
+                "UPDATE axentra_user_identities SET linked_by = 'explicit' WHERE provider = %s AND subject = %s"
+                " AND user_id = %s AND linked_by <> 'explicit' RETURNING id",
+                (provider, subject, user_id),
+            ):
                 raise Conflict("this external identity is already linked")
             self.audit.record(
                 tx,
