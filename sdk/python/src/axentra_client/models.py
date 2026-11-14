@@ -579,6 +579,7 @@ class WebhookEndpoint(AxentraModel):
     previous_secret_expires_at: datetime | None = None
     version: int
     created_by: str | None = None
+    creator_has_access: bool | None = None
     created_at: datetime
     updated_at: datetime
 

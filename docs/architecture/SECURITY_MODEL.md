@@ -466,6 +466,16 @@ Keys created in process by system callers (`created_by` is not a user or key id)
 The bound costs one query plus one authorization of the creator per authorized call (measured
 +0.6 to +1.9 ms p50 per request on a local instance).
 
+**Webhook endpoints follow their creator in the same way** (security assessment A-03). An endpoint
+delivers only while its creator (`created_by`) holds `webhooks:manage` in the product now: the
+fan-out plans no delivery for an endpoint whose creator was removed, demoted, disabled or (for a
+key) revoked, and a delivery planned before is not sent but ends `dead` with `last_error`
+`endpoint creator no longer has access` (also when redelivered). `GET /webhooks` and
+`GET /webhooks/{id}` show this as `creator_has_access: false`. Nothing is disabled or deleted:
+restoring the creator's access restores delivery, and an active operator can delete the endpoint
+and create it again. Endpoints created by platform admins keep working while they stay admins;
+endpoints created in process by system callers are not bounded.
+
 ## Secrets and the keyring
 
 - **Secret references.** Settings ending in `_ref` take `env:NAME` or `file:/path` (e.g. Docker or

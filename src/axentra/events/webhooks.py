@@ -56,6 +56,8 @@ SIGNATURE_HEADER = "Axentra-Signature"
 PING_TYPE = "axentra.ping"
 MAX_EVENT_TYPES = 50
 MAX_GRACE_SECONDS = 7 * 86400
+#: ``last_error`` of a delivery dropped because the endpoint's creator lost ``webhooks:manage``.
+CREATOR_LOST_ACCESS = "endpoint creator no longer has access"
 
 
 def webhook_retry_delay(attempt: int, events: EventsSettings, *, rng: random.Random | None = None) -> float:
@@ -229,8 +231,19 @@ class WebhookService:
             row = tx.one_or_404("SELECT * FROM axentra_webhook_endpoints WHERE id = %s", (wid,))
         return NewWebhookSecret(endpoint=_endpoint(row), secret=secret)
 
+    def _listed(self, row: Row, access: dict[str | None, bool] | None = None) -> WebhookEndpoint:
+        """:func:`_endpoint` with the creator's current access (:meth:`creator_has_access`);
+        ``access`` caches it per creator within one listing."""
+        access = {} if access is None else access
+        creator = row["created_by"]
+        if creator not in access:
+            access[creator] = self.creator_has_access(row["product_id"], creator)
+        ep = _endpoint(row)
+        ep.creator_has_access = access[creator]
+        return ep
+
     def get(self, principal: Principal, product_id: str, endpoint_id: str) -> WebhookEndpoint:
-        return _endpoint(self._load(principal, product_id, endpoint_id, "webhooks:read"))
+        return self._listed(self._load(principal, product_id, endpoint_id, "webhooks:read"))
 
     def list(
         self, principal: Principal, product_id: str, *, limit: int | None = None, cursor: str | None = None
@@ -243,7 +256,8 @@ class WebhookService:
                 "SELECT * FROM axentra_webhook_endpoints WHERE product_id = %s AND id > %s ORDER BY id LIMIT %s",
                 (product_id, after[0] if after else "", n + 1),
             )
-        items = [_endpoint(r) for r in rows[:n]]
+        access: dict[str | None, bool] = {}
+        items = [self._listed(r, access) for r in rows[:n]]
         return Page[WebhookEndpoint](
             items=items, next_cursor=encode_cursor([items[-1].id]) if len(rows) > n and items else None
         )
@@ -299,7 +313,7 @@ class WebhookService:
                 details={"fields": sorted(changes)},
             )
             out = tx.one_or_404("SELECT * FROM axentra_webhook_endpoints WHERE id = %s", (endpoint_id,))
-        return _endpoint(out)
+        return self._listed(out)
 
     def delete(
         self, principal: Principal, product_id: str, endpoint_id: str, *, if_match: int | None = None
@@ -486,6 +500,16 @@ class WebhookService:
 
     # -- fan-out and delivery (workers) --------------------------------------------------------
 
+    def creator_has_access(self, product_id: str, created_by: str | None) -> bool:
+        """Whether the endpoint's creator could still create it: ``webhooks:manage`` in the product,
+        held *now* (an API key creator is bounded by its own creator, see the authorizer). An
+        endpoint whose creator lost it (removed, demoted, disabled, revoked) delivers nothing, like
+        that creator's API keys. Endpoints created in process by a system caller are not bounded."""
+        creator = self.authz.actor_principal(created_by)
+        if creator is None:
+            return True
+        return self.authz.has(creator, "webhooks:manage", product_id)
+
     def _fan_out(self, tx: Tx, event: Event) -> None:
         if event.type.startswith("axentra."):
             return
@@ -494,8 +518,14 @@ class WebhookService:
             " AND (tenant_id IS NULL OR tenant_id = %s) ORDER BY id",
             (event.product_id, event.tenant_id),
         )
+        access: dict[str | None, bool] = {}
         for ep in rows:
             if not type_matches(event.type, ep["event_types"]):
+                continue
+            creator = ep["created_by"]
+            if creator not in access:
+                access[creator] = self.creator_has_access(event.product_id, creator)
+            if not access[creator]:
                 continue
             did = new_id("dlv")
             inserted = tx.one(
@@ -627,6 +657,10 @@ class WebhookService:
         if not ep["enabled"]:
             self._record(ctx.scope, delivery_id, None, "endpoint disabled", final=True)
             return {"skipped": "endpoint disabled"}
+        if not self.creator_has_access(ep["product_id"], ep["created_by"]):
+            # Queued before the creator lost access (or redelivered since): not sent.
+            self._record(ctx.scope, delivery_id, None, CREATOR_LOST_ACCESS, final=True)
+            return {"skipped": CREATOR_LOST_ACCESS}
         result, error = self._send(ep, delivery_id, d["payload"])
         ok = result is not None and 200 <= result.status < 300
         refused = error is not None and error.startswith("refused:")

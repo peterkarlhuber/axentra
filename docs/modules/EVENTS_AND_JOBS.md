@@ -205,6 +205,13 @@ Verify on the receiving side (Python helper: `axentra.events.verify_signature(se
 body)`). Compute the HMAC over `f"{t}.".encode() + raw_body`, compare it in constant time with any
 `v1` value, reject timestamps older than about 5 minutes, and deduplicate by event id.
 
+An endpoint delivers only while its creator still holds `webhooks:manage` in the product (like
+the creator's API keys, see `architecture/SECURITY_MODEL.md`): otherwise events are not fanned out
+to it, and a delivery planned before ends `dead` with `last_error` `endpoint creator no longer has
+access` without being sent. The endpoint shows `creator_has_access: false` in `GET` responses;
+restore the creator's access, or delete the endpoint and create it again as an active operator.
+Endpoints created in process (`Principal.system`) are not bounded.
+
 A 2xx response counts as success. Any other response, a timeout or a connection error is retried
 through the job queue, up to `webhook_max_attempts`. Then the delivery becomes `dead`.
 
@@ -302,7 +309,8 @@ Shapes (see `openapi/axentra-v1.json`):
 - `Event`: `id, product_id, tenant_id, type, data, idempotency_key, actor_kind, actor_id,
   request_id, occurred_at`.
 - `WebhookEndpoint`: `id, product_id, tenant_id, url, description, event_types, enabled, version,
-  has_previous_secret, previous_secret_expires_at, created_by, created_at, updated_at`. The secret
+  has_previous_secret, previous_secret_expires_at, created_by, creator_has_access, created_at,
+  updated_at`. `creator_has_access` is `null` in the create and rotate-secret responses. The secret
   is never returned here.
 - `Delivery`: `id, product_id, tenant_id, endpoint_id, event_id, event_type, status
   (pending|succeeded|failed|dead), attempts, response_code, response_body, duration_ms,
