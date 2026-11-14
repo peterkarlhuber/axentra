@@ -32,7 +32,7 @@ RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.
 
 FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS runtime
 LABEL org.opencontainers.image.title="Taskboard (Axentra demo)" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="LicenseRef-Proprietary"
 RUN groupadd --system --gid 10001 taskboard \
     && useradd --system --uid 10001 --gid taskboard --home-dir /var/lib/taskboard --create-home \
        --shell /usr/sbin/nologin taskboard \

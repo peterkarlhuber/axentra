@@ -46,7 +46,7 @@ FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915
 LABEL org.opencontainers.image.title="Axentra" \
       org.opencontainers.image.description="Modular SaaS backend foundation (HTTP API)" \
       org.opencontainers.image.source="https://github.com/peterkarlhuber/axentra" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="LicenseRef-Proprietary"
 RUN groupadd --system --gid 10001 axentra \
     && useradd --system --uid 10001 --gid axentra --home-dir /var/lib/axentra --create-home \
        --shell /usr/sbin/nologin axentra \
