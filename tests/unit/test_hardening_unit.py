@@ -160,13 +160,28 @@ def test_compose_env_templates() -> None:
     assert set(trial) - {"TASKBOARD_ORIGIN", "TASKBOARD_HTTP_PORT"} == set(production)
 
 
-@pytest.mark.parametrize("password", ["change-me-app", "change-me-owner", "CHANGE-ME", "replace-with-x"])
-def test_placeholder_database_password_is_refused_in_production(password: str, caplog) -> None:  # type: ignore[no-untyped-def]
-    """C-03: the template passwords of .env.example never reach a production database connection."""
+@pytest.mark.parametrize(
+    ("password", "dsn"),
+    [
+        ("change-me-app", "url"),
+        ("change-me-owner", "url"),
+        ("CHANGE-ME", "url"),
+        ("replace-with-x", "url"),
+        ("change%2Dme-app", "url"),
+        ("change-me-app", "keyvalue"),
+        ("'change-me app'", "keyvalue"),
+    ],
+)
+def test_placeholder_database_password_is_refused_in_production(password: str, dsn: str, caplog) -> None:  # type: ignore[no-untyped-def]
+    """C-03: the template passwords of .env.example never reach a production database connection, also in a
+    percent-encoded URL or a libpq key/value string."""
     from axentra.core.errors import ConfigurationError
     from axentra.platform import _database_url, _migration_url
 
-    url = f"postgresql://axentra_app:{password}@db:5432/axentra"
+    if dsn == "url":
+        url = f"postgresql://axentra_app:{password}@db:5432/axentra"
+    else:
+        url = f"host=db port=5432 dbname=axentra user=axentra_app password={password}"
     environ = {"AXENTRA__DATABASE__URL": url, "AXENTRA__SECURITY__PUBLIC_URL": "https://api.example.com"}
     production = load_settings(None, environ={**environ, "AXENTRA__ENVIRONMENT": "production"})
     with pytest.raises(ConfigurationError, match="placeholder password"):
@@ -184,4 +199,4 @@ def test_placeholder_database_password_is_refused_in_production(password: str, c
             "AXENTRA__DATABASE__URL": url.replace(password, "9f3a1c"),
         },
     )
-    assert _database_url(ok).endswith("@db:5432/axentra")
+    assert _database_url(ok) == url.replace(password, "9f3a1c")

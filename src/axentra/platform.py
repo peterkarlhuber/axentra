@@ -20,7 +20,6 @@ from collections.abc import Callable, Sequence
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import unquote, urlsplit
 
 from axentra.access.api_keys import ApiKeyService
 from axentra.access.authorizer import Authorizer
@@ -59,12 +58,16 @@ _PLACEHOLDER_PASSWORDS = ("change-me", "replace-with")
 
 
 def _check_placeholder_password(settings: Settings, url: str, setting: str) -> str:
-    """Refuse a template password in ``url`` in production, warn elsewhere (C-03)."""
+    """Refuse a template password in ``url`` (a URL or a libpq ``key=value`` string) in production, warn
+    elsewhere (C-03). A string libpq cannot parse is left to the connection attempt."""
+    from psycopg import Error as PsycopgError
+    from psycopg.conninfo import conninfo_to_dict
+
     try:
-        password = urlsplit(url).password or ""
-    except ValueError:
+        password = str(conninfo_to_dict(url).get("password") or "")
+    except PsycopgError:
         return url
-    if unquote(password).lower().startswith(_PLACEHOLDER_PASSWORDS):
+    if password.lower().startswith(_PLACEHOLDER_PASSWORDS):
         if settings.is_production:
             raise ConfigurationError(
                 f"{setting} uses the placeholder password of the template; set a generated password"
