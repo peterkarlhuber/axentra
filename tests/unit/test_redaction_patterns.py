@@ -32,6 +32,8 @@ SECRETS = [
         "M4c-_" * 9,
     ),
     ("next=%2Fv1%2Ffiles%2Fdownload%2Fd1%2Ek1%2EeyJmIjoiZmlsXzEifQ%2E" + "M4c" * 15, "M4c" * 15),
+    ("next=%252Fv1%252Ffiles%252Fdownload%252Fd1.k1.eyJmIjoiZmlsXzEifQ." + "M4d" * 15, "M4d" * 15),
+    ("x_d1.k1.eyJmIjoiZmlsXzEifQ." + "M4e" * 15, "M4e" * 15),
 ]
 
 HARMLESS = [

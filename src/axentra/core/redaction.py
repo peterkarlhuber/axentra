@@ -52,10 +52,9 @@ _PATTERNS = [
     re.compile(f"ax(?:inv|pinv|pwr|emv|setup){_enc('_')}{_URLSAFE_CHAR}{{16,}}"),
     re.compile(f"whsec{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra webhook signing secrets
     # Signed download tokens ``d1.<kid>.<payload>.<mac>`` (storage/tokens.py), such as the last segment of
-    # ``/v1/files/download/<token>`` in a request line.
-    re.compile(
-        f"(?:(?<![A-Za-z0-9_-])|(?<=%[0-9A-Fa-f]{{2}}))d1{_enc('.')}[A-Za-z0-9]+{_enc('.')}{_URLSAFE_CHAR}{{8,}}{_enc('.')}{_URLSAFE_CHAR}{{16,}}"
-    ),
+    # ``/v1/files/download/<token>`` in a request line. No left boundary: the token may follow any character
+    # (``x_d1...``, or ``%252Fd1...`` when the URL is encoded twice).
+    re.compile(f"d1{_enc('.')}[A-Za-z0-9]+{_enc('.')}{_URLSAFE_CHAR}{{8,}}{_enc('.')}{_URLSAFE_CHAR}{{16,}}"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWTs
 ]
