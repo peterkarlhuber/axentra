@@ -47,7 +47,7 @@ Code: `src/axentra/storage/` (service, backends, safety, tokens, models), HTTP l
 | `s3_access_key_ref`, `s3_secret_key_ref` | | secret references (`env:`/`file:`); empty: boto3's default credential chain |
 | `s3_prefix` | `""` | key prefix inside the bucket |
 | `s3_server_side_encryption` | none | `AES256` or `aws:kms` |
-| `s3_presigned_downloads` | `false` | `download-url` returns a presigned S3 URL instead of an Axentra URL |
+| `s3_presigned_downloads` | `false` | `download-url` returns a presigned S3 URL (SigV4) instead of an Axentra URL |
 | `max_file_bytes` | 50 MiB | hard per-file limit, enforced while streaming |
 | `allowed_content_types` | `[]` | allow-list (`image/png`, `image/*`); empty: everything except the blocked types |
 | `store_blocked_as_inert` | `false` | installation default of the content-type policy: store blocked (executable/HTML/SVG/script) uploads as inert `application/octet-stream` instead of refusing them; products override it (see "Content-type policy") |
@@ -56,7 +56,10 @@ Code: `src/axentra/storage/` (service, backends, safety, tokens, models), HTTP l
 | `pending_upload_timeout_seconds` | 3600 | after this, a still-pending upload counts as abandoned |
 | `deleted_object_retention_hours` | 0 | keep the object of a deleted or expired file this long before the purge removes it (0: delete at once); set it for consistent backups, see operations/BACKUP_RESTORE.md |
 
-The S3 backend needs the optional extra: `pip install 'axentra[s3]'` (boto3 is imported lazily).
+The S3 backend needs the optional extra: `pip install 'axentra[s3]'` (boto3 is imported lazily). Its
+client signs requests and presigned URLs with SigV4 (also for S3-compatible stores such as SeaweedFS,
+Garage or MinIO), connects within 5 s, waits at most 30 s per read and makes at most 3 attempts per
+request (constants in `axentra.storage.backends`).
 
 ## Library usage
 
@@ -131,7 +134,13 @@ Sorting: `created_at`, `name`, `size`, prefixed with `-` for descending (default
 Errors: 401 unauthenticated, 403 missing permission, 404 foreign scope / unknown / deleted / expired
 file and every invalid download token (expired, tampered, wrong scope, deleted file, suspended
 tenant: no oracle), 412 `If-Match` mismatch, 413 `payload_too_large`, 415 `unsupported_media_type`,
-422 validation, 429 `quota_exceeded`.
+422 validation, 429 `quota_exceeded`, 503 `service_unavailable` with `Retry-After` when the object
+store is unreachable, times out or answers 5xx/`SlowDown` (upload, download, signed download; the
+answer names no endpoint, bucket or credential, the cause is logged as a warning and the request as an
+error). A failed upload leaves no visible file; a delete during an outage still answers `204`, and the
+purge removes the object later. Presigned download URLs need no request to the store and are still
+issued during an outage. An outage after a download has started streaming ends the connection
+(the status line is already sent).
 
 Why `collections:read` for product usage: `product:read` is also granted to plain tenant members
 (so they can pick a tenant), which would reveal other tenants' usage. `collections:read` is held
