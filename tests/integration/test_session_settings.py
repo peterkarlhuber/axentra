@@ -16,6 +16,8 @@ import psycopg
 from psycopg.rows import tuple_row
 from psycopg_pool import ConnectionPool
 import pytest
+from tabrion.errors import ConfigurationError
+from tabrion.postgres import SessionSettings
 
 from axentra.config.settings import DatabaseSettings
 from axentra.data import database as database_module
@@ -47,6 +49,52 @@ def reference_show_all(url: str) -> dict[str, str]:
         conn.execute("SELECT set_config('statement_timeout', %s, false)", ("30000",))
         conn.commit()
         return show_all(conn)
+
+
+def test_the_passed_session_fields_are_pinned() -> None:
+    """AX-I-2 (review L-1 of #76): Axentra passes only these fields to ``configure``; never ``TimeZone``,
+    ``lock_timeout``, ``search_path`` or ``transaction_timeout``."""
+    default = Database("postgresql://axentra@127.0.0.1/none")._session
+    assert default == SessionSettings(
+        statement_timeout_ms=30_000,
+        lock_timeout_ms=None,
+        idle_in_transaction_timeout_ms=None,
+        transaction_timeout_ms=None,
+        application_name=None,
+        search_path=None,
+        timezone=None,
+    )
+    given = Database(
+        "postgresql://axentra@127.0.0.1/none",
+        statement_timeout_ms=0,
+        idle_in_transaction_timeout_ms=60_000,
+        application_name="axentra-test",
+    )._session
+    assert {
+        k: getattr(given, k) for k in SessionSettings.__dataclass_fields__ if getattr(given, k) is not None
+    } == {
+        "statement_timeout_ms": 0,
+        "idle_in_transaction_timeout_ms": 60_000,
+        "application_name": "axentra-test",
+    }
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"statement_timeout_ms": 2_147_483_648},
+        {"idle_in_transaction_timeout_ms": -1},
+        {"application_name": "caf\u00e9"},
+    ],
+)
+def test_invalid_session_settings_fail_when_the_database_is_built(kwargs: dict[str, Any]) -> None:
+    with pytest.raises(ConfigurationError, match="invalid_setting"):
+        Database("postgresql://axentra@127.0.0.1/none", **kwargs)
+
+
+def test_statement_timeout_is_refused_at_config_load_above_int_max() -> None:
+    with pytest.raises(ValueError):
+        DatabaseSettings(statement_timeout_ms=2_147_483_648)
 
 
 def test_new_options_are_off_by_default() -> None:

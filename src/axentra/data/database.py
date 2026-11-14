@@ -31,7 +31,7 @@ import psycopg
 from psycopg import pq
 from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import ConnectionPool
-from tabrion.postgres import SessionSettings, configure
+from tabrion.postgres import SessionSettings, configure, session_configurator
 
 from axentra.core.errors import ConfigurationError, NotFound
 
@@ -236,6 +236,8 @@ class Database:
             self.pool = pool
             self.url = url or str(getattr(pool, "conninfo", "") or "")
             return
+        # Validates the session settings now (tabrion.errors.ConfigurationError), not when the pool connects.
+        session_configurator(self._session)
         self.owns_pool = True
         self.url = url
         self.pool = ConnectionPool(

@@ -82,7 +82,7 @@ class DatabaseSettings(_Section):
     """Also apply migrations published by installed packages in the ``axentra.migrations`` entry point group."""
     pool_min: int = Field(1, ge=0)
     pool_max: int = Field(10, ge=1)
-    statement_timeout_ms: int = Field(30_000, ge=0)
+    statement_timeout_ms: int = Field(30_000, ge=0, le=2_147_483_647)
     idle_in_transaction_timeout_ms: int = Field(0, ge=0, le=2_147_483_647)
     """``idle_in_transaction_session_timeout`` of each connection of Axentra's own pool (``0``: not set, the
     server's setting). Ends a session that keeps a transaction open without a statement for longer."""

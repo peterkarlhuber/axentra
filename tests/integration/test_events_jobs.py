@@ -13,6 +13,7 @@ import threading
 import time
 
 import psycopg
+from psycopg.conninfo import conninfo_to_dict
 import pytest
 
 from axentra.core.context import Principal
@@ -405,19 +406,66 @@ def test_leader_loss_re_elects_and_never_has_two_leaders(fast_ax, caplog):
         b.release()
 
 
+def _lock_backends(admin, url_dbname, exclude=()):
+    """Backends of the test database whose last statement tried an advisory lock (the leader lock's connections)."""
+    rows = admin.execute(
+        "SELECT pid FROM pg_stat_activity WHERE datname = %s AND query LIKE %s AND pid <> pg_backend_pid()",
+        (url_dbname, "%pg_try_advisory_lock%"),
+    ).fetchall()
+    return {pid for (pid,) in rows} - set(exclude)
+
+
+def _settled(read, want, tries=50):
+    for _ in range(tries):  # a closed connection leaves pg_stat_activity shortly after the client hangs up
+        got = read()
+        if got == want:
+            return got
+        time.sleep(0.1)
+    return got
+
+
 def test_leader_lock_holds_no_connection_while_not_leading(fast_ax):
-    """As before TABRION MIG-AXE-5: a process that is not the leader keeps no lock connection open."""
+    """As before TABRION MIG-AXE-5: a process that is not the leader keeps no lock connection open (seen on the
+    server, in ``pg_stat_activity``), and the leader's connection is closed on release."""
     ax = fast_ax
+    dbname = conninfo_to_dict(ax.db.url)["dbname"]
     a, b = LeaderLock(ax.db.url, key=4244), LeaderLock(ax.db.url, key=4244)
     try:
-        assert a.acquire() is True
-        assert b.acquire() is False
-        assert b._lock is None and b._conn is None
-        a.release()
-        assert a._lock is None
+        with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
+            assert a.acquire() is True
+            leader = a._conn.info.backend_pid
+            assert b.acquire() is False
+            assert _settled(lambda: _lock_backends(admin, dbname), {leader}) == {leader}
+            a.release()
+            assert _settled(lambda: _lock_backends(admin, dbname), set()) == set()
     finally:
         a.release()
         b.release()
+
+
+def test_leader_re_elects_in_the_same_tick_when_the_lock_is_free(fast_ax, caplog):
+    """A leader whose connection was lost, with no other process waiting, is the leader again in the same
+    ``acquire()`` call (on a new connection), after logging the loss."""
+    ax = fast_ax
+    a = LeaderLock(ax.db.url, key=4245)
+    try:
+        assert a.acquire() is True
+        lost_pid = a._conn.info.backend_pid
+        with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
+            admin.execute("SELECT pg_terminate_backend(%s)", (lost_pid,))
+            gone = _settled(
+                lambda: admin.execute(
+                    "SELECT NOT EXISTS (SELECT FROM pg_stat_activity WHERE pid = %s)", (lost_pid,)
+                ).fetchone()[0],
+                True,
+            )
+            assert gone is True
+        with caplog.at_level("WARNING", logger="axentra.events.schedules"):
+            assert a.acquire() is True
+        assert "scheduler leader connection lost; re-electing" in caplog.text
+        assert a.held and a._conn.info.backend_pid != lost_pid
+    finally:
+        a.release()
 
 
 def test_cron_schedule_and_validation(fast_ax):

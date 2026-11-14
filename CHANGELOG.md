@@ -29,6 +29,9 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   `database.application_name` (default empty) for the connections of Axentra's own pool; both are not set by
   default, so the session of a pool connection is unchanged. The pool now sets its session with
   `tabrion.postgres.configure`; a pool borrowed with `Database.on_pool` is still never configured.
+- Changed (TABRION MIG-AXE-4): `database.statement_timeout_ms` above 2147483647 (PostgreSQL's limit) is refused when
+  the configuration is loaded, and invalid session settings fail when a `Database` is built
+  (`tabrion.errors.ConfigurationError`) instead of when the pool connects.
 - Changed (TABRION MIG-AXE-5): the scheduler leader lock (`LeaderLock`) runs on `tabrion.postgres.SessionLock`, and
   the migration lock waits with `tabrion.postgres.wait_advisory_lock`. Keys, polling and the connections used are
   unchanged.
