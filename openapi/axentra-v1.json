@@ -8196,6 +8196,18 @@
             ],
             "title": "Created By"
           },
+          "creator_has_access": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`true` while the endpoint's creator holds `webhooks:manage` in the product, `false` once it lost it (the endpoint then receives no deliveries, like that creator's API keys; recreate it as an active operator). `null` where not computed (the response of creating or rotating a secret)",
+            "title": "Creator Has Access"
+          },
           "description": {
             "title": "Description",
             "type": "string"

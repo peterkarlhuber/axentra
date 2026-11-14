@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import re
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -65,3 +68,166 @@ def test_load_settings_is_exported_from_the_package():
     assert axentra.Settings.__name__ == "Settings"
     with pytest.raises(AttributeError):
         axentra.nope  # noqa: B018
+
+
+BAD_EMAILS = [
+    "victim@x.test\r\nBcc:evil@evil.test",
+    "victim@x.test\nBcc:evil@evil.test",
+    "a@x.test,b@evil.test",
+    "a@x.test;b@evil.test",
+    "Name <a@x.test>",
+    '"a"@x.test',
+    "a(comment)@x.test",
+    "a\tb@x.test",
+    "a b@x.test",
+    "a\x00@x.test",
+    "a\u2028@x.test",
+    "a\u200b@x.test",
+]
+
+
+@pytest.mark.parametrize("email", BAD_EMAILS)
+def test_normalize_email_refuses_header_separators_and_control_characters(email: str) -> None:
+    """B-05: such an address was stored, but no mail could ever be sent to it."""
+    from axentra.core.errors import ValidationFailed
+    from axentra.identity.service import normalize_email
+
+    with pytest.raises(ValidationFailed):
+        normalize_email(email)
+
+
+@pytest.mark.parametrize(
+    ("email", "normalized"),
+    [
+        (" Ops@Example.COM ", "Ops@example.com"),
+        ("o'brien+tag@x.test", "o'brien+tag@x.test"),
+        ("jörg@bücher.de", "jörg@bücher.de"),
+    ],
+)
+def test_normalize_email_keeps_ordinary_addresses(email: str, normalized: str) -> None:
+    from axentra.identity.service import normalize_email
+
+    assert normalize_email(email) == normalized
+
+
+@pytest.mark.parametrize(
+    "url", ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080", "http://api.localhost"]
+)
+def test_unset_environment_is_fine_for_a_local_trial(url: str) -> None:
+    settings = load_settings(None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url})
+    assert settings.environment == "development"
+    settings.validate_security()
+
+
+@pytest.mark.parametrize("url", ["https://api.example.com", "http://10.0.0.5:8080", "http://0.0.0.0:8080"])
+def test_unset_environment_with_a_reachable_public_url_refuses_to_start(url: str) -> None:
+    """B-03: a forgotten ``environment`` no longer silently runs a reachable installation in development mode."""
+    from axentra.core.errors import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="environment is not set"):
+        load_settings(None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url}).validate_security()
+    # Set explicitly, development stays possible (for example a trial on a LAN host).
+    load_settings(
+        None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url, "AXENTRA__ENVIRONMENT": "development"}
+    ).validate_security()
+
+
+COMPOSE_DIR = Path(__file__).resolve().parents[2] / "deploy" / "compose"
+
+
+@pytest.mark.parametrize("name", ["single", "multi", "taskboard"])
+def test_compose_publishes_on_loopback_by_default(name: str) -> None:
+    """C-03: a quick start never publishes the API on every host interface."""
+    text = (COMPOSE_DIR / f"docker-compose.{name}.yml").read_text(encoding="utf-8")
+    ports = re.findall(r'^\s+- "([^"]*:\d+)"\s*$', text, re.MULTILINE)
+    assert ports
+    assert all(p.startswith("${AXENTRA_BIND_ADDRESS:-127.0.0.1}:") for p in ports), ports
+
+
+def _env_template(name: str) -> dict[str, str]:
+    lines = (COMPOSE_DIR / name).read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+
+
+def test_compose_env_templates() -> None:
+    trial = _env_template(".env.example")
+    assert trial["AXENTRA_ENVIRONMENT"] == "development" and trial["AXENTRA_BIND_ADDRESS"] == "127.0.0.1"
+    assert "LOCAL TRIAL" in (COMPOSE_DIR / ".env.example").read_text(encoding="utf-8")
+    production = _env_template(".env.production.example")
+    assert production["AXENTRA_ENVIRONMENT"] == "production"
+    assert production["AXENTRA_PUBLIC_URL"].startswith("https://")
+    assert production["AXENTRA_BIND_ADDRESS"] == "127.0.0.1"
+    assert set(trial) - {"TASKBOARD_ORIGIN", "TASKBOARD_HTTP_PORT"} == set(production)
+
+
+@pytest.mark.parametrize(
+    ("password", "dsn"),
+    [
+        ("change-me-app", "url"),
+        ("change-me-owner", "url"),
+        ("CHANGE-ME", "url"),
+        ("replace-with-x", "url"),
+        ("change%2Dme-app", "url"),
+        ("change-me-app", "keyvalue"),
+        ("'change-me app'", "keyvalue"),
+    ],
+)
+def test_placeholder_database_password_is_refused_in_production(password: str, dsn: str, caplog) -> None:  # type: ignore[no-untyped-def]
+    """C-03: the template passwords of .env.example never reach a production database connection, also in a
+    percent-encoded URL or a libpq key/value string."""
+    from axentra.core.errors import ConfigurationError
+    from axentra.platform import _database_url, _migration_url
+
+    if dsn == "url":
+        url = f"postgresql://axentra_app:{password}@db:5432/axentra"
+    else:
+        url = f"host=db port=5432 dbname=axentra user=axentra_app password={password}"
+    environ = {"AXENTRA__DATABASE__URL": url, "AXENTRA__SECURITY__PUBLIC_URL": "https://api.example.com"}
+    production = load_settings(None, environ={**environ, "AXENTRA__ENVIRONMENT": "production"})
+    with pytest.raises(ConfigurationError, match="placeholder password"):
+        _database_url(production)
+    with pytest.raises(ConfigurationError, match="placeholder password"):
+        _migration_url(production)
+    development = load_settings(None, environ={**environ, "AXENTRA__ENVIRONMENT": "development"})
+    assert _database_url(development) == url
+    assert "placeholder password" in caplog.text
+    ok = load_settings(
+        None,
+        environ={
+            **environ,
+            "AXENTRA__ENVIRONMENT": "production",
+            "AXENTRA__DATABASE__URL": url.replace(password, "9f3a1c"),
+        },
+    )
+    assert _database_url(ok) == url.replace(password, "9f3a1c")
+
+
+@pytest.mark.parametrize(
+    ("body", "has_nul"),
+    [
+        (b'{"a": "x"}', False),
+        (b'{"a": "\\u0000"}', True),
+        (b'{"a": "\\\\\\u0000"}', True),
+        (b'{"a": "\\\\u0000"}', False),
+        (b'{"a": "\\\\\\\\u0000"}', False),
+        ('{"a": "x"}'.encode("utf-16"), True),
+        ('{"a": "x"}'.encode("utf-32-le"), True),
+        (b'{"a": "\x00"}', True),
+    ],
+)
+def test_json_nul_detection(body: bytes, has_nul: bool) -> None:
+    from axentra.api.nul_guard import _json_body_has_nul
+
+    assert _json_body_has_nul(body) is has_nul
+
+
+def test_json_nul_detection_is_fast_without_an_escape() -> None:
+    """B-04 review: the regex runs only when the body holds the text ``\\u0000``."""
+    from unittest import mock
+
+    from axentra.api import nul_guard
+
+    body = b'"' + b"\\\\" * (1 << 20) + b'"'
+    with mock.patch.object(nul_guard, "_JSON_NUL") as regex:
+        assert nul_guard._json_body_has_nul(body) is False
+    regex.search.assert_not_called()
