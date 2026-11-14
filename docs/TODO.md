@@ -52,6 +52,7 @@ review, no penetration test).
 
 | Pri | Area | Item |
 |---|---|---|
+| P1 | security | **Pre-release assessment 2026-11-13** (AI-assisted, on `1dbd98f`; report `axentra-sicherheitsbewertung.md` in the project files): findings A-01 (Medium), A-02, A-03, B-01, C-03, LD-01 (Low) and B-02..B-05 (Info) are fixed in the change that adds this row (see CHANGELOG), each with a regression test that failed before the fix; C-02 (dependency confusion of `tabrion`) is handled by TABRION DC-1. Still open: the **independent human security review** (status NOT COMPLETED — HUMAN REVIEW REQUIRED), an AI delta review of the merged state, LD-01 in Stripe test mode (does a SEPA subscription checkout send `payment_status = unpaid`?), and the owner's decision on recommendation I5 (turn OIDC linking by verified email off by default for platform admins; today an accepted residual risk) |
 | P1 | tests | **Needs external review.** Provider adapters never exercised against live services: Stripe (only `httpx.MockTransport`), S3 (only moto; no MinIO/AWS), SMTP (only an in-process `aiosmtpd`), OIDC (only an in-process stub IdP). Needs a sandbox run without paid calls, reviewed together with the first production-like deployment (see "Release and verification") |
 
 ## Release and verification
