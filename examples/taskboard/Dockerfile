@@ -26,8 +26,8 @@ COPY examples/taskboard ./examples/taskboard
 RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.txt \
     && /opt/build/bin/pip wheel --require-hashes --no-deps --no-build-isolation -w /tmp/wheels \
        -r deploy/locks/tabrion.txt \
-    && /opt/taskboard/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/tabrion-*.whl)" \
-    && /opt/taskboard/bin/pip install --constraint deploy/constraints.txt "/src[server]" \
+    && /opt/taskboard/bin/pip install --constraint deploy/constraints.txt \
+       "$(ls /tmp/wheels/tabrion-*.whl)" "/src[server]" \
     && /opt/taskboard/bin/pip install --no-deps ./examples/taskboard \
     && /opt/taskboard/bin/pip check \
     && /opt/taskboard/bin/python -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d' \
