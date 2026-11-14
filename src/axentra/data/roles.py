@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import psycopg
+from psycopg import pq
 from psycopg.rows import tuple_row
 from tabrion.errors import RoleMissing, RoleUnsafe, UsageError
 from tabrion.postgres import grant_runtime_role as _tabrion_grant_runtime_role
@@ -96,6 +97,31 @@ def _report(found: Any) -> RoleReport:
     )
 
 
+def _read(conn: psycopg.Connection[Any], query: str, params: tuple[Any, ...]) -> tuple[Any, ...] | None:
+    """One row of a read-only query; rolls back only the implicit transaction it opened itself (T-NOTX)."""
+    opened = not conn.autocommit and conn.info.transaction_status == pq.TransactionStatus.IDLE
+    try:
+        with conn.cursor(row_factory=tuple_row) as cur:
+            cur.execute(query, params)
+            return cur.fetchone()
+    finally:
+        if opened:
+            conn.rollback()
+
+
+def _operator_error(role: str, schema: str | None, exc: Exception) -> ConfigurationError:
+    """``ValueError`` and ``UsageError`` of Tabrion as an operator error (review of #87)."""
+    if isinstance(exc, UsageError):
+        if exc.code == "postgres.schema_missing":
+            return ConfigurationError(f"the schema {schema!r} does not exist")
+        if exc.code == "postgres.nested_transaction":
+            return ConfigurationError(
+                "grant_runtime_role needs a connection that is not inside a transaction (commit or roll back first)"
+            )
+        return ConfigurationError(f"cannot use the database role {role!r}: {exc.code}")
+    return ConfigurationError(f"cannot use the database role {role!r}: {exc}")
+
+
 def _missing(role: str) -> ConfigurationError:
     return ConfigurationError(f"the database role {role!r} does not exist")
 
@@ -108,6 +134,8 @@ def inspect_role(conn: psycopg.Connection[Any], role: str, schema: str | None = 
         return _report(_tabrion_inspect_role(conn, role, schema=schema))
     except RoleMissing:
         raise _missing(role) from None
+    except (UsageError, ValueError) as exc:
+        raise _operator_error(role, schema, exc) from None
 
 
 def _refusal(
@@ -117,11 +145,9 @@ def _refusal(
     before = inspect_role(conn, role, schema)
     if role == before.owner:
         return ConfigurationError(f"{role!r} is the connecting (owner) role; name the separate runtime role")
-    with conn.cursor(row_factory=tuple_row) as cur:
-        cur.execute("SELECT rolsuper, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = %s", (role,))
-        direct = cur.fetchone() or (False, False)
-    if not conn.autocommit:
-        conn.rollback()
+    direct = _read(
+        conn, "SELECT rolsuper, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = %s", (role,)
+    ) or (False, False)
     texts: list[str] = []
     if "superuser" in reasons:
         texts.append("is a superuser" if direct[0] else "can become a superuser (role membership)")
@@ -136,6 +162,34 @@ def _refusal(
     return ConfigurationError(
         f"the runtime role {role!r} {' and '.join(texts)}: row-level security would not apply to it"
     )
+
+
+def _writes_all_data(conn: psycopg.Connection[Any], role: str) -> bool:
+    """Whether ``role`` is a member of the predefined role ``pg_write_all_data`` (PostgreSQL 14 or later)."""
+    row = _read(
+        conn,
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles r, pg_catalog.pg_roles w"
+        " WHERE r.rolname = %s AND w.rolname = 'pg_write_all_data'"
+        " AND pg_catalog.pg_has_role(r.oid, w.oid, 'MEMBER'))",
+        (role,),
+    )
+    return bool(row and row[0])
+
+
+def _writable_protected_tables(conn: psycopg.Connection[Any], role: str, schema: str) -> list[str]:
+    """The protected tables of ``schema`` that ``role`` may still change after the grant (re-check, review of #87)."""
+    found: list[str] = []
+    for table in PROTECTED_TABLES:
+        row = _read(
+            conn,
+            "SELECT c.oid IS NOT NULL AND pg_catalog.has_table_privilege(%s, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')"
+            " FROM (SELECT 1) one LEFT JOIN pg_catalog.pg_class c ON c.relname = %s"
+            " AND c.relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = %s)",
+            (role, table, schema),
+        )
+        if row and row[0]:
+            found.append(table)
+    return found
 
 
 def grant_runtime_role(
@@ -153,13 +207,23 @@ def grant_runtime_role(
 
     Refused (:class:`~axentra.core.errors.ConfigurationError`, nothing granted) when ``role`` is the
     connecting role itself, a superuser, has ``BYPASSRLS``, or owns tables of the schema, or can become such a role
-    (role membership) or the owner of the schema: row-level security would not protect anything for it.
+    (role membership) or the owner of the schema: row-level security would not protect anything for it. Also
+    refused when ``role`` is a member of ``pg_write_all_data`` (it could write the migration bookkeeping), and,
+    after the grant, when it can still write a protected table. Invalid names (longer than 63 bytes), a missing
+    schema and a connection inside a transaction are refused as ``ConfigurationError`` too.
     """
     own = isinstance(url_or_conn, str)
     conn = psycopg.connect(url_or_conn, autocommit=True) if isinstance(url_or_conn, str) else url_or_conn
     try:
         try:
-            return _report(
+            before = _tabrion_inspect_role(conn, role, schema=schema)
+            if before.restricted and role != before.owner and _writes_all_data(conn, role):
+                # Refused before anything is granted: the REVOKE on the bookkeeping would not hold.
+                raise ConfigurationError(
+                    f"the runtime role {role!r} is a member of pg_write_all_data (role membership): it could write"
+                    " the migration bookkeeping (axentra_schema_migrations); use a role without it"
+                )
+            report = _report(
                 _tabrion_grant_runtime_role(conn, role, schema=schema, protected_tables=PROTECTED_TABLES)
             )
         except RoleMissing:
@@ -167,10 +231,16 @@ def grant_runtime_role(
         except RoleUnsafe as exc:
             reasons = str((exc.details or {}).get("reasons", "")).split(",")
             raise _refusal(conn, role, schema, reasons) from None
-        except UsageError as exc:
-            if exc.code == "postgres.schema_missing":
-                raise ConfigurationError(f"the schema {schema!r} does not exist") from None
-            raise
+        except (UsageError, ValueError) as exc:
+            raise _operator_error(role, schema, exc) from None
+        writable = _writable_protected_tables(conn, role, report.schema)
+        if writable:
+            raise ConfigurationError(
+                f"the runtime role {role!r} can still write {', '.join(writable)} after the grant (a privilege"
+                " granted elsewhere, or through role membership): revoke it; the migration bookkeeping must stay"
+                " read-only for the runtime role"
+            )
+        return report
     finally:
         if own:
             conn.close()

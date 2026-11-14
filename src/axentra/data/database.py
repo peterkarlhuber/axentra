@@ -385,7 +385,8 @@ class Database:
         info = self.role_info()
         if (info["superuser"] or info["bypass_rls"]) and not allow_superuser:
             raise ConfigurationError(
-                "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated "
+                "the database role bypasses row-level security (superuser or BYPASSRLS, also through role "
+                "membership; see `axentra db inspect-role`); use a dedicated "
                 "application role or set database.allow_superuser = true for local development only"
             )
         if info["table_owner"] and not (allow_table_owner or allow_superuser):

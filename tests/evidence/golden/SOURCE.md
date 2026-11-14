@@ -22,8 +22,9 @@ Changes since then, each rewritten with the tool and explained in its pull reque
 - TABRION MIG-AXE-6: `roles.json` (`--only roles write`). Tabrion's role check counts every role a role can become
   (contract I-20; Peter's decision to adopt it, as for MIG-NOD-5). A superuser is a member of every role, also of the
   `BYPASSRLS` ones, so the `superuser` variant now reports `bypass_rls: true` in `inspect_role`, `role_info` and
-  `check_role` (4 lines). Every decision, error class and message is unchanged; `catalog.json` (the grants) is
-  identical.
+  `check_role` (4 lines). Every decision and error class is unchanged; `catalog.json` (the grants) is identical. The
+  security review of #87 extended the `check_role` refusal of a superuser or `BYPASSRLS` role with "also through role
+  membership; see `axentra db inspect-role`" (6 lines of `message`).
 
 A pull request that changes a snapshot on purpose (a new migration, or a step whose plan allows the change) rewrites
 the file with the tool and says why; the diff is part of the review. A rollback (revert pull request) is verified by

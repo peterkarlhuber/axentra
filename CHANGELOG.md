@@ -33,7 +33,11 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   owner (new messages "can become ... (role membership)"), and `Database.check_role` / `Axentra.start()` refuse an
   application role that is a member of a `BYPASSRLS` or superuser role. `inspect_role` and `role_info` report
   `bypass_rls: true` for a superuser. A connection handed to `grant_runtime_role` must not be inside a transaction,
-  and a schema that does not exist is refused with "the schema ... does not exist".
+  and a schema that does not exist is refused with "the schema ... does not exist" (these and names longer than 63
+  bytes are `ConfigurationError`s). A member of `pg_write_all_data` is refused (it could write
+  `axentra_schema_migrations`), and the grant fails when the runtime role can still write the migration bookkeeping
+  afterwards. The start check's message for a superuser or `BYPASSRLS` role now mentions role membership and
+  `axentra db inspect-role`.
 - Security (TABRION MIG-AXE-3, finding B-06-1): database errors are redacted by Tabrion's `tabrion.errors`
   (`safe_message`, `DbErrorRedactionFilter`) instead of Axentra's local fix (TABRION MIG-AXE-0). Axentra keeps the
   process-wide installation (`install_db_error_redaction`) and the helpers for stored and exported texts
