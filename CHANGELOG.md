@@ -25,6 +25,16 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Fixed (TABRION QA-7): `scripts/check_tabrion_api.py --surface` no longer reports a `__x__` name such as
+  `tabrion.postgres.SessionSettings.__dataclass_fields__` (`tests/integration/test_session_settings.py`) as missing
+  from Tabrion's `docs/api/surface.json`. Such names are public (the `__all__` check already skipped them) and have
+  no entry of their own: `--surface` now checks the name before the first `__x__` part (here the stable
+  `tabrion.postgres.SessionSettings`). New test `test_the_surface_comparison_checks_dunder_names_as_their_owner`;
+  the pinned SHA-256 of the shared script is updated, and its docstring names tabrion-studio's copy as the
+  source (the copies in tabrion-studio, orkexa and nodestro-runtime still have the old version). CI: the lint job runs
+  `python scripts/check_tabrion_api.py --check-export docs/api-consumers.md --surface <surface.json>` against the
+  snapshot of the Tabrion commit pinned in `requirements/tabrion.txt`. Tooling only.
+
 - Security (TABRION DC-AX-1 follow-up, 2026-11-14): `scripts/check_tabrion_source.py` is nodestro-studio's new copy
   (#198, SHA-256 `f1edfc71b5da4986547abe0824833fb73bba532cb5e6a00e202c9ff317747456`): the poisoned `tabrion` is 0.2.99
   (was 0.1.0, outside Axentra's `>=0.2,<0.3`), so an install by range would pick it over the pinned 0.2.1. The test

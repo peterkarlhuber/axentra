@@ -47,6 +47,15 @@ jobs:
       - run: lint-imports
       - name: OpenAPI contract is current
         run: axentra openapi export --check
+      # TABRION QA-21 (AC-7) / QA-7: only public Tabrion names, docs/api-consumers.md lists them, and each is a stable
+      # (S) name of the frozen API snapshot (docs/api/surface.json, K10) of the Tabrion commit that
+      # requirements/tabrion.txt pins.
+      - name: Tabrion API (public and stable names, export current)
+        run: |
+          sha=$(sed -n 's|^tabrion @ git+https://github.com/peterkarlhuber/tabrion.git@\([0-9a-f]\{40\}\)$|\1|p' requirements/tabrion.txt)
+          test -n "$sha"
+          curl -fsSL "https://raw.githubusercontent.com/peterkarlhuber/tabrion/$sha/docs/api/surface.json" -o "$RUNNER_TEMP/surface.json"
+          python scripts/check_tabrion_api.py --check-export docs/api-consumers.md --surface "$RUNNER_TEMP/surface.json"
 
   test:
     name: Tests (Python ${{ matrix.python }}, PostgreSQL ${{ matrix.postgres }})
