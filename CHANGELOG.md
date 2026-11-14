@@ -25,6 +25,15 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Security (QA finding 2026-11-14): `/v1/docs` loads Swagger UI pinned to `swagger-ui-dist@5.34.1` with Subresource
+  Integrity (`sha384`, checked against the npm package) and `crossorigin`, instead of the moving `@5` without
+  integrity, and no longer loads a favicon from fastapi.tiangolo.com. Production keeps `/v1/docs` disabled by
+  default (`security.api_docs`).
+- Security (TABRION 0.2.x, delta review N-2/H-2): Axentra requires `tabrion[postgres]>=0.2,<0.3` and pins the final
+  Tabrion 0.2.1 (`af0458d`, `requirements/tabrion.txt`, `deploy/locks/tabrion.txt`). Its log redaction removes a
+  lone `LINE n:` statement echo of pre-formatted database error text, and a server text label in the middle of a
+  line now starts a removed part. A value in the primary text (`invalid input syntax ...: "x"`) still stays
+  (residual R-1, OBSERVABILITY.md). Regression test `test_h2_statement_echo_without_another_label_is_removed`.
 - Security (container image, release-candidate hardening): the runtime image contains no `pip` any more (its vendored
   urllib3, msgpack and setuptools gave 5 HIGH scan findings; `pip check` still runs in the build stage), the
   `python:3.13-slim` base moves to the current upstream digest (apt CVE-2026-109518), and the runtime stage installs

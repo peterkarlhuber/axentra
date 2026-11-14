@@ -20,7 +20,7 @@ uv venv .venv -p 3.12 && VIRTUAL_ENV=$PWD/.venv uv pip install -r requirements/t
 ### Tabrion
 
 Axentra names [Tabrion](https://github.com/peterkarlhuber/tabrion) only by a version range in `pyproject.toml`
-(for example `tabrion[testing,postgres]>=0.1,<0.2`), never by a direct URL. Tabrion is not on a package index, so
+(for example `tabrion[testing,postgres]>=0.2,<0.3`), never by a direct URL. Tabrion is not on a package index, so
 `requirements/tabrion.txt` says where the version comes from: one pin on the commit SHA of a final Tabrion release
 (TABRION VER-1). Always install it in the same command as Axentra, with `-r` (not `-c`) and pip 25.0 or newer
 (the supported minimum by policy, plan 06 section 6.4; older pip is not tested and constraint files with a direct
@@ -28,7 +28,7 @@ URL fail); CI runs with pip 25.0 and the current pip. Without it pip looks for T
 PyPI and fails. `tests/unit/test_tabrion_requirements.py` checks the file (one pin, full SHA of a final release) and
 the ranges (no direct URL, no pre-release specifier). A Tabrion update changes the pin and, for a new minor, the
 ranges, after Axentra's CI is green against it. Since TABRION MIG-AXE-3 Axentra requires
-`tabrion[postgres]>=0.1,<0.2` at runtime too (database error redaction, `tabrion.errors`), so every install needs
+`tabrion[postgres]>=0.2,<0.3` at runtime too (database error redaction, `tabrion.errors`), so every install needs
 `-r requirements/tabrion.txt`; the container image takes the same commit from `deploy/locks/tabrion.txt`
 (`scripts/update_locks.sh` regenerates both locks). Never install Axentra without the pin file: Tabrion is not on
 PyPI, and a project of that name there would be someone else's (dependency confusion, TABRION DC-AX-1).

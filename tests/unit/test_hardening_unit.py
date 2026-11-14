@@ -27,6 +27,24 @@ def test_api_docs_public_outside_production():
     assert "/v1/docs" in _paths(app)
 
 
+def test_api_docs_load_a_pinned_swagger_ui_with_integrity():
+    """QA finding 2026-11-14: /v1/docs loaded ``swagger-ui-dist@5`` (a moving major version) without SRI."""
+    from axentra.api import app as app_module
+
+    app = create_app(load_settings(None, environ={}, environment="test", mode="multi"), start=False)
+    page = TestClient(app).get("/v1/docs").text
+    assert "swagger-ui-dist@5/" not in page and "fastapi.tiangolo.com" not in page
+    assert re.fullmatch(r"\d+\.\d+\.\d+", app_module.SWAGGER_UI_VERSION)
+    for url, sri in (
+        (app_module.SWAGGER_UI_JS, app_module.SWAGGER_UI_JS_SRI),
+        (app_module.SWAGGER_UI_CSS, app_module.SWAGGER_UI_CSS_SRI),
+    ):
+        assert f"swagger-ui-dist@{app_module.SWAGGER_UI_VERSION}/" in url
+        assert f'"{url}" integrity="{sri}" crossorigin="anonymous"' in page
+    tags = re.findall(r"<(?:script|link)[^>]*(?:src|href)=\"https?://[^>]*>", page)
+    assert len(tags) == 2 and all("integrity=" in tag for tag in tags)
+
+
 @pytest.mark.parametrize("override", [None, "disabled"])
 def test_api_docs_disabled_in_production_by_default(tmp_path, override):
     keyfile = tmp_path / "keys"

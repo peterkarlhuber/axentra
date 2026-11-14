@@ -174,12 +174,52 @@ def check_routes(app: FastAPI) -> int:
     return checked
 
 
+#: Swagger UI for ``/v1/docs``, pinned to one release with Subresource Integrity, so a changed or compromised CDN
+#: file is refused by the browser. The hashes are those of the files in the npm package (``dist.integrity``
+#: ``sha512-VSr8fXfI93obYaQicLJbLUKGRxDojj/SfRJDDLCioGTUBj4BK/Nj4eE9jCeCAnJxVLi7iS+08PbiZLyrQKBkJQ==``); to update,
+#: change the version and recompute both with ``openssl dgst -sha384 -binary <file> | base64``.
+SWAGGER_UI_VERSION = "5.34.1"
+SWAGGER_UI_JS = f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}/swagger-ui-bundle.js"
+SWAGGER_UI_JS_SRI = "sha384-XFYN47VzPiDY6qPtxYKg0nqUeW/upo20xf1j2SUE7gT/i35FJB4cuS/71Iegzk8Z"
+SWAGGER_UI_CSS = f"https://cdn.jsdelivr.net/npm/swagger-ui-dist@{SWAGGER_UI_VERSION}/swagger-ui.css"
+SWAGGER_UI_CSS_SRI = "sha384-4c3vsE5f+trhFyHrFrLM1fFGUn531NIaC7dcqEWIJdoRQJ5CkJbSuSCwXLpaS1KF"
+
+
+def _swagger_ui_page(openapi_url: str, title: str) -> str:
+    """FastAPI's Swagger UI page with the pinned files, ``integrity`` and ``crossorigin``, and no external favicon."""
+    from fastapi.openapi.docs import get_swagger_ui_html
+
+    html = bytes(
+        get_swagger_ui_html(
+            openapi_url=openapi_url,
+            title=title,
+            swagger_js_url=SWAGGER_UI_JS,
+            swagger_css_url=SWAGGER_UI_CSS,
+            swagger_favicon_url="data:,",
+        ).body
+    ).decode()
+    replacements = {
+        f'<script src="{SWAGGER_UI_JS}">': (
+            f'<script src="{SWAGGER_UI_JS}" integrity="{SWAGGER_UI_JS_SRI}" crossorigin="anonymous"'
+            ' referrerpolicy="no-referrer">'
+        ),
+        f'href="{SWAGGER_UI_CSS}">': (
+            f'href="{SWAGGER_UI_CSS}" integrity="{SWAGGER_UI_CSS_SRI}" crossorigin="anonymous"'
+            ' referrerpolicy="no-referrer">'
+        ),
+    }
+    for old, new in replacements.items():
+        if html.count(old) != 1:  # a FastAPI change of the template must not silently drop the pin
+            raise RuntimeError(f"unexpected Swagger UI template: {old!r} not found exactly once")
+        html = html.replace(old, new)
+    return html
+
+
 def _install_api_docs(app: FastAPI, mode: str) -> None:
     """``/v1/openapi.json`` and ``/v1/docs`` per ``security.api_docs`` (public/authenticated/disabled)."""
     if mode == "disabled":
         return
     from fastapi import Depends
-    from fastapi.openapi.docs import get_swagger_ui_html
     from fastapi.responses import HTMLResponse, JSONResponse
 
     deps = [Depends(resolve_principal)] if mode == "authenticated" else []
@@ -190,7 +230,7 @@ def _install_api_docs(app: FastAPI, mode: str) -> None:
 
     @app.get("/v1/docs", include_in_schema=False, dependencies=deps)
     def swagger_ui() -> HTMLResponse:
-        return get_swagger_ui_html(openapi_url="/v1/openapi.json", title="Axentra API")
+        return HTMLResponse(_swagger_ui_page("/v1/openapi.json", "Axentra API"))
 
 
 def create_app(

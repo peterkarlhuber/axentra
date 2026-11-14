@@ -635,3 +635,24 @@ def test_asyncio_default_exception_handler_logs_through_the_filter(caplog: pytes
     text = "\n".join(caplog.text.splitlines())
     assert "Task exception was never retrieved" in text and "unique violation (SQLSTATE 23505)" in text
     assert SECRET not in text and "DETAIL" not in text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # psycopg's text of a 22P02 error, formatted before it was logged (no DETAIL/HINT/CONTEXT label).
+        "invalid input syntax for type integer: \"x\"\nLINE 1: select 'CANARY-line'::int\n               ^",
+        # The same inside a repr: the line break is the two characters backslash and n.
+        repr(RuntimeError("invalid input syntax for type integer: \"x\"\nLINE 1: select 'CANARY-line'::int")),
+    ],
+)
+def test_h2_statement_echo_without_another_label_is_removed(text: str) -> None:
+    """Delta review N-2 / H-2: Tabrion 0.2.1 (22fa7ad) removes a lone ``LINE n:`` statement echo. A value in the
+    primary text (``"x"`` here) stays: label-based removal cannot see it (residual R-1, OBSERVABILITY.md)."""
+    out = db_errors.strip_server_text(text)
+    assert "CANARY-line" not in out
+    assert out.startswith(text[:30])
+    record = logging.LogRecord("t", logging.ERROR, __file__, 1, "job failed: %s", (text,), None)
+    assert DbErrorRedactionFilter().filter(record)
+    assert "CANARY-line" not in record.getMessage()
+    assert "CANARY-line" not in db_errors.safe_error_text(RuntimeError(text))
