@@ -291,14 +291,25 @@ class WebhookService:
             if if_match is not None and row["version"] != if_match:
                 raise PreconditionFailed("the webhook was changed by someone else")
             merged = {k: changes.get(k, row[k]) for k in allowed}
+            # Deliveries follow the endpoint's ``created_by`` (:meth:`creator_has_access`). A caller
+            # who changes where or what is delivered (url, event types) or turns a disabled endpoint
+            # on takes that place, so the endpoint stops when the editor loses access.
+            acting = row["created_by"]
+            if (
+                merged["url"] != row["url"]
+                or merged["event_types"] != row["event_types"]  # both sorted by _check_types
+                or (bool(merged["enabled"]) and not row["enabled"])
+            ):
+                acting = principal.actor.id
             tx.execute(
                 "UPDATE axentra_webhook_endpoints SET url = %s, event_types = %s, description = %s, enabled = %s,"
-                " version = version + 1, updated_at = now() WHERE id = %s",
+                " created_by = %s, version = version + 1, updated_at = now() WHERE id = %s",
                 (
                     merged["url"],
                     merged["event_types"],
                     merged["description"],
                     bool(merged["enabled"]),
+                    acting,
                     endpoint_id,
                 ),
             )
@@ -310,7 +321,12 @@ class WebhookService:
                 target_id=endpoint_id,
                 product_id=product_id,
                 tenant_id=row["tenant_id"],
-                details={"fields": sorted(changes)},
+                details={"fields": sorted(changes)}
+                | (
+                    {"created_by": {"from": row["created_by"], "to": acting}}
+                    if acting != row["created_by"]
+                    else {}
+                ),
             )
             out = tx.one_or_404("SELECT * FROM axentra_webhook_endpoints WHERE id = %s", (endpoint_id,))
         return self._listed(out)

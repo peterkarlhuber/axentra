@@ -471,7 +471,10 @@ delivers only while its creator (`created_by`) holds `webhooks:manage` in the pr
 fan-out plans no delivery for an endpoint whose creator was removed, demoted, disabled or (for a
 key) revoked, and a delivery planned before is not sent but ends `dead` with `last_error`
 `endpoint creator no longer has access` (also when redelivered). `GET /webhooks` and
-`GET /webhooks/{id}` show this as `creator_has_access: false`. Nothing is disabled or deleted:
+`GET /webhooks/{id}` show this as `creator_has_access: false`. A caller who changes an endpoint's `url` or
+`event_types`, or turns a disabled endpoint on, becomes its `created_by` (audited as
+`events.webhook.update` with `created_by` from/to), so redirecting someone else's endpoint does
+not outlive the editor's own access. Nothing is disabled or deleted:
 restoring the creator's access restores delivery, and an active operator can delete the endpoint
 and create it again. Endpoints created by platform admins keep working while they stay admins;
 endpoints created in process by system callers are not bounded.

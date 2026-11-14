@@ -132,3 +132,30 @@ def test_active_and_system_creators_keep_delivering(lworld: World, receiver: Rec
     assert [d["status"] for d in _deliveries(w, pid, system_ep.id)] == ["succeeded"]
     assert _ok(w.admin.get(f"/v1/products/{pid}/webhooks/{system_ep.id}"), 200)["creator_has_access"] is True
     assert len(receiver.requests) == 2
+
+
+def test_editor_who_redirects_an_endpoint_becomes_its_creator(lworld: World, receiver: Receiver) -> None:
+    w = lworld
+    pid, tid, uid, pa = _setup(w)
+    wid = _hook(w.admin, pid, "https://owner.invalid/hook")
+    # Changing only the description keeps the creator.
+    s = _ok(pa.patch(f"/v1/products/{pid}/webhooks/{wid}", json={"description": "notes"}), 200)
+    assert s["created_by"] != uid
+    # Redirecting the endpoint makes the editor its creator, so its removal stops the deliveries.
+    s = _ok(pa.patch(f"/v1/products/{pid}/webhooks/{wid}", json={"url": receiver.url}), 200)
+    assert s["created_by"] == uid
+    _ok(w.admin.delete(f"/v1/products/{pid}/members/{uid}"), 204)
+    _publish(w, pid, tid)
+    _drain(w)
+    assert _deliveries(w, pid, wid) == [] and receiver.requests == []
+
+
+def test_editor_who_widens_event_types_or_enables_becomes_its_creator(lworld: World) -> None:
+    w = lworld
+    pid, _, uid, pa = _setup(w)
+    base = {"url": "https://owner.invalid/hook", "event_types": ["invoice.*"]}
+    for change in ({"event_types": ["*"]}, {"enabled": True}):
+        body = base | ({"enabled": False} if "enabled" in change else {})
+        wid = _ok(w.admin.post(f"/v1/products/{pid}/webhooks", json=body))["endpoint"]["id"]
+        s = _ok(pa.patch(f"/v1/products/{pid}/webhooks/{wid}", json=change), 200)
+        assert s["created_by"] == uid, change

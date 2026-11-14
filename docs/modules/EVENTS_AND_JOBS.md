@@ -210,7 +210,10 @@ the creator's API keys, see `architecture/SECURITY_MODEL.md`): otherwise events 
 to it, and a delivery planned before ends `dead` with `last_error` `endpoint creator no longer has
 access` without being sent. The endpoint shows `creator_has_access: false` in `GET` responses;
 restore the creator's access, or delete the endpoint and create it again as an active operator.
-Endpoints created in process (`Principal.system`) are not bounded.
+Endpoints created in process (`Principal.system`) are not bounded. The "creator" is whoever last
+decided where and what the endpoint delivers: a `PATCH` that changes `url` or `event_types`, or
+enables a disabled endpoint, makes the caller `created_by` (audited with `created_by` from/to);
+changing only the description or disabling it keeps `created_by`.
 
 A 2xx response counts as success. Any other response, a timeout or a connection error is retried
 through the job queue, up to `webhook_max_attempts`. Then the delivery becomes `dead`.
