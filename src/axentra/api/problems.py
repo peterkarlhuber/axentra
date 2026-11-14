@@ -37,6 +37,7 @@ _STATUS_CODES = {
     409: "conflict",
     413: "payload_too_large",
     415: "unsupported_media_type",
+    422: "validation_failed",
     429: "rate_limited",
 }
 

@@ -5476,6 +5476,11 @@ export interface components {
             created_at: string;
             /** Created By */
             created_by: string | null;
+            /**
+             * Creator Has Access
+             * @description `true` while the endpoint's creator holds `webhooks:manage` in the product, `false` once it lost it (the endpoint then receives no deliveries, like that creator's API keys; recreate it as an active operator). `null` where not computed (the response of creating or rotating a secret)
+             */
+            creator_has_access?: boolean | null;
             /** Description */
             description: string;
             /** Enabled */

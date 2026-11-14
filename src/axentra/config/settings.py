@@ -17,6 +17,7 @@ configuration (missing keys, wildcard origins, plain HTTP cookies, a superuser d
 from __future__ import annotations
 
 from enum import StrEnum
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -397,8 +398,22 @@ class SearchSettings(_Section):
     """Write an audit event for every index upsert/delete (without document content)."""
 
 
+def is_loopback_url(url: str) -> bool:
+    """Whether ``url`` points at this machine only (``localhost``, ``*.localhost``, ``127.0.0.0/8``, ``::1``)."""
+    host = (urlsplit(url).hostname or "").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 class Settings(_Section):
     environment: Environment = Environment.DEVELOPMENT
+    """``development`` when not set, which relaxes the production checks. Without an explicit value the
+    installation must also have a loopback ``security.public_url`` (a local trial); anything reachable from
+    elsewhere refuses to start until ``environment`` is set (B-03)."""
     mode: DeploymentMode = DeploymentMode.SINGLE
     modules: list[str] = Field(default_factory=lambda: list(MODULES))
     product: ProductSettings = Field(default_factory=ProductSettings)
@@ -476,6 +491,11 @@ class Settings(_Section):
         ``Axentra(..., keyring=...)``, so ``security.master_keys_ref`` is not required (inline
         ``security.master_keys`` stays refused in production)."""
         problems: list[str] = []
+        if "environment" not in self.model_fields_set and not is_loopback_url(self.security.public_url):
+            problems.append(
+                f"environment is not set and security.public_url ({self.security.public_url}) is not a loopback"
+                ' address: set environment = "production" (or "development" explicitly for a trial installation)'
+            )
         if self.is_production:
             if not self.security.public_url.startswith("https://"):
                 problems.append("security.public_url must use https in production")

@@ -680,3 +680,62 @@ class _CliAx:
 
     def close(self) -> None:
         return None
+
+
+@pytest.mark.parametrize("fmt", ["json", "text"])
+def test_signed_download_token_never_in_request_or_access_log(world, capsys, fmt):
+    """B-01: a download through a real uvicorn server with its access log on, logged as ``configure_logging``
+    sets up: neither Axentra's request log nor uvicorn's access log carries the token."""
+    import logging
+    import socket
+    import threading
+
+    import httpx
+    import uvicorn
+
+    from axentra.audit.logging import configure_logging
+
+    names = ["uvicorn", "uvicorn.error", "uvicorn.access", "axentra.http", ""]
+    saved = {
+        n: (lg.handlers[:], lg.filters[:], lg.level, lg.propagate, lg.disabled)
+        for n in names
+        for lg in [logging.getLogger(n)]
+    }
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    f = _upload(world.admin, pid, tid, b"confidential", name="s.txt").json()
+    u = world.admin.post(f"{_files(pid, tid)}/{f['id']}/download-url", json={"ttl_seconds": 60}).json()
+    token = u["path"].rsplit("/", 1)[1]
+    try:
+        configure_logging("INFO", fmt)
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        # uvicorn's own logging configuration (access log on) replaces the handlers, not the filter.
+        server = uvicorn.Server(uvicorn.Config(world.app, host="127.0.0.1", port=port, lifespan="off"))
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 10
+            while not server.started:
+                assert time.monotonic() < deadline, "uvicorn did not start"
+                time.sleep(0.05)
+            d = httpx.get(f"http://127.0.0.1:{port}{u['path']}", timeout=10)
+            assert d.status_code == 200 and d.content == b"confidential"
+        finally:
+            server.should_exit = True
+            thread.join(10)
+    finally:
+        for name, (handlers, filters, level, propagate, disabled) in saved.items():
+            lg = logging.getLogger(name)
+            lg.handlers[:], lg.filters[:] = handlers, filters
+            lg.setLevel(level)
+            lg.propagate, lg.disabled = propagate, disabled
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    access = [line for line in out.splitlines() if "/v1/files/download/" in line]
+    # One line from Axentra's request log, one from uvicorn's access log.
+    assert len(access) >= 2, out
+    assert all("/v1/files/download/[redacted]" in line for line in access), access
+    assert token not in out
+    assert token.split(".")[3] not in out
