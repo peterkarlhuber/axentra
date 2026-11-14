@@ -1004,6 +1004,7 @@ class IdentityService:
         allow_signup: bool,
         allowed_domains: list[str],
         link_by_verified_email: bool = True,
+        link_platform_users_by_verified_email: bool = False,
         allow_signup_without_email: bool = False,
         ip: str | None = None,
         request_id: str | None = None,
@@ -1014,6 +1015,11 @@ class IdentityService:
         - With a verified email and ``link_by_verified_email`` (default), an existing user with
           that email is linked. Otherwise a new user is created when ``allow_signup`` is set or an
           open invitation exists for the email.
+        - An existing user with a platform role is linked that way only with
+          ``link_platform_users_by_verified_email`` (off by default, decision I5); otherwise ``403
+          explicit_link_required``: a platform admin links the identity explicitly
+          (:meth:`link_identity`), so a provider that is wrong about an address cannot take over a
+          platform account.
         - With ``link_by_verified_email=False``, an unknown identity is never linked to an existing
           user. A new user is created (``allow_signup`` or an invitation); if another user already
           has the email, the new user is created *without* an email address (only
@@ -1047,6 +1053,15 @@ class IdentityService:
                 user_email: str | None = email if verified else None
                 how = "created"
                 if existing and link_by_verified_email:
+                    if existing["platform_role"] and not link_platform_users_by_verified_email:
+                        logger.warning(
+                            "OIDC login refused: provider %s would link a platform user by email; link it explicitly",
+                            provider,
+                        )
+                        raise Forbidden(
+                            "this account must be linked to the identity provider by a platform admin",
+                            extra={"reason": "explicit_link_required"},
+                        )
                     user_id = existing["id"]
                     how = "linked_by_email"
                 elif existing:

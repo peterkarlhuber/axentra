@@ -187,7 +187,12 @@ cannot make Axentra read or buffer more (MUP-ONA VB-3).
 - A known (issuer, subject) logs in as its user (even if the email changed at the provider).
 - Otherwise the email is used only when the ID token says `email_verified: true` (the boolean,
   not the string). A verified email of an existing user links the identity to that user
-  (`link_by_verified_email = true`, the default).
+  (`link_by_verified_email = true`, the default). **Not for platform users:** when the existing
+  user has a platform role (`platform_admin` or `platform_viewer`), the login is refused with
+  `explicit_link_required` and nothing is linked or created (owner decision I5, 2026-11-14). A platform
+  admin links the identity explicitly (`POST /v1/users/{user_id}/identities` with the issuer and
+  subject); the next login then succeeds. `link_platform_users_by_verified_email = true` restores the
+  old behavior for a provider.
 - With `link_by_verified_email = false`, an unknown identity is **never** linked to an existing
   user by email. It gets a new user: with the address when it is free, or **without an address**
   when another user already has it (needs `allow_signup`; otherwise `signup_disabled`). The
@@ -242,6 +247,7 @@ on the API origin while `login_page` is an absolute URL elsewhere. Codes:
 | `email_not_verified` | a verified email is needed (new identity, or `allowed_email_domains`) |
 | `domain_not_allowed` | the email domain is not in `allowed_email_domains` |
 | `signup_disabled` | no account and no open invitation, `allow_signup = false` |
+| `explicit_link_required` | the verified email belongs to a platform user, whom only an explicit link connects (I5) |
 | `account_disabled` | the user is disabled |
 | `rate_limited` | too many login starts from this IP (6 x `login_rate_per_minute` per minute) |
 | `invitation_requires_post` | the `GET` start got an `invitation`; send it in the body of the `POST` start |

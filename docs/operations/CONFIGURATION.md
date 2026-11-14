@@ -140,6 +140,9 @@ value is set at once from the environment: `AXENTRA__OIDC='[{"id": "corp", ...}]
 | `scopes` | `["openid", "email", "profile"]` | Requested scopes |
 | `allow_signup` | `false` | Create unknown users on first login; otherwise only existing or invited users |
 | `allowed_email_domains` | `[]` | Restrict logins to these email domains (empty: any) |
+| `link_by_verified_email` | `true` | Link an unknown identity to the existing user with the same verified email |
+| `link_platform_users_by_verified_email` | `false` | Also do that when the existing user has a platform role (I5); off: `explicit_link_required`, link explicitly |
+| `allow_signup_without_email` | `false` | With `allow_signup`: create a user without an address when no verified email is sent |
 
 ## Sections for modules in development
 

@@ -181,6 +181,11 @@ class OidcProviderSettings(_Section):
     """Link an unknown identity to the existing user with the same verified email (account
     linking across providers). ``false``: never link by email; a new user is created instead
     (without an email address when the address belongs to another user; needs ``allow_signup``)."""
+    link_platform_users_by_verified_email: bool = False
+    """Also link an unknown identity by verified email when the existing user has a platform role
+    (``platform_admin`` or ``platform_viewer``). Off by default (owner decision I5, 2026-11-14): such a
+    login is refused with ``explicit_link_required``, and a platform admin links the identity explicitly
+    (``POST /v1/users/{user_id}/identities``). Only matters while ``link_by_verified_email`` is on."""
     allow_signup_without_email: bool = False
     """Together with ``allow_signup``: create a user without an email address for an unknown
     identity whose provider sends no verified email (otherwise ``email_not_verified``)."""

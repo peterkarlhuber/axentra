@@ -4,6 +4,25 @@ Axentra runs as a stateless HTTP process (`axentra serve`) in front of PostgreSQ
 covers the container image, the compose stacks and the production checklist. Settings:
 [CONFIGURATION](CONFIGURATION.md). Mode choice: [DEPLOYMENT_MODELS](../architecture/DEPLOYMENT_MODELS.md).
 
+## Supported platforms and install paths
+
+Owner decision of 2026-11-14 for the first public release:
+
+- **Officially supported: Linux on amd64 (x86_64), running the container image** built from this repository
+  (`Dockerfile`, with the compose stacks below or an equivalent orchestrator). Releases are tested on this
+  platform only: CI and the release-candidate runs use Linux amd64, Python 3.11 to 3.13 and PostgreSQL 15 to 17.
+- Not officially supported (may work, not tested for releases): other CPU architectures (arm64), running
+  Axentra directly on macOS or Windows, and installs outside the container image. The local QA kit of Axentra
+  Studio for Windows and macOS is a test tool, not a supported deployment.
+- **Supported install paths are the pinned ones only** (decision on C-02, dependency confusion): the container
+  image, which builds Tabrion offline from the hash-pinned archive of `deploy/locks/tabrion.txt`, and pip
+  installs that always add `-r requirements/tabrion.txt` (the Tabrion commit pin) from the same Axentra commit.
+  **Residual risk (accepted by the owner):** Tabrion is not on a package index and its name there is not
+  reserved. A `pip install` of Axentra *without* `-r requirements/tabrion.txt` (for example
+  `pip install -e .` or `pip install axentra @ git+...` alone) asks the configured index for `tabrion`, and
+  whoever registers that name there would run code at install time. Such installs are unsupported; CI's
+  "Install with a poisoned index" job proves that the supported paths never ask an index for `tabrion`.
+
 ## Components
 
 | Component | Notes |

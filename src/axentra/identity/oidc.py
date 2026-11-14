@@ -76,6 +76,8 @@ ERROR_CODES = frozenset(
         "email_not_verified",
         "domain_not_allowed",
         "signup_disabled",
+        # the verified email belongs to a platform user, who is linked only explicitly (I5)
+        "explicit_link_required",
         "account_disabled",
         "rate_limited",
         # an invitation on the GET start, which has no Origin check: send it with the POST start
@@ -738,6 +740,7 @@ class OidcService:
                 allow_signup=allow_signup,
                 allowed_domains=allowed_domains,
                 link_by_verified_email=provider.link_by_verified_email,
+                link_platform_users_by_verified_email=provider.link_platform_users_by_verified_email,
                 allow_signup_without_email=provider.allow_signup_without_email,
                 ip=ip,
                 request_id=request_id,

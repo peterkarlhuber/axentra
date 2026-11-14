@@ -27,7 +27,7 @@ import pytest
 
 from axentra.api.app import create_app
 from axentra.data.database import DbScope
-from tests.integration.conftest import Browser, World, bootstrap_admin
+from tests.integration.conftest import ADMIN_EMAIL, Browser, World, bootstrap_admin
 
 ISSUER = "https://idp.test"
 CLIENT_ID = "axentra-test"
@@ -270,6 +270,55 @@ def test_existing_user_is_linked_by_verified_email(make_world) -> None:  # type:
     assert _error(r) is None
     assert b.get("/v1/auth/session").json()["user"]["id"] == uid
     assert w.login_as("bob@example.com").get("/v1/auth/session").status_code == 200  # password still works
+
+
+@pytest.mark.parametrize("role", ["platform_admin", "platform_viewer"])
+def test_platform_user_is_not_linked_by_verified_email(make_world, role: str) -> None:  # type: ignore[no-untyped-def]
+    """Owner decision I5: a provider that vouches for a platform user's address does not get that account."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": role}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) == "explicit_link_required"
+    assert b.client.cookies.get(SESSION_COOKIE) is None
+    assert _identities(w) == []  # nothing linked, no second account created
+    with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        assert tx.scalar("SELECT count(*) FROM axentra_users WHERE lower(email) = 'ops@example.com'") == 1
+        assert tx.scalar("SELECT count(*) FROM axentra_users") == 2  # the bootstrap admin and ops
+    assert w.login_as("ops@example.com").get("/v1/auth/session").status_code == 200  # password still works
+
+    # An explicit link by a platform admin is honored on the next login.
+    r = w.admin.post(f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "ops-sub"})
+    assert r.status_code == 201, r.text
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
+def test_bootstrap_admin_is_not_linked_by_verified_email(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    _, r = w.login(subject="admin-sub", email=ADMIN_EMAIL)
+    assert _error(r) == "explicit_link_required"
+    assert _identities(w) == []
+
+
+def test_platform_user_linking_can_be_turned_back_on(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world(link_platform_users_by_verified_email=True)
+    uid = w.user("ops@example.com")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
+def test_role_removed_user_is_linked_again(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    uid = w.user("ops@example.com")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "none"}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert b.get("/v1/auth/session").json()["user"]["id"] == uid
 
 
 # -- state and browser binding -----------------------------------------------------------------------
