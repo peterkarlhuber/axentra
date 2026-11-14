@@ -145,7 +145,7 @@ matches for `nodestro|orkexa|studio`):
 
 ```bash
 uv build --wheel --sdist -o dist .                       # axentra-0.1.0.dev0-py3-none-any.whl + sdist
-python3.12 -m venv /tmp/srv && /tmp/srv/bin/pip install "dist/axentra-0.1.0.dev0-py3-none-any.whl[server]"
+python3.12 -m venv /tmp/srv && /tmp/srv/bin/pip install -r requirements/tabrion.txt "dist/axentra-0.1.0.dev0-py3-none-any.whl[server]"
 /tmp/srv/bin/axentra --version                           # axentra 0.1.0.dev0
 export AXENTRA__DATABASE__URL=postgresql://postgres:pg@127.0.0.1:5432/axentra_report_smoke
 /tmp/srv/bin/axentra migrate                             # applied axentra:0001_foundation ... 0005_notify

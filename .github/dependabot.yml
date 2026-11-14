@@ -32,6 +32,9 @@ updates:
       pip-minor-and-patch:
         update-types: [minor, patch]
     ignore:
+      # Tabrion is not on a package index: requirements/tabrion.txt and deploy/locks/tabrion.txt pin its commit, and a
+      # PyPI project of that name would be someone else's (dependency confusion, TABRION DC-AX-1).
+      - dependency-name: tabrion
       # botocore (s3 extra) requires python-dateutil < 3; a 3.x pin makes the full image unresolvable (AX3-05).
       # Remove once botocore allows it.
       - dependency-name: python-dateutil

@@ -25,6 +25,17 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Security (TABRION DC-AX-1, dependency confusion): Tabrion is not on a package index, and a PyPI project of that
+  name would be someone else's. `tests/unit/test_tabrion_requirements.py` now refuses an installed Tabrion that does
+  not come from the pin (Git commit of `requirements/tabrion.txt`) or the hashed archive of `deploy/locks/tabrion.txt`,
+  in particular one without `direct_url.json` (an index install); a sibling checkout is accepted only with
+  `AXENTRA_TABRION_LOCAL_CHECKOUT=1`. The new CI job "Install with a poisoned index (Tabrion pin)" runs the
+  development install against a poisoned index (`scripts/check_tabrion_source.py`, a checksummed copy of
+  nodestro-studio's) and is red if pip asks it for `tabrion` at all; ci-ok reports it. Both images (and the Taskboard
+  image, with `pip check`) fail to build unless Tabrion is the wheel built from the hashed archive, and CI checks
+  that again on the built images; the Taskboard image installs that wheel in the same `pip install` as Axentra, so
+  Tabrion never comes from the index. The README install table and checkout command, the SDK and Taskboard install
+  hints and the implementation report add `-r requirements/tabrion.txt`, and Dependabot ignores `tabrion`.
 - Security (pre-release assessment of 2026-11-13, findings on `1dbd98f`; independent review of the fixes
   included). **A-01** custom role definitions are bounded by the caller's grant: creating a role, adding
   permissions to one, or changing or deleting a role whose permissions exceed the caller's is refused with `403`

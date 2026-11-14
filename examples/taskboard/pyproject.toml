@@ -9,7 +9,7 @@ description = "Taskboard: a demo multi-tenant SaaS backend built on Axentra"
 requires-python = ">=3.11"
 license = "LicenseRef-Proprietary"
 dependencies = [
-    # In this repository: pip install -e ../..[server] first (Axentra is not on PyPI yet).
+    # In this repository: pip install -r ../../requirements/tabrion.txt -e ../..[server] first (Axentra is not on PyPI yet).
     "axentra[server]",
     "httpx>=0.27",
 ]

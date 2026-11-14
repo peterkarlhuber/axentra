@@ -87,8 +87,9 @@ include = ["src/axentra", "README.md", "LICENSE", "CHANGELOG.md", "NOTICE.md"]
 line-length = 110
 target-version = "py311"
 src = ["src", "tests"]
-# scripts/check_dependency_policy.py is an unchanged, checksummed copy from nodestro-studio (TABRION QA-17), linted there.
-extend-exclude = ["scripts/check_dependency_policy.py"]
+# scripts/check_dependency_policy.py (TABRION QA-17) and scripts/check_tabrion_source.py (DC-AX-1) are unchanged,
+# checksummed copies from nodestro-studio, linted there.
+extend-exclude = ["scripts/check_dependency_policy.py", "scripts/check_tabrion_source.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "C4", "PT"]

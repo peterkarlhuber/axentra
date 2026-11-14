@@ -30,7 +30,12 @@ the ranges (no direct URL, no pre-release specifier). A Tabrion update changes t
 ranges, after Axentra's CI is green against it. Since TABRION MIG-AXE-3 Axentra requires
 `tabrion[postgres]>=0.1,<0.2` at runtime too (database error redaction, `tabrion.errors`), so every install needs
 `-r requirements/tabrion.txt`; the container image takes the same commit from `deploy/locks/tabrion.txt`
-(`scripts/update_locks.sh` regenerates both locks).
+(`scripts/update_locks.sh` regenerates both locks). Never install Axentra without the pin file: Tabrion is not on
+PyPI, and a project of that name there would be someone else's (dependency confusion, TABRION DC-AX-1).
+`tests/unit/test_tabrion_requirements.py` fails when the installed Tabrion is not the pinned commit; for development
+against a sibling Tabrion checkout (`pip install -e ../tabrion`) set `AXENTRA_TABRION_LOCAL_CHECKOUT=1`. CI's job
+"Install with a poisoned index (Tabrion pin)" (`scripts/check_tabrion_source.py`, a checksummed copy of
+nodestro-studio's) shows that the documented install never asks a package index for `tabrion`.
 
 The `dev` extra needs Tabrion for the PostgreSQL test fixtures (`tests/conftest.py` on `tabrion.testing`,
 TABRION MIG-AXE-1). They create the roles `axentra_test_app` (and `axentra_test_owner` with
