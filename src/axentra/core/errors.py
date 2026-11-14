@@ -179,6 +179,20 @@ class ModuleDisabled(AxentraError):
     title = "Module not enabled"
 
 
+class ServiceUnavailable(AxentraError):
+    """A dependency (for example the S3 object store) is unreachable or overloaded; retry later.
+
+    The only 5xx error whose ``status`` and ``code`` reach the client (``503 service_unavailable`` with
+    ``Retry-After``). ``detail`` is fixed by the raiser and must name the dependency kind only, never an
+    endpoint, bucket, key or credential; the original exception is logged server-side."""
+
+    code = "service_unavailable"
+    status = 503
+    title = "Service unavailable"
+    #: ``Retry-After`` when the raiser names no delay of its own.
+    default_retry_after: ClassVar[int] = 10
+
+
 class ConfigurationError(AxentraError):
     """Invalid or insecure configuration; raised at startup, never to clients."""
 
@@ -252,9 +266,20 @@ def problem_details(exc: BaseException) -> ProblemInfo:
 
     - An :class:`AxentraError` with a 4xx status keeps its ``status``, ``code``, ``title``,
       ``detail`` (redacted) and ``extra`` members; a 429 carries ``Retry-After``.
-    - Any :class:`AxentraError` with a 5xx status, and every other exception, becomes a generic
+    - A :class:`ServiceUnavailable` keeps its ``503``, ``code``, ``title`` and ``detail`` and carries
+      ``Retry-After`` (``internal=True``: the caller logs ``exc``).
+    - Any other :class:`AxentraError` with a 5xx status, and every other exception, becomes a generic
       ``500 internal`` problem without details (``internal=True``: the caller logs ``exc``).
     """
+    if isinstance(exc, ServiceUnavailable):
+        return problem(
+            503,
+            exc.code,
+            exc.title,
+            exc.detail,
+            extra=exc.extra,
+            retry_after=exc.retry_after or exc.default_retry_after,
+        )
     if isinstance(exc, AxentraError) and exc.status < 500:
         return problem(
             exc.status, exc.code, exc.title, exc.detail, extra=exc.extra, retry_after=exc.retry_after

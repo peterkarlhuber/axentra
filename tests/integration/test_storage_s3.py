@@ -116,3 +116,58 @@ def test_s3_signed_and_presigned_urls_and_orphans(s3, ax_factory):
     assert urlparse(p["url"]).path.endswith(f"ax/{pid}/{tid}/{fid}")
     # SigV4 (SigV2 presigned URLs with response-* overrides are refused by S3-compatible stores).
     assert q["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"] and "AWSAccessKeyId" not in q
+
+
+class _StoreDown:
+    """The real client for local work (presigning), an unreachable endpoint for every request."""
+
+    def __init__(self, real) -> None:  # type: ignore[no-untyped-def]
+        self.real = real
+        self.meta = real.meta
+
+    def generate_presigned_url(self, *a, **kw):  # type: ignore[no-untyped-def]
+        return self.real.generate_presigned_url(*a, **kw)
+
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+        from botocore.exceptions import EndpointConnectionError
+
+        def call(*a, **kw):  # type: ignore[no-untyped-def]
+            raise EndpointConnectionError(
+                endpoint_url="http://s3.internal.example:9000/axentra-test-bucket/ax/key"
+            )
+
+        return call
+
+
+def test_s3_unavailable_answers_503_with_retry_after(s3, ax_factory):
+    """Live finding 2026-11-14 (SeaweedFS stopped): the raw botocore error escaped as 500 and uvicorn
+    dropped the connection. Every storage request now answers 503 service_unavailable + Retry-After."""
+    world = _world(ax_factory)
+    pid, tid, base = _setup(world)
+    fid = world.admin.post(base, files={"file": ("a.txt", b"before outage", "text/plain")}).json()["id"]
+    token_path = world.admin.post(f"{base}/{fid}/download-url").json()["path"]
+    backend = world.ax.storage.backend
+    backend.client = _StoreDown(backend.client)
+    anon = TestClient(world.app)  # raise_server_exceptions=True: an escaping exception fails the test
+
+    for r in (
+        world.admin.post(base, files={"file": ("b.txt", b"during outage", "text/plain")}),
+        world.admin.get(f"{base}/{fid}/content"),
+        anon.get(token_path),
+    ):
+        assert r.status_code == 503, r.text
+        body = r.json()
+        assert body["code"] == "service_unavailable" and r.headers["Retry-After"] == "10"
+        assert "s3.internal.example" not in r.text and "testing" not in r.text and "bucket" not in r.text
+    # The failed upload left nothing visible; the old file is still listed.
+    assert [f["id"] for f in world.admin.get(base).json()["items"]] == [fid]
+
+    # Presigned downloads need no request to the store: the URL is still issued (SigV4).
+    world.ax.storage.cfg = world.ax.storage.cfg.model_copy(update={"s3_presigned_downloads": True})
+    p = world.admin.post(f"{base}/{fid}/download-url", json={"ttl_seconds": 30})
+    assert p.status_code == 200 and p.json()["kind"] == "presigned"
+    assert parse_qs(urlparse(p.json()["url"]).query)["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"]
+
+    # Recovery: the real client again.
+    backend.client = backend.client.real
+    assert world.admin.get(f"{base}/{fid}/content").content == b"before outage"
