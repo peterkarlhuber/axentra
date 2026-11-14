@@ -17,6 +17,14 @@ written from the old code, before any TABRION MIG-AXE step:
 | `settings.json` | `SHOW` extract per kind of connection (owned pool, read-only, `on_pool`, `joined`, `join`, leader lock, ping) | AX-I-1..4, MIG-AXE-4, MIG-AXE-5 |
 | `schema.json` | Schema dump from the catalog (columns, constraints, indexes, triggers, functions, applied migrations) | every step: no schema change (document 11, section 3) |
 
+Changes since then, each rewritten with the tool and explained in its pull request:
+
+- TABRION MIG-AXE-6: `roles.json` (`--only roles write`). Tabrion's role check counts every role a role can become
+  (contract I-20; Peter's decision to adopt it, as for MIG-NOD-5). A superuser is a member of every role, also of the
+  `BYPASSRLS` ones, so the `superuser` variant now reports `bypass_rls: true` in `inspect_role`, `role_info` and
+  `check_role` (4 lines). Every decision, error class and message is unchanged; `catalog.json` (the grants) is
+  identical.
+
 A pull request that changes a snapshot on purpose (a new migration, or a step whose plan allows the change) rewrites
 the file with the tool and says why; the diff is part of the review. A rollback (revert pull request) is verified by
 the same files: after the revert, `check` must report "snapshots identical" again.

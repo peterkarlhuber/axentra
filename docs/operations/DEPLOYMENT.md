@@ -148,7 +148,8 @@ existing PostgreSQL server, run the statements of `deploy/compose/initdb/01-role
 own passwords (the `\getenv` lines are psql-specific), or create the two roles yourself and let
 `axentra db grant-runtime-role axentra_app` (as the owner) grant the runtime role; `axentra db
 inspect-role` shows whether row-level security fully applies to the application role (no
-superuser, no `BYPASSRLS`, owns no table).
+superuser, no `BYPASSRLS`, owns no table, and cannot become such a role or the schema's owner through role
+membership).
 
 ## Administration over HTTP (`axentra remote`)
 

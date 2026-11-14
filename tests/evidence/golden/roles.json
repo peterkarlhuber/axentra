@@ -347,14 +347,14 @@
         },
         "allow_superuser=True,allow_table_owner=False": {
           "ok": {
-            "bypass_rls": false,
+            "bypass_rls": true,
             "superuser": true,
             "table_owner": true
           }
         },
         "allow_superuser=True,allow_table_owner=True": {
           "ok": {
-            "bypass_rls": false,
+            "bypass_rls": true,
             "superuser": true,
             "table_owner": true
           }
@@ -367,7 +367,7 @@
       },
       "inspect_role": {
         "ok": {
-          "bypass_rls": false,
+          "bypass_rls": true,
           "can_create": true,
           "connect": true,
           "owned_tables": [
@@ -425,7 +425,7 @@
       },
       "role_info": {
         "ok": {
-          "bypass_rls": false,
+          "bypass_rls": true,
           "superuser": true,
           "table_owner": true
         }

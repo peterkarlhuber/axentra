@@ -379,3 +379,88 @@ def test_db_commands(granted, tmp_path, capsys) -> None:  # type: ignore[no-unty
     assert main(["--config", str(cfg), "migrate", "--grant-runtime-role", granted["runtime_role"]]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["applied"] == [] and out["runtime_role"]["restricted"] is True
+
+
+# ---- stricter role check through Tabrion (TABRION MIG-AXE-6, contract I-20) ---------------------------------------
+
+
+def test_roles_that_can_become_an_unsafe_role_are_refused(roles_db: dict[str, str]) -> None:
+    """A role is as privileged as every role it can become (role membership, also NOINHERIT): a member of a
+    ``BYPASSRLS`` or superuser role, and a member of the schema's owner, are refused by ``grant_runtime_role``;
+    an application role that is a member of a ``BYPASSRLS`` role fails ``check_role`` (Peter's decision for
+    MIG-NOD-5 and MIG-AXE-6: adopt Tabrion's stricter check)."""
+    suffix = uuid.uuid4().hex[:6]
+    names = {k: f"ax6_{k}_{suffix}" for k in ("byp", "byp_m", "su", "su_m", "s_own", "s_own_m")}
+    schema = f"ax6_schema_{suffix}"
+    ident = {k: sql.Identifier(v) for k, v in names.items()}
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN BYPASSRLS").format(ident["byp"]))
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN SUPERUSER").format(ident["su"]))
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(ident["s_own"]))
+        for member, parent in (("byp_m", "byp"), ("su_m", "su"), ("s_own_m", "s_own")):
+            admin.execute(
+                sql.SQL("CREATE ROLE {} LOGIN NOINHERIT PASSWORD {}").format(
+                    ident[member], sql.Literal(PASSWORD)
+                )
+            )
+            admin.execute(sql.SQL("GRANT {} TO {}").format(ident[parent], ident[member]))
+        admin.execute(
+            sql.SQL("CREATE SCHEMA {} AUTHORIZATION {}").format(sql.Identifier(schema), ident["s_own"])
+        )
+        admin.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                sql.Identifier(str(admin.info.dbname)), ident["byp_m"]
+            )
+        )
+    try:
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], names["byp_m"])
+        assert str(err.value) == (
+            f"the runtime role {names['byp_m']!r} can become a role with BYPASSRLS (role membership):"
+            " row-level security would not apply to it"
+        )
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], names["su_m"])
+        assert f"the runtime role {names['su_m']!r} can become a superuser (role membership)" in str(
+            err.value
+        )
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], names["s_own_m"], schema=schema)
+        assert str(err.value) == (
+            f"the runtime role {names['s_own_m']!r} can become the owner role or the owner of the schema"
+            " (role membership): row-level security would not apply to it"
+        )
+        with psycopg.connect(roles_db["owner"], autocommit=True) as conn:
+            report = inspect_role(conn, names["byp_m"])
+        assert report.bypass_rls and not report.superuser and not report.restricted
+        db = Database(_with_db(ADMIN_URL, str(conninfo_dbname(roles_db["admin"])), names["byp_m"], PASSWORD))
+        db.open()
+        try:
+            assert db.role_info() == {"superuser": False, "bypass_rls": True, "table_owner": False}
+            with pytest.raises(ConfigurationError, match="bypasses row-level security"):
+                db.check_role(allow_superuser=False, allow_table_owner=False)
+        finally:
+            db.close()
+        # Nothing was granted to the refused roles.
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            granted_to = admin.execute(
+                "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee = ANY(%s)",
+                ([names["byp_m"], names["su_m"], names["s_own_m"]],),
+            ).fetchone()
+            assert granted_to == (0,)
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP SCHEMA IF EXISTS {}").format(sql.Identifier(schema)))
+            admin.execute(
+                sql.SQL("REVOKE ALL ON DATABASE {} FROM {}").format(
+                    sql.Identifier(str(admin.info.dbname)), ident["byp_m"]
+                )
+            )
+            for key in ("byp_m", "su_m", "s_own_m", "byp", "su", "s_own"):
+                admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(ident[key]))
+
+
+def conninfo_dbname(url: str) -> str:
+    from psycopg.conninfo import conninfo_to_dict
+
+    return str(conninfo_to_dict(url)["dbname"])

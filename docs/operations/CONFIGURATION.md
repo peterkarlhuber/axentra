@@ -42,7 +42,8 @@ library). In `environment = "production"` it refuses to start when:
 
 In every environment: `allowed_origins` must not contain `*`, and `billing.live_payments`
 requires `billing.provider = "stripe"`. At `Axentra.start()`, the database role is checked: a
-superuser or `BYPASSRLS` role is refused in production unless `database.allow_superuser = true`.
+superuser or `BYPASSRLS` role (also one that can become such a role through role membership) is refused in production
+unless `database.allow_superuser = true`.
 
 The `axentra` command prints such operator errors (invalid or unknown configuration keys, failed
 validation, an unreachable database, a database error, a module given to `--load` that does not
