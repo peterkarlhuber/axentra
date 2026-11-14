@@ -30,6 +30,50 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   migrations split byte-identically. A product migration splits differently only where the old splitter was wrong:
   `E'...'` strings with backslash escapes, nested block comments, dollar-quote tags with digits, a `--` comment
   ending at a carriage return; a statement of block comments only is now dropped instead of sent.
+- Build: the image's build stage takes `SOURCE_DATE_EPOCH` as a build argument, so pip writes hash-based `.pyc`
+  files and two builds of one commit (with `rewrite-timestamp=true`) give identical layers; before, only the `.pyc`
+  source mtimes differed (release-candidate dry run). docs/operations/DEPLOYMENT.md has the command.
+- Added (TABRION MIG-AXE-4): settings `database.idle_in_transaction_timeout_ms` (default `0`) and
+  `database.application_name` (default empty) for the connections of Axentra's own pool; both are not set by
+  default, so the session of a pool connection is unchanged. The pool now sets its session with
+  `tabrion.postgres.configure`; a pool borrowed with `Database.on_pool` is still never configured.
+- Changed (TABRION MIG-AXE-4): `database.statement_timeout_ms` above 2147483647 (PostgreSQL's limit) is refused when
+  the configuration is loaded, and invalid session settings fail when a `Database` is built
+  (`tabrion.errors.ConfigurationError`) instead of when the pool connects.
+- Changed (TABRION MIG-AXE-5): the scheduler leader lock (`LeaderLock`) runs on `tabrion.postgres.SessionLock`, and
+  the migration lock waits with `tabrion.postgres.wait_advisory_lock`. Keys, polling and the connections used are
+  unchanged.
+- Security (TABRION DC-AX-1, dependency confusion): Tabrion is not on a package index, and a PyPI project of that
+  name would be someone else's. `tests/unit/test_tabrion_requirements.py` now refuses an installed Tabrion that does
+  not come from the pin (Git commit of `requirements/tabrion.txt`) or the hashed archive of `deploy/locks/tabrion.txt`,
+  in particular one without `direct_url.json` (an index install); a sibling checkout is accepted only with
+  `AXENTRA_TABRION_LOCAL_CHECKOUT=1`. The new CI job "Install with a poisoned index (Tabrion pin)" runs the
+  development install against a poisoned index (`scripts/check_tabrion_source.py`, a checksummed copy of
+  nodestro-studio's) and is red if pip asks it for `tabrion` at all; ci-ok reports it. Both images (and the Taskboard
+  image, with `pip check`) fail to build unless Tabrion is the wheel built from the hashed archive, and CI checks
+  that again on the built images; the Taskboard image installs that wheel in the same `pip install` as Axentra, so
+  Tabrion never comes from the index. The README install table and checkout command, the SDK and Taskboard install
+  hints and the implementation report add `-r requirements/tabrion.txt`, and Dependabot ignores `tabrion`.
+- Security (pre-release assessment of 2026-11-13, findings on `1dbd98f`; independent review of the fixes
+  included). **A-01** custom role definitions are bounded by the caller's grant: creating a role, adding
+  permissions to one, or changing or deleting a role whose permissions exceed the caller's is refused with `403`
+  (platform admins and system code exempt; existing roles are not changed). **A-02** an editor who changes a
+  schedule's `kind` or `payload` (compared as canonical JSON) or enables it becomes its acting principal
+  (`created_by`), so its jobs no longer run with the original creator's permissions. **A-03** webhook endpoints
+  whose creator no longer holds `webhooks:manage` get no new deliveries and pending deliveries end `dead`;
+  an editor who changes `url` or `event_types` or enables an endpoint becomes its creator; endpoint responses
+  carry `creator_has_access` (additive OpenAPI field). **B-01** signed download tokens are masked in the request
+  log, uvicorn's access log and free-text redaction. **B-02** redaction covers every Axentra token prefix.
+  **B-03** an installation without an explicit `environment` refuses to start when `public_url` is not loopback,
+  and the container image defaults to `production`. **B-04** NUL characters in the path, query or a JSON body and
+  non-UTF-8 JSON bodies are refused with `422`; so are file `metadata` (multipart field and list filter) with a
+  `\u0000` escape or a lone surrogate, which gave a `500` before (delta review N-1). **B-05** email addresses with white space, control characters or
+  header separators are refused with `422`. **LD-01** `checkout.session.completed` starts a subscription only when
+  `payment_status` is `paid` or `no_payment_required`; `checkout.session.async_payment_succeeded` and `_failed` are
+  handled. **C-03** the compose stacks publish on `AXENTRA_BIND_ADDRESS` (default `127.0.0.1`), `.env.example` is
+  labeled as a local trial, `.env.production.example` is new, and production refuses the templates' placeholder
+  database passwords. Also: the two-scheduler slot test uses one clock reading (minute-boundary flake).
+
 - Security (TABRION MIG-AXE-3, finding B-06-1): database errors are redacted by Tabrion's `tabrion.errors`
   (`safe_message`, `DbErrorRedactionFilter`) instead of Axentra's local fix (TABRION MIG-AXE-0). Axentra keeps the
   process-wide installation (`install_db_error_redaction`) and the helpers for stored and exported texts

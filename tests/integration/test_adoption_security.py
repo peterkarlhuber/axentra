@@ -219,34 +219,34 @@ class _Recorder:
 
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> _Recorder:
-    """Records every statement run through a cursor of every psycopg connection opened during the test."""
+    """Records every statement run through any psycopg cursor during the test.
+
+    Patched on ``psycopg.Cursor`` itself, not as a ``cursor_factory``: Tabrion's helpers (``configure``, the advisory
+    locks; TABRION MIG-AXE-4/5) run their statements on a plain ``psycopg.Cursor(conn)`` of their own, which a
+    connection's cursor factory does not reach."""
     found = _Recorder()
 
-    class RecordingCursor(psycopg.Cursor[Any]):
-        def _record(self, query: Any, params: Any) -> None:
-            text = query if isinstance(query, str | bytes) else query.as_string(self)
-            text = text.decode() if isinstance(text, bytes) else text
-            with found.lock:
-                found.statements.append((found.phase, text, params))
+    def _record(cursor: psycopg.Cursor[Any], query: Any, params: Any) -> None:
+        text = query if isinstance(query, str | bytes) else query.as_string(cursor)
+        text = text.decode() if isinstance(text, bytes) else text
+        with found.lock:
+            found.statements.append((found.phase, text, params))
 
-        def execute(self, query: Any, params: Any = None, **kwargs: Any) -> Any:
-            self._record(query, params)
-            return super().execute(query, params, **kwargs)
+    execute = psycopg.Cursor.execute
+    executemany = psycopg.Cursor.executemany
 
-        def executemany(self, query: Any, params_seq: Any, **kwargs: Any) -> Any:
-            params_seq = list(params_seq)
-            for params in params_seq or [None]:
-                self._record(query, params)
-            return super().executemany(query, params_seq, **kwargs)
+    def recording_execute(self: psycopg.Cursor[Any], query: Any, params: Any = None, **kwargs: Any) -> Any:
+        _record(self, query, params)
+        return execute(self, query, params, **kwargs)
 
-    original = psycopg.Connection.connect.__func__  # type: ignore[attr-defined]
+    def recording_executemany(self: psycopg.Cursor[Any], query: Any, params_seq: Any, **kwargs: Any) -> Any:
+        params_seq = list(params_seq)
+        for params in params_seq or [None]:
+            _record(self, query, params)
+        return executemany(self, query, params_seq, **kwargs)
 
-    def connect(cls: Any, *args: Any, **kwargs: Any) -> Any:
-        kwargs.setdefault("cursor_factory", RecordingCursor)
-        return original(cls, *args, **kwargs)
-
-    monkeypatch.setattr(psycopg.Connection, "connect", classmethod(connect))
-    monkeypatch.setattr(psycopg, "connect", psycopg.Connection.connect)
+    monkeypatch.setattr(psycopg.Cursor, "execute", recording_execute)
+    monkeypatch.setattr(psycopg.Cursor, "executemany", recording_executemany)
     return found
 
 

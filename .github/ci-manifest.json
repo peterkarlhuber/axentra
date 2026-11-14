@@ -9,6 +9,7 @@
       "Tests (Python 3.13, PostgreSQL 17)",
       "Install with pip 25.0 (Tabrion pin)",
       "Install with pip current (Tabrion pin)",
+      "Install with a poisoned index (Tabrion pin)",
       "TypeScript SDK (generated types, unit tests, build)",
       "Python SDK (Python 3.11)",
       "Python SDK (Python 3.13)",

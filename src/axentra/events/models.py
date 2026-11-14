@@ -123,6 +123,13 @@ class WebhookEndpoint(BaseModel):
     has_previous_secret: bool = False
     previous_secret_expires_at: datetime | None = None
     created_by: str | None
+    creator_has_access: bool | None = Field(
+        default=None,
+        description="`true` while the endpoint's creator holds `webhooks:manage` in the product,"
+        " `false` once it lost it (the endpoint then receives no deliveries, like that creator's API"
+        " keys; recreate it as an active operator). `null` where not computed (the response of"
+        " creating or rotating a secret)",
+    )
     created_at: datetime
     updated_at: datetime
 
