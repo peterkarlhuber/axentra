@@ -7,15 +7,24 @@ is used.
 | Name | Used in |
 |---|---|
 | `tabrion.errors` | `tests/unit/test_db_errors.py` |
+| `tabrion.errors.ConfigurationError` | `tests/integration/test_session_settings.py` |
 | `tabrion.errors.DbErrorRedactionFilter` | `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
 | `tabrion.errors.RoleMissing` | `src/axentra/data/roles.py` |
 | `tabrion.errors.RoleUnsafe` | `src/axentra/data/roles.py` |
 | `tabrion.errors.UsageError` | `src/axentra/data/roles.py` |
 | `tabrion.errors.classify` | `src/axentra/cli.py` |
 | `tabrion.errors.safe_message` | `src/axentra/cli.py`, `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
+| `tabrion.postgres.SessionLock` | `src/axentra/events/schedules.py` |
+| `tabrion.postgres.SessionSettings` | `src/axentra/data/database.py`, `tests/integration/test_session_settings.py` |
+| `tabrion.postgres.SessionSettings.__dataclass_fields__` | `tests/integration/test_session_settings.py` |
+| `tabrion.postgres.advisory_unlock` | `src/axentra/data/migrations.py` |
+| `tabrion.postgres.configure` | `src/axentra/data/database.py` |
 | `tabrion.postgres.grant_runtime_role` | `src/axentra/data/roles.py` |
 | `tabrion.postgres.inspect_role` | `src/axentra/data/roles.py` |
 | `tabrion.postgres.role_info` | `src/axentra/data/database.py` |
+| `tabrion.postgres.session_configurator` | `src/axentra/data/database.py` |
+| `tabrion.postgres.wait_advisory_lock` | `src/axentra/data/migrations.py` |
+| `tabrion.sql.split_statements` | `src/axentra/data/migrations.py`, `tests/unit/test_split_statements_golden.py` |
 | `tabrion.testing.PostgresDatabaseHandle` | `tests/conftest.py` |
 | `tabrion.testing.RoleSetup` | `tests/conftest.py` |
 | `tabrion.testing.configure` | `tests/conftest.py` |

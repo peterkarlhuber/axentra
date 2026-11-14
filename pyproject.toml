@@ -7,14 +7,13 @@ name = "axentra"
 dynamic = ["version"]
 description = "Axentra: a modular, reusable backend foundation for SaaS products (identity, tenancy, access, data, storage, jobs, usage, billing, notifications, audit)."
 readme = "README.md"
-license = "MIT"
+license = "LicenseRef-Proprietary"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Peter Karlhuber" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -88,8 +87,9 @@ include = ["src/axentra", "README.md", "LICENSE", "CHANGELOG.md", "NOTICE.md"]
 line-length = 110
 target-version = "py311"
 src = ["src", "tests"]
-# scripts/check_dependency_policy.py is an unchanged, checksummed copy from nodestro-studio (TABRION QA-17), linted there.
-extend-exclude = ["scripts/check_dependency_policy.py"]
+# scripts/check_dependency_policy.py (TABRION QA-17) and scripts/check_tabrion_source.py (DC-AX-1) are unchanged,
+# checksummed copies from nodestro-studio, linted there.
+extend-exclude = ["scripts/check_dependency_policy.py", "scripts/check_tabrion_source.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "C4", "PT"]

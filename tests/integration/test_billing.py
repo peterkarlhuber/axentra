@@ -385,6 +385,105 @@ def test_fake_checkout_and_webhooks(fake_world):
     assert anon.post("/v1/billing/webhooks/stripe", content=body, headers=headers).status_code == 404
 
 
+def _checkout(w, pid, tid, plan="pro"):
+    r = w.admin.post(
+        f"/v1/products/{pid}/tenants/{tid}/billing/checkout",
+        json={"plan": plan, "success_url": "http://studio.test/", "cancel_url": "http://studio.test/"},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_unpaid_checkout_waits_for_the_async_payment(fake_world):
+    """LD-01: a completed checkout with a delayed payment method (payment_status unpaid) does not start the
+    subscription; checkout.session.async_payment_succeeded does, _failed does not."""
+    w = fake_world
+    fake = w.ax.billing.provider
+    pid = _product(w)
+    _plan(w, pid, prices=PRO_PRICES, entitlements={"limit.api_calls": 1000})
+    anon = TestClient(w.app)
+    now = int(datetime.now(UTC).timestamp())
+
+    # Unpaid, then the delayed payment succeeds.
+    t1 = _tenant(w, pid)
+    base1 = f"/v1/products/{pid}/tenants/{t1}/billing"
+    co = _checkout(w, pid, t1)
+    body, h = fake.complete_checkout(co["checkout_id"], payment_status="unpaid", created=now)
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    sub = w.admin.get(base1 + "/subscription").json()
+    assert sub["status"] == "incomplete" and sub["provider_subscription_id"].startswith("sub_fake_")
+    assert w.admin.get(base1 + "/entitlements").json()["plan_key"] is None
+    body, h = fake.settle_checkout(co["checkout_id"], succeeded=True, created=now + 1)
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    sub = w.admin.get(base1 + "/subscription").json()
+    assert sub["status"] == "active" and sub["current_period_end"]
+    assert w.admin.get(base1 + "/entitlements").json()["limits"] == {"api_calls": 1000}
+    assert _hook(anon, body, h).json()["outcome"] == "duplicate"
+
+    # Unpaid, then the delayed payment fails: stays incomplete; the provider's later subscription
+    # event still applies.
+    t2 = _tenant(w, pid, "globex")
+    base2 = f"/v1/products/{pid}/tenants/{t2}/billing"
+    co = _checkout(w, pid, t2)
+    body, h = fake.complete_checkout(co["checkout_id"], payment_status="unpaid", created=now)
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    body, h = fake.settle_checkout(co["checkout_id"], succeeded=False, created=now + 1)
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    sub = w.admin.get(base2 + "/subscription").json()
+    assert sub["status"] == "incomplete"
+    assert w.admin.get(base2 + "/entitlements").json()["plan_key"] is None
+    # A failed payment never starts it, even when its event carries payment_status "paid".
+    body, h = fake.signed_event(
+        "checkout.session.async_payment_failed",
+        {"id": co["checkout_id"], "payment_status": "paid"},
+        created=now + 2,
+    )
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    assert w.admin.get(base2 + "/subscription").json()["status"] == "incomplete"
+    gone, gh = fake.signed_event(
+        "customer.subscription.updated",
+        {"id": sub["provider_subscription_id"], "status": "incomplete_expired"},
+        created=now + 3,
+    )
+    assert _hook(anon, gone, gh).json()["outcome"] == "applied"
+    assert w.admin.get(base2 + "/subscription").json()["status"] == "canceled"
+
+    # Unpaid, then the provider reports the subscription active: that still starts it.
+    t3 = _tenant(w, pid, "initech")
+    base3 = f"/v1/products/{pid}/tenants/{t3}/billing"
+    co = _checkout(w, pid, t3)
+    body, h = fake.complete_checkout(co["checkout_id"], payment_status="unpaid", created=now)
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    psub = w.admin.get(base3 + "/subscription").json()["provider_subscription_id"]
+    upd, uh = fake.signed_event(
+        "customer.subscription.updated", {"id": psub, "status": "active"}, created=now + 1
+    )
+    assert _hook(anon, upd, uh).json()["outcome"] == "applied"
+    assert w.admin.get(base3 + "/subscription").json()["status"] == "active"
+
+    # A checkout without payment_status (unknown shape) does not start the subscription either.
+    t4 = _tenant(w, pid, "umbrella")
+    co = _checkout(w, pid, t4)
+    body, h = fake.signed_event("checkout.session.completed", {"id": co["checkout_id"]}, created=now)
+    assert _hook(anon, body, h).json()["outcome"] == "applied"
+    assert (
+        w.admin.get(f"/v1/products/{pid}/tenants/{t4}/billing/subscription").json()["status"] == "incomplete"
+    )
+
+
+def test_trial_checkout_without_payment_starts_the_trial(fake_world):
+    w = fake_world
+    fake = w.ax.billing.provider
+    pid = _product(w)
+    tid = _tenant(w, pid)
+    _plan(w, pid, prices=PRO_PRICES, trial_days=14)
+    co = _checkout(w, pid, tid)
+    body, h = fake.complete_checkout(co["checkout_id"], payment_status="no_payment_required")
+    assert _hook(TestClient(w.app), body, h).json()["outcome"] == "applied"
+    sub = w.admin.get(f"/v1/products/{pid}/tenants/{tid}/billing/subscription").json()
+    assert sub["status"] == "trialing" and sub["trial_end"]
+
+
 def test_fake_trial_checkout_and_subscription_event_before_checkout(fake_world):
     w = fake_world
     fake = w.ax.billing.provider

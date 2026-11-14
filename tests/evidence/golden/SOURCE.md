@@ -15,6 +15,7 @@ written from the old code, before any TABRION MIG-AXE step:
 | `roles.json` | Role decision table, eight variants (`inspect_role`, `grant_runtime_role`, `role_info`, `check_role`) | AX-I-5 (MIG-T-AXE-5), MIG-AXE-6 |
 | `problems.json` | Problem details of every error class, HTTP error answers, OpenAPI `Problem` schemas | AX-I-7 (MIG-T-AXE-7), MIG-AXE-3 |
 | `settings.json` | `SHOW` extract per kind of connection (owned pool, read-only, `on_pool`, `joined`, `join`, leader lock, ping) | AX-I-1..4, MIG-AXE-4, MIG-AXE-5 |
+| `statements.json` | Statements of every migration file (Axentra and the Taskboard example) and of the splitter test vectors, written with Axentra's own `split_statements` at master `b91e05a` (before TABRION MIG-AXE-2; a one-off script, not the snapshot tool) | MIG-AXE-2 (G-AX-7), `tests/unit/test_split_statements_golden.py` |
 | `schema.json` | Schema dump from the catalog (columns, constraints, indexes, triggers, functions, applied migrations) | every step: no schema change (document 11, section 3) |
 
 Changes since then, each rewritten with the tool and explained in its pull request:

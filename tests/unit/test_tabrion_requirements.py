@@ -4,7 +4,8 @@
   URL ``git+https://github.com/peterkarlhuber/tabrion.git@<sha>``, the full 40-hex SHA of a final Tabrion release.
 - ``pyproject.toml`` names Tabrion only by a final range ``>=0.N,<0.(N+1)``: no direct URL (RC-1), no pre-release
   specifier (RC-8), and the pinned version lies inside every range.
-- If Tabrion is installed from Git (CI installs ``-r requirements/tabrion.txt``), it is the pinned commit.
+- The installed Tabrion is the pinned commit (``-r requirements/tabrion.txt``) or the hashed archive of
+  ``deploy/locks/tabrion.txt``, never a release from a package index (dependency confusion, DC-AX-1).
 
 A new pin adds its SHA to ``FINAL_RELEASES`` after checking it in Tabrion: ``git show <sha>:src/tabrion/_version.py``
 is a final version and the SHA is the release commit on Tabrion's ``master``.
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 from importlib import metadata
 import json
+import os
 from pathlib import Path
 import re
 import tomllib
@@ -138,23 +140,102 @@ def test_pyproject_names_tabrion_by_final_range_only() -> None:
     assert range_problems(_pyproject(), FINAL_RELEASES.get(sha or "")) == []
 
 
-def test_installed_tabrion_is_the_pin() -> None:
-    """An installed Tabrion from Git (pip writes ``direct_url.json`` with ``vcs_info``) is the pinned commit and
-    version; one from anywhere else (a wheel, a later package index, V-B) is a final version inside every range."""
+#: Escape hatch for development against a sibling Tabrion checkout (``pip install -e ../tabrion``): with this variable
+#: set to 1, an installed Tabrion from a local directory (``dir_info``) is accepted. Never set in CI.
+LOCAL_CHECKOUT_ENV = "AXENTRA_TABRION_LOCAL_CHECKOUT"
+LOCK = ROOT / "deploy" / "locks" / "tabrion.txt"
+ARCHIVE = re.compile(r"https://github\.com/peterkarlhuber/tabrion/archive/(?P<sha>[0-9a-f]{40})\.tar\.gz")
+
+
+def installed_problems(
+    direct_url: str | None, sha: str | None, lock_text: str, *, local_ok: bool
+) -> list[str]:
+    """Where an installed Tabrion came from (its ``direct_url.json`` text): the pinned commit from Git
+    (``vcs_info.commit_id`` equal to the pin), or the hashed source archive of ``deploy/locks/tabrion.txt``
+    (``archive_info``, the URL of that commit). Anything else, in particular no ``direct_url.json`` at all (an
+    install from a package index: dependency confusion, DC-AX-1), is refused; a local directory only with
+    ``local_ok``. This detects an accidental index install; a poisoned wheel can forge the file, which is why CI also
+    runs the install against a poisoned index (``scripts/check_tabrion_source.py``)."""
+    if direct_url is None:
+        return ["tabrion has no direct_url.json: it was installed from a package index, not from the pin"]
     try:
-        dist = metadata.distribution("tabrion")
-    except metadata.PackageNotFoundError:
-        return  # not installed: nothing to compare (the file checks above still ran)
+        data = json.loads(direct_url)
+    except ValueError:
+        return ["tabrion's direct_url.json does not parse"]
+    url = data.get("url") if isinstance(data, dict) else None
+    if not isinstance(url, str):
+        return ["tabrion's direct_url.json names no URL"]
+    if "vcs_info" in data:
+        vcs = data["vcs_info"]
+        if url != "https://github.com/peterkarlhuber/tabrion.git":
+            return [f"tabrion comes from {url}, not github.com/peterkarlhuber/tabrion.git"]
+        if not isinstance(vcs, dict) or vcs.get("commit_id") != sha:
+            return [
+                f"tabrion is commit {vcs.get('commit_id') if isinstance(vcs, dict) else None}, the pin is {sha}"
+            ]
+        return []
+    if "archive_info" in data:
+        match = ARCHIVE.fullmatch(url)
+        locked = [m["sha"] for line in lock_text.splitlines() if (m := ARCHIVE.search(line))]
+        if match is None or locked != [match["sha"]] or match["sha"] != sha:
+            return [
+                f"tabrion comes from the archive {url}, not the one of deploy/locks/tabrion.txt at the pin"
+            ]
+        return []
+    if "dir_info" in data:
+        if local_ok:
+            return []
+        return [
+            f"tabrion comes from the local directory {url}; set {LOCAL_CHECKOUT_ENV}=1 for a sibling checkout"
+        ]
+    return [f"tabrion's direct_url.json names no known source: {sorted(data)}"]
+
+
+def test_installed_tabrion_is_the_pin() -> None:
+    """The installed Tabrion is the pinned commit and version, never one from a package index (DC-AX-1)."""
+    dist = metadata.distribution("tabrion")  # the dev extra requires it: not installed is a failure
     sha, _ = pin_problems(REQUIREMENTS.read_text(encoding="utf-8"))
-    direct = dist.read_text("direct_url.json")
-    vcs = json.loads(direct).get("vcs_info") if direct is not None else None
-    if vcs is not None:
-        assert vcs.get("commit_id") == sha
+    local_ok = os.environ.get(LOCAL_CHECKOUT_ENV) == "1"
+    lock_text = LOCK.read_text(encoding="utf-8") if LOCK.is_file() else ""
+    assert installed_problems(dist.read_text("direct_url.json"), sha, lock_text, local_ok=local_ok) == []
+    if not local_ok:
         assert dist.version == FINAL_RELEASES.get(sha or "")
-    else:
-        version = Version(dist.version)
-        assert not (version.is_prerelease or version.is_devrelease), dist.version
-        assert range_problems(_pyproject(), dist.version) == []
+
+
+SHA0 = "d5821faa8742dea012abda3b663549c038d76543"
+GIT_URL = "https://github.com/peterkarlhuber/tabrion.git"
+ARCHIVE_URL = f"https://github.com/peterkarlhuber/tabrion/archive/{SHA0}.tar.gz"
+LOCK_TEXT = f"# lock\ntabrion @ {ARCHIVE_URL} \\\n    --hash=sha256:aa\n"
+
+
+@pytest.mark.parametrize(
+    ("direct_url", "local_ok"),
+    [
+        (json.dumps({"url": GIT_URL, "vcs_info": {"vcs": "git", "commit_id": SHA0}}), False),
+        (json.dumps({"url": ARCHIVE_URL, "archive_info": {"hashes": {"sha256": "aa"}}}), False),
+        (json.dumps({"url": "file:///home/dev/tabrion", "dir_info": {"editable": True}}), True),
+    ],
+)
+def test_installed_sources_that_pass(direct_url: str, local_ok: bool) -> None:
+    assert installed_problems(direct_url, SHA0, LOCK_TEXT, local_ok=local_ok) == []
+
+
+@pytest.mark.parametrize(
+    "direct_url",
+    [
+        None,  # from a package index
+        "{not json",
+        json.dumps({"vcs_info": {"commit_id": SHA0}}),  # no URL
+        json.dumps({"url": GIT_URL, "vcs_info": {"vcs": "git", "commit_id": "0" * 40}}),  # another commit
+        json.dumps({"url": "https://github.com/someone/tabrion.git", "vcs_info": {"commit_id": SHA0}}),
+        json.dumps({"url": ARCHIVE_URL.replace(SHA0, "0" * 40), "archive_info": {}}),  # another archive
+        json.dumps({"url": "https://files.example/tabrion-0.1.0-py3-none-any.whl", "archive_info": {}}),
+        json.dumps({"url": "file:///home/dev/tabrion", "dir_info": {}}),  # local, without the escape hatch
+        json.dumps({"url": GIT_URL}),  # no known source
+    ],
+)
+def test_installed_sources_that_fail(direct_url: str | None) -> None:
+    assert installed_problems(direct_url, SHA0, LOCK_TEXT, local_ok=False) != []
 
 
 GOOD = "tabrion @ git+https://github.com/peterkarlhuber/tabrion.git@d5821faa8742dea012abda3b663549c038d76543"

@@ -463,3 +463,31 @@ def test_user_memberships_are_listed_as_far_as_the_caller_may_read(world):
     world.user("nobody@example.com")
     assert world.login_as("nobody@example.com").get(f"/v1/users/{uid}/memberships").status_code == 404
     assert world.admin.get("/v1/users/usr_unknown/memberships").status_code == 404
+
+
+def test_invitations_refuse_addresses_with_header_separators(world):
+    """B-05: tenant and product invitations (and verified emails of external users) refuse addresses no mail
+    can be sent to; nothing is stored."""
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    for email in ("victim@x.test\r\nBcc:evil@evil.test", "a@x.test,b@evil.test", "a@x.test;b@evil.test"):
+        r = world.admin.post(
+            f"/v1/products/{pid}/tenants/{tid}/invitations", json={"email": email, "role": "member"}
+        )
+        assert r.status_code == 422 and r.json()["detail"] == "invalid email address", r.text
+        r = world.admin.post(
+            f"/v1/products/{pid}/invitations", json={"email": email, "role": "product_admin"}
+        )
+        assert r.status_code == 422 and r.json()["detail"] == "invalid email address", r.text
+        r = world.admin.post(
+            "/v1/users/external",
+            json={
+                "provider": "https://idp.example",
+                "subject": "s-1",
+                "email": email,
+                "email_verified": True,
+            },
+        )
+        assert r.status_code == 422 and r.json()["detail"] == "invalid email address", r.text
+    assert world.admin.get(f"/v1/products/{pid}/tenants/{tid}/invitations").json() == []
+    assert world.admin.get(f"/v1/products/{pid}/invitations").json() in ([], {"items": []})

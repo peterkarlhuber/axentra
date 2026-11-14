@@ -53,12 +53,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+#: Password prefixes of the templates (``deploy/compose/.env.example``): never a real password.
+_PLACEHOLDER_PASSWORDS = ("change-me", "replace-with")
+
+
+def _check_placeholder_password(settings: Settings, url: str, setting: str) -> str:
+    """Refuse a template password in ``url`` (a URL or a libpq ``key=value`` string) in production, warn
+    elsewhere (C-03). A string libpq cannot parse is left to the connection attempt."""
+    from psycopg import Error as PsycopgError
+    from psycopg.conninfo import conninfo_to_dict
+
+    try:
+        password = str(conninfo_to_dict(url).get("password") or "")
+    except PsycopgError:
+        return url
+    if password.lower().startswith(_PLACEHOLDER_PASSWORDS):
+        if settings.is_production:
+            raise ConfigurationError(
+                f"{setting} uses the placeholder password of the template; set a generated password"
+            )
+        logger.warning("%s uses the placeholder password of the template (refused in production)", setting)
+    return url
+
+
 def _database_url(settings: Settings) -> str:
     if settings.database.url_ref:
         from axentra.config.secrets import resolve_secret
 
-        return resolve_secret(settings.database.url_ref)
-    return settings.database.url
+        url = resolve_secret(settings.database.url_ref)
+    else:
+        url = settings.database.url
+    return _check_placeholder_password(settings, url, "database.url")
 
 
 def _migration_url(settings: Settings) -> str:
@@ -66,8 +91,13 @@ def _migration_url(settings: Settings) -> str:
     if settings.database.migration_url_ref:
         from axentra.config.secrets import resolve_secret
 
-        return resolve_secret(settings.database.migration_url_ref)
-    return settings.database.migration_url or _database_url(settings)
+        url = resolve_secret(settings.database.migration_url_ref)
+        return _check_placeholder_password(settings, url, "database.migration_url")
+    if settings.database.migration_url:
+        return _check_placeholder_password(
+            settings, settings.database.migration_url, "database.migration_url"
+        )
+    return _database_url(settings)
 
 
 def _dev_keyring_spec(settings: Settings) -> str | None:
@@ -105,6 +135,8 @@ class Axentra:
             min_size=settings.database.pool_min,
             max_size=settings.database.pool_max,
             statement_timeout_ms=settings.database.statement_timeout_ms,
+            idle_in_transaction_timeout_ms=settings.database.idle_in_transaction_timeout_ms,
+            application_name=settings.database.application_name,
         )
         self.keyring = (
             keyring

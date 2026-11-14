@@ -47,8 +47,14 @@ _AUTH_QUERY = re.compile(
 _URLSAFE_CHAR = r"(?:[A-Za-z0-9_-]|%(?:25)*[0-9A-Fa-f]{2})"
 _PATTERNS = [
     re.compile(f"axk{_enc('_')}[a-z0-9]+{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra API keys
-    re.compile(f"axinv{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra invitation tokens
+    # Axentra one-time tokens: tenant invitations (``axinv_``), product invitations (``axpinv_``), password resets
+    # (``axpwr_``), email verifications (``axemv_``) and setup tokens (``axsetup_``).
+    re.compile(f"ax(?:inv|pinv|pwr|emv|setup){_enc('_')}{_URLSAFE_CHAR}{{16,}}"),
     re.compile(f"whsec{_enc('_')}{_URLSAFE_CHAR}{{16,}}"),  # Axentra webhook signing secrets
+    # Signed download tokens ``d1.<kid>.<payload>.<mac>`` (storage/tokens.py), such as the last segment of
+    # ``/v1/files/download/<token>`` in a request line. No left boundary: the token may follow any character
+    # (``x_d1...``, or ``%252Fd1...`` when the URL is encoded twice).
+    re.compile(f"d1{_enc('.')}[A-Za-z0-9]+{_enc('.')}{_URLSAFE_CHAR}{{8,}}{_enc('.')}{_URLSAFE_CHAR}{{16,}}"),
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{8,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),  # JWTs
 ]

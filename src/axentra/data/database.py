@@ -31,6 +31,7 @@ import psycopg
 from psycopg import pq
 from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import ConnectionPool
+from tabrion.postgres import SessionSettings, configure, session_configurator
 from tabrion.postgres import role_info as _tabrion_role_info
 
 from axentra.core.errors import ConfigurationError, NotFound
@@ -213,9 +214,22 @@ class Database:
         min_size: int = 1,
         max_size: int = 10,
         statement_timeout_ms: int = 30_000,
+        idle_in_transaction_timeout_ms: int = 0,
+        application_name: str = "",
         pool: Any = None,
     ) -> None:
         self._timeout = statement_timeout_ms
+        #: The session settings of each connection of Axentra's own pool (TABRION MIG-AXE-4). Only
+        #: ``statement_timeout`` by default; the others stay the server's unless set (``0`` / ``""``: not set).
+        self._session = SessionSettings(
+            statement_timeout_ms=statement_timeout_ms,
+            lock_timeout_ms=None,
+            idle_in_transaction_timeout_ms=idle_in_transaction_timeout_ms or None,
+            transaction_timeout_ms=None,
+            application_name=application_name or None,
+            search_path=None,
+            timezone=None,
+        )
         self._joined = _Joined()
         if pool is not None:
             #: A borrowed pool (:meth:`on_pool`): the host opens and closes it.
@@ -223,6 +237,8 @@ class Database:
             self.pool = pool
             self.url = url or str(getattr(pool, "conninfo", "") or "")
             return
+        # Validates the session settings now (tabrion.errors.ConfigurationError), not when the pool connects.
+        session_configurator(self._session)
         self.owns_pool = True
         self.url = url
         self.pool = ConnectionPool(
@@ -263,7 +279,11 @@ class Database:
         return cls(url, pool=pool)
 
     def _configure(self, conn: psycopg.Connection[Row]) -> None:
-        conn.execute("SELECT set_config('statement_timeout', %s, false)", (str(self._timeout),))
+        """Session settings of a new connection of Axentra's own pool (never of a borrowed one, :meth:`on_pool`).
+
+        ``tabrion.postgres.configure`` sets them with ``set_config(..., false)`` in one round trip and does not
+        commit; the pool needs an idle connection, so Axentra commits (TABRION MIG-AXE-4)."""
+        configure(conn, self._session)
         conn.commit()
 
     def open(self, wait: bool = True, timeout: float = 30.0) -> None:

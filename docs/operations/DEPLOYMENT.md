@@ -41,6 +41,11 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
   `docker run --rm --entrypoint cat axentra:local /opt/axentra/sbom.cdx.json`; CI keeps it as the
   artifact `sbom-axentra`. It covers Python distributions, not the Debian packages of the base
   image (scan the image for those).
+- Reproducible build: build with `--build-arg SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` and an output
+  with `rewrite-timestamp=true` (for example
+  `docker buildx build --no-cache --build-arg SOURCE_DATE_EPOCH=... --output type=image,name=axentra:local,rewrite-timestamp=true .`).
+  Two builds of one commit then give the same platform manifest, config and layers (checked in the internal
+  release-candidate dry run of 2026-11-14); the image index around them can still differ by its attestations.
 - Runs as `axentra` (uid/gid 10001), working directory `/var/lib/axentra`.
 - `ENTRYPOINT ["axentra"]`, default `CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]`, so
   `docker run axentra:local migrate` or `... admin setup-token` run other commands.
@@ -69,7 +74,8 @@ the configuration file (`deploy/config/single.toml` or `multi.toml`):
 job runs `taskboard migrate` (Axentra's and the `taskboard` namespace), and its `app` serves
 Taskboard with the Axentra API mounted under `/axentra`, on port 8090, using its own database.
 
-Values come from `deploy/compose/.env` (template: `.env.example`): database passwords
+Values come from `deploy/compose/.env` (template: `.env.example` for a local trial,
+`.env.production.example` for a server): database passwords
 (URL-safe, e.g. `openssl rand -hex 24`), the keyring (`AXENTRA_MASTER_KEYS`, from
 `axentra keys generate`), and `AXENTRA_ENVIRONMENT`, `AXENTRA_PUBLIC_URL`,
 `AXENTRA_ALLOWED_ORIGINS`, `AXENTRA_HTTP_PORT`, which override the TOML file.
@@ -96,7 +102,11 @@ again (idempotent) before the API restarts. Take a backup first
 ([BACKUP_RESTORE](BACKUP_RESTORE.md)); migrations are forward-only.
 
 The compose files are a starting point for a single host. They do not include a reverse proxy or
-TLS; `.env.example` uses `development` so that plain HTTP on localhost works.
+TLS; `.env.example` uses `development` so that plain HTTP on localhost works. Every stack publishes its
+port on `AXENTRA_BIND_ADDRESS` (default `127.0.0.1`, reachable only from the host itself); set it to
+`0.0.0.0` or a specific address only behind a TLS-terminating proxy and with `AXENTRA_ENVIRONMENT=production`,
+which refuses the placeholder passwords of the templates. The image itself defaults to `production`
+when no environment is passed.
 
 ## Production checklist
 

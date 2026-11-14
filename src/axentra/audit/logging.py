@@ -33,7 +33,8 @@ class JsonFormatter(logging.Formatter):
         keys = ("method", "path", "status", "duration_ms", "product_id", "tenant_id", "job_id")
         for key in (*keys, "db_sqlstate", "db_constraint"):
             if hasattr(record, key):
-                data[key] = getattr(record, key)
+                value = getattr(record, key)
+                data[key] = redact_text(value) if isinstance(value, str) else value
         return json.dumps(data, default=str)
 
 

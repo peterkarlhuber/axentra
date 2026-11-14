@@ -17,6 +17,7 @@ configuration (missing keys, wildcard origins, plain HTTP cookies, a superuser d
 from __future__ import annotations
 
 from enum import StrEnum
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -82,7 +83,13 @@ class DatabaseSettings(_Section):
     """Also apply migrations published by installed packages in the ``axentra.migrations`` entry point group."""
     pool_min: int = Field(1, ge=0)
     pool_max: int = Field(10, ge=1)
-    statement_timeout_ms: int = Field(30_000, ge=0)
+    statement_timeout_ms: int = Field(30_000, ge=0, le=2_147_483_647)
+    idle_in_transaction_timeout_ms: int = Field(0, ge=0, le=2_147_483_647)
+    """``idle_in_transaction_session_timeout`` of each connection of Axentra's own pool (``0``: not set, the
+    server's setting). Ends a session that keeps a transaction open without a statement for longer."""
+    application_name: str = Field("", max_length=63, pattern=r"^[\x20-\x7e]*$")
+    """``application_name`` of each connection of Axentra's own pool (``""``: not set, the server's or the URL's
+    value); printable ASCII, at most 63 characters."""
     allow_superuser: bool = False
     """Superusers bypass row-level security; refused in production unless explicitly allowed."""
     allow_table_owner: bool | None = None
@@ -397,8 +404,22 @@ class SearchSettings(_Section):
     """Write an audit event for every index upsert/delete (without document content)."""
 
 
+def is_loopback_url(url: str) -> bool:
+    """Whether ``url`` points at this machine only (``localhost``, ``*.localhost``, ``127.0.0.0/8``, ``::1``)."""
+    host = (urlsplit(url).hostname or "").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 class Settings(_Section):
     environment: Environment = Environment.DEVELOPMENT
+    """``development`` when not set, which relaxes the production checks. Without an explicit value the
+    installation must also have a loopback ``security.public_url`` (a local trial); anything reachable from
+    elsewhere refuses to start until ``environment`` is set (B-03)."""
     mode: DeploymentMode = DeploymentMode.SINGLE
     modules: list[str] = Field(default_factory=lambda: list(MODULES))
     product: ProductSettings = Field(default_factory=ProductSettings)
@@ -476,6 +497,11 @@ class Settings(_Section):
         ``Axentra(..., keyring=...)``, so ``security.master_keys_ref`` is not required (inline
         ``security.master_keys`` stays refused in production)."""
         problems: list[str] = []
+        if "environment" not in self.model_fields_set and not is_loopback_url(self.security.public_url):
+            problems.append(
+                f"environment is not set and security.public_url ({self.security.public_url}) is not a loopback"
+                ' address: set environment = "production" (or "development" explicitly for a trial installation)'
+            )
         if self.is_production:
             if not self.security.public_url.startswith("https://"):
                 problems.append("security.public_url must use https in production")

@@ -19,6 +19,21 @@ SECRETS = [
     ('{"body": "new_password=Correct-Horse-9"}', "Correct-Horse-9"),
     ("client_id=abc&client_secret=c1i3nt-s3cr3t&code=x", "c1i3nt-s3cr3t"),
     ("return_to=%2Fx%3Fclient%5Fsecret%3Dc1i3nt-s3cr3t", "c1i3nt-s3cr3t"),
+    # B-02: every prefixed token Axentra issues.
+    ("invited with axinv_" + "Inv-_" * 9, "Inv-_" * 9),
+    ("product invitation axpinv_" + "Pinv0" * 9, "Pinv0" * 9),
+    ("reset link /reset?x=1#axpwr_" + "Pwr9-" * 9, "Pwr9-" * 9),
+    ("verify axemv_" + "Emv7_" * 9, "Emv7_" * 9),
+    ("setup token axsetup_" + "Setup" * 9, "Setup" * 9),
+    ("encoded axpinv%5F" + "Pinv1" * 9, "Pinv1" * 9),
+    # B-01: signed download tokens in a request line (uvicorn access log) and percent-encoded.
+    (
+        '127.0.0.1:5000 - "GET /v1/files/download/d1.k1.eyJmIjoiZmlsXzEifQ.' + "M4c-_" * 9 + ' HTTP/1.1" 200',
+        "M4c-_" * 9,
+    ),
+    ("next=%2Fv1%2Ffiles%2Fdownload%2Fd1%2Ek1%2EeyJmIjoiZmlsXzEifQ%2E" + "M4c" * 15, "M4c" * 15),
+    ("next=%252Fv1%252Ffiles%252Fdownload%252Fd1.k1.eyJmIjoiZmlsXzEifQ." + "M4d" * 15, "M4d" * 15),
+    ("x_d1.k1.eyJmIjoiZmlsXzEifQ." + "M4e" * 15, "M4e" * 15),
 ]
 
 HARMLESS = [
@@ -30,6 +45,8 @@ HARMLESS = [
     "whsec_short",
     "a = b, password reset requested",
     "GET /v1/products?page=2&limit=50",
+    "GET /v1/files/download/garbage",
+    "version d1.2.3 of the schema",
 ]
 
 

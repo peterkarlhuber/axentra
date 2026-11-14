@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from axentra.core.errors import ConfigurationError
@@ -312,3 +314,80 @@ def test_parallel_runners_on_a_fresh_database_apply_each_migration_once(pg_urls)
     finally:
         with psycopg.connect(pg_urls["server_admin"], autocommit=True) as conn:
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(fresh)))
+
+
+def test_a_waiting_runner_does_not_block_create_index_concurrently(pg_urls):
+    """TABRION MIG-AXE-5: runner A holds the migration lock and applies a ``-- axentra:no-transaction`` migration with
+    ``CREATE INDEX CONCURRENTLY`` while runner B waits for the lock. B waits with ``wait_advisory_lock`` (polling,
+    no open statement or snapshot between attempts), so the index build does not wait for B and both finish: A
+    applies the migration, B finds nothing pending. A blocking ``pg_advisory_lock`` in B would hold a snapshot and
+    the index build would wait for it forever."""
+    import threading
+
+    import psycopg
+
+    from axentra.data.migrations import MIGRATION_LOCK
+
+    migs = [
+        Migration(
+            "cicwait_ns",
+            1,
+            "concurrent_index",
+            "-- axentra:no-transaction\n"
+            "CREATE TABLE IF NOT EXISTS cicwait_ns_items (id int PRIMARY KEY, label text);\n"
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS cicwait_ns_items_label ON cicwait_ns_items (label);\n",
+        )
+    ]
+    results: dict[str, list[str]] = {}
+    errors: list[BaseException] = []
+    b_started = threading.Event()
+
+    def run(name: str, **kwargs) -> None:
+        runner = MigrationRunner(pg_urls["owner"])
+        runner.register(migs)
+        try:
+            results[name] = runner.migrate(**kwargs)
+        except BaseException as exc:  # reported by the main thread
+            errors.append(exc)
+
+    def start_b_while_a_holds_the_lock(pending) -> None:
+        # Called under A's migration lock, before A applies anything: B starts and waits for the lock.
+        b.start()
+        b_started.set()
+        with psycopg.connect(pg_urls["admin"], autocommit=True) as admin:
+            for _ in range(100):
+                waiting = admin.execute(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                    " AND query LIKE %s AND pid <> pg_backend_pid()",
+                    ("%pg_try_advisory_lock%",),
+                ).fetchone()[0]
+                if waiting:
+                    break
+                time.sleep(0.05)
+            assert waiting, "runner B never tried the migration lock"
+            # A still holds the lock (advisory locks are per database).
+            assert admin.execute("SELECT pg_try_advisory_lock(%s)", (MIGRATION_LOCK,)).fetchone() == (False,)
+
+    b = threading.Thread(target=run, args=("b",), daemon=True)
+    a = threading.Thread(
+        target=run, args=("a",), kwargs={"before_apply": start_b_while_a_holds_the_lock}, daemon=True
+    )
+    try:
+        a.start()
+        a.join(timeout=60)
+        assert not a.is_alive(), "runner A did not finish: CREATE INDEX CONCURRENTLY waited for runner B"
+        assert errors == []
+        assert b_started.is_set()
+        b.join(timeout=60)
+        assert not b.is_alive(), "runner B did not finish after A released the lock"
+        assert errors == []
+        assert results == {"a": ["cicwait_ns:0001_concurrent_index"], "b": []}
+        with psycopg.connect(pg_urls["admin"], autocommit=True) as conn:
+            valid = conn.execute(
+                "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass('cicwait_ns_items_label')"
+            ).fetchone()
+            assert valid == (True,)
+    finally:
+        _delete_namespace(pg_urls, "cicwait_ns")
+        with psycopg.connect(pg_urls["admin"], autocommit=True) as conn:
+            conn.execute("DROP TABLE IF EXISTS cicwait_ns_items")

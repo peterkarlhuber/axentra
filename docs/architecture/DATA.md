@@ -81,13 +81,14 @@ also visible in tenant scope of the same product (see
   mode (for `CREATE INDEX CONCURRENTLY`, or `ALTER TYPE ... ADD VALUE` before PostgreSQL 12), and
   is recorded after its last statement. It cannot be rolled back halfway: make every statement
   re-runnable (`IF NOT EXISTS`, `CREATE OR REPLACE`). Statements are split at top-level
-  semicolons (quotes, dollar quotes and comments are respected).
+  semicolons by `tabrion.sql.split_statements` (PostgreSQL's quoting rules: quotes, `E'...'` escapes, dollar
+  quotes and nested comments are respected).
   An interrupted `CREATE INDEX CONCURRENTLY` leaves an `INVALID` index that `IF NOT EXISTS` would
   keep: find it with `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it
   (`DROP INDEX CONCURRENTLY ...`) and run `axentra migrate` again. Axentra's own `0014` (time-sort
   indexes of `axentra_records`) is such a migration. Runners wait for the migration lock by
-  polling (`pg_try_advisory_lock`), so a waiting runner holds no snapshot that a concurrent index
-  build of the lock holder would wait for.
+  polling (`pg_try_advisory_lock`, through `tabrion.postgres.wait_advisory_lock`), so a waiting runner holds no
+  snapshot that a concurrent index build of the lock holder would wait for.
 - **Timeouts.** `-- axentra:lock-timeout=<duration>` and `-- axentra:statement-timeout=<duration>`
   in a file's leading comment lines (a PostgreSQL duration: `250ms`, `5s`, `2min`) set
   `lock_timeout` / `statement_timeout` for that migration only; `database.migration_lock_timeout_ms`
@@ -134,4 +135,8 @@ Clients must not parse them ([ADR 0008](../adr/0008-ids-and-pagination.md)).
 - Invariants that span rows (last platform admin, last owner) are checked inside the same
   transaction as the change.
 - Audit events are written in the same transaction as the change they describe.
-- `statement_timeout` (`database.statement_timeout_ms`, default 30 s) bounds every statement.
+- `statement_timeout` (`database.statement_timeout_ms`, default 30 s) bounds every statement. Each new
+  connection of Axentra's own pool is set up with `tabrion.postgres.configure` (`set_config(..., false)`, then a
+  commit): the statement timeout, and `idle_in_transaction_session_timeout` and `application_name` only when
+  `database.idle_in_transaction_timeout_ms` / `database.application_name` are set (default: not set). A pool
+  borrowed from the host (`Database.on_pool`) is never configured.

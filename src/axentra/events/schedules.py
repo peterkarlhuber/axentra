@@ -19,11 +19,13 @@ from __future__ import annotations
 import builtins
 import contextlib
 from datetime import datetime
+import json
 import logging
 from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
+from tabrion.postgres import SessionLock
 
 from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
@@ -70,53 +72,75 @@ def _validate_timing(interval_seconds: int | None, cron: str | None) -> None:
 
 
 class LeaderLock:
-    """A session-level advisory lock held on a dedicated (non-pooled) connection."""
+    """A session-level advisory lock held on a dedicated (non-pooled) connection.
+
+    Delegates to ``tabrion.postgres.SessionLock`` (TABRION MIG-AXE-5) with the same key and the same footprint as
+    before: an autocommit connection (``connect_timeout=10``) only while it leads or tries to, nothing set on its
+    session, closed after a failed attempt and on :meth:`release`."""
 
     def __init__(self, url: str, key: int = SCHEDULER_LOCK) -> None:
         self.url = url
         self.key = key
-        self._conn: psycopg.Connection[Any] | None = None
+        self._lock: SessionLock | None = None
+        self._session: psycopg.Connection[Any] | None = None
+        self._leading = False
+
+    def _remember(self, conn: psycopg.Connection[Any]) -> None:
+        """``SessionLock``'s ``configure`` callback: notes the lock connection and sets nothing on its session."""
+        self._session = conn
+
+    @property
+    def _conn(self) -> psycopg.Connection[Any] | None:
+        """The connection that holds the lock while this process leads (``None`` otherwise)."""
+        return self._session if self._leading else None
 
     @property
     def held(self) -> bool:
-        return self._conn is not None
+        return self._leading
 
     def acquire(self) -> bool:
         """``True`` while this process is the leader; re-checks the connection every call."""
-        if self._conn is not None:
-            try:
-                self._conn.execute("SELECT 1")
-                return True
-            except psycopg.Error:
-                logger.warning("scheduler leader connection lost; re-electing")
-                self._drop()
         try:
-            conn = psycopg.connect(self.url, autocommit=True, connect_timeout=10)
+            if self._leading and self._lock is not None:
+                if self._lock.holds(self.key):  # SELECT 1 on the lock connection
+                    return True
+                logger.warning("scheduler leader connection lost; re-electing")
+                self._leading = False
+            if self._lock is None:
+                self._lock = SessionLock(
+                    self.url,
+                    connect_kwargs={"autocommit": True, "connect_timeout": 10},
+                    configure=self._remember,
+                )
+            self._leading = self._lock.try_acquire(self.key)
         except psycopg.Error:
             logger.warning("scheduler cannot connect for the leader lock", exc_info=True)
-            return False
-        row = conn.execute("SELECT pg_try_advisory_lock(%s)", (self.key,)).fetchone()
-        if row and row[0]:
-            self._conn = conn
-            return True
-        conn.close()
-        return False
+            self._leading = False
+        if not self._leading:
+            self._close()
+        return self._leading
 
-    def _drop(self) -> None:
-        if self._conn is not None:
-            with contextlib.suppress(psycopg.Error):
-                self._conn.close()
-        self._conn = None
+    def _close(self) -> None:
+        lock, self._lock = self._lock, None
+        self._leading = False
+        self._session = None
+        if lock is not None:
+            lock.close()  # closing the connection frees the lock
 
     def release(self) -> None:
-        if self._conn is not None:
+        if self._lock is not None and self._leading:
             with contextlib.suppress(psycopg.Error):
-                self._conn.execute("SELECT pg_advisory_unlock(%s)", (self.key,))
-        self._drop()
+                self._lock.release(self.key)
+        self._close()
 
 
 def _schedule(row: Row) -> Schedule:
     return Schedule.model_validate(row)
+
+
+def _canonical(value: Any) -> str:
+    """JSON text that tells types apart (``1``, ``1.0`` and ``true`` compare equal in Python)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 class ScheduleService:
@@ -379,6 +403,16 @@ class ScheduleService:
             if timing_changed
             else row["next_run_at"]
         )
+        # The schedule's jobs act with what its ``created_by`` holds (JobService.principal_for). A
+        # caller who changes what runs (the kind or payload) or turns a disabled schedule on takes
+        # that place, so an editor cannot run its own choice with the creator's permissions.
+        acting = row["created_by"]
+        if (
+            merged["kind"] != row["kind"]
+            or _canonical(merged["payload"]) != _canonical(row["payload"])
+            or (bool(merged["enabled"]) and not row["enabled"])
+        ):
+            acting = principal.actor.id
         with self.db.transaction(job_scope(product_id, row["tenant_id"])) as tx:
             cur = tx.one_or_404(
                 "SELECT version FROM axentra_schedules WHERE id = %s AND product_id = %s FOR UPDATE",
@@ -389,8 +423,8 @@ class ScheduleService:
                 raise PreconditionFailed("the schedule was changed by someone else")
             tx.execute(
                 "UPDATE axentra_schedules SET name = %s, kind = %s, payload = %s, interval_seconds = %s, cron = %s,"
-                " enabled = %s, priority = %s, max_attempts = %s, next_run_at = %s, version = version + 1,"
-                " updated_at = now() WHERE id = %s",
+                " enabled = %s, priority = %s, max_attempts = %s, next_run_at = %s, created_by = %s,"
+                " version = version + 1, updated_at = now() WHERE id = %s",
                 (
                     str(merged["name"]).strip(),
                     merged["kind"],
@@ -401,6 +435,7 @@ class ScheduleService:
                     merged["priority"],
                     merged["max_attempts"],
                     nxt,
+                    acting,
                     schedule_id,
                 ),
             )
@@ -412,7 +447,12 @@ class ScheduleService:
                 target_id=schedule_id,
                 product_id=product_id,
                 tenant_id=row["tenant_id"],
-                details={"fields": sorted(changes)},
+                details={"fields": sorted(changes)}
+                | (
+                    {"created_by": {"from": row["created_by"], "to": acting}}
+                    if acting != row["created_by"]
+                    else {}
+                ),
             )
             out = tx.one_or_404("SELECT * FROM axentra_schedules WHERE id = %s", (schedule_id,))
         return _schedule(out)

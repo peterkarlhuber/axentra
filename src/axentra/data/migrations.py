@@ -54,11 +54,12 @@ from importlib import metadata, resources
 import logging
 from pathlib import Path
 import re
-import time
 from typing import Any
 
 import psycopg
 from psycopg.rows import tuple_row
+from tabrion.postgres import advisory_unlock, wait_advisory_lock
+from tabrion.sql import split_statements as split_statements  # re-exported (G-AX-6, TABRION MIG-AXE-2)
 
 from axentra.core.errors import ConfigurationError
 
@@ -71,7 +72,6 @@ NO_TRANSACTION_MARKER = "-- axentra:no-transaction"
 _TIMEOUT_DIRECTIVE = re.compile(r"^--\s*axentra:(lock|statement)-timeout\s*=(.*)$", re.IGNORECASE)
 #: Durations accepted in timeout directives (a number with an optional PostgreSQL unit).
 _DURATION = re.compile(r"^[0-9]{1,9}(us|ms|s|min|h|d)?$")
-_DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,62 +120,6 @@ class Migration:
                 raise ValueError(f"migration {self.label}: invalid {m.group(1)}-timeout {m.group(2)!r}")
             found[f"{m.group(1).lower()}_timeout"] = value
         return found
-
-
-def split_statements(sql: str) -> list[str]:
-    """Split SQL into statements at top-level semicolons.
-
-    Understands quoted strings and identifiers, dollar-quoted bodies and comments; used only for
-    ``-- axentra:no-transaction`` migrations, whose statements must be sent one at a time."""
-    out: list[str] = []
-    buf: list[str] = []
-    i, n = 0, len(sql)
-    while i < n:
-        c = sql[i]
-        if c == "-" and sql.startswith("--", i):
-            end = sql.find("\n", i)
-            end = n if end < 0 else end
-            buf.append(sql[i:end])
-            i = end
-        elif c == "/" and sql.startswith("/*", i):
-            end = sql.find("*/", i + 2)
-            end = n if end < 0 else end + 2
-            buf.append(sql[i:end])
-            i = end
-        elif c in ("'", '"'):
-            j = i + 1
-            while j < n:
-                if sql[j] == c:
-                    if j + 1 < n and sql[j + 1] == c:  # doubled quote
-                        j += 2
-                        continue
-                    break
-                j += 1
-            buf.append(sql[i : j + 1])
-            i = j + 1
-        elif c == "$" and (m := _DOLLAR_TAG.match(sql, i)):
-            tag = m.group(0)
-            end = sql.find(tag, i + len(tag))
-            end = n if end < 0 else end + len(tag)
-            buf.append(sql[i:end])
-            i = end
-        elif c == ";":
-            out.append("".join(buf))
-            buf = []
-            i += 1
-        else:
-            buf.append(c)
-            i += 1
-    out.append("".join(buf))
-    return [s.strip() for s in out if _has_code(s)]
-
-
-def _has_code(statement: str) -> bool:
-    for line in statement.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("--"):
-            return True
-    return False
 
 
 class SchemaNotCurrent(ConfigurationError):
@@ -304,17 +248,6 @@ def discover_migrations(
         for ep in sorted(eps, key=lambda e: e.name):
             out.extend(_coerce(ep.load(), f"entry point {ep.name} ({ep.value})"))
     return out
-
-
-def _wait_for_lock(conn: psycopg.Connection[Any], poll_seconds: float = 0.2) -> None:
-    """Take the migration lock, polling instead of blocking in ``pg_advisory_lock``.
-
-    A blocking ``pg_advisory_lock`` keeps a statement (and its snapshot) open while it waits, and
-    ``CREATE INDEX CONCURRENTLY`` in a ``-- axentra:no-transaction`` migration of the runner that
-    holds the lock waits for every open snapshot: the two runners would deadlock. Between tries no
-    statement is open here."""
-    while not conn.execute("SELECT pg_try_advisory_lock(%s)", (MIGRATION_LOCK,)).fetchone()[0]:  # type: ignore[index]
-        time.sleep(poll_seconds)
 
 
 def render_plan(pending: Sequence[Migration], timeouts: dict[str, str] | None = None) -> str:
@@ -497,7 +430,10 @@ class MigrationRunner:
         raises, nothing is applied."""
         done: list[str] = []
         with psycopg.connect(self.url, autocommit=True) as conn:
-            _wait_for_lock(conn)
+            # Polls pg_try_advisory_lock (TABRION MIG-AXE-5): a blocking pg_advisory_lock keeps a statement, and its
+            # snapshot, open while it waits, and CREATE INDEX CONCURRENTLY in a no-transaction migration of the
+            # runner that holds the lock waits for every open snapshot: the two runners would deadlock.
+            wait_advisory_lock(conn, MIGRATION_LOCK)
             try:
                 self._ensure_table(conn)
                 pending = self._checked_pending(conn, allow_newer=allow_newer)
@@ -508,7 +444,7 @@ class MigrationRunner:
                     logger.info("applied migration %s", mig.label)
                     done.append(mig.label)
             finally:
-                conn.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK,))
+                advisory_unlock(conn, MIGRATION_LOCK)
         return done
 
     def plan(self, *, allow_newer: bool = False) -> list[Migration]:
