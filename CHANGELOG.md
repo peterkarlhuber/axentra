@@ -25,6 +25,11 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Fixed (TABRION TB-150 follow-up): the error of a refused `grant_runtime_role` names Tabrion's new reason
+  `predefined_role` (a member of a predefined role such as `pg_read_all_data`, refused by Tabrion from the release
+  with tabrion #77 on) with the roles, and names any reason Axentra does not know yet instead of an empty sentence.
+  No change with the pinned Tabrion 0.2.1, which never raises `predefined_role`; Axentra's own `pg_write_all_data`
+  refusal still comes first.
 - Fixed (TABRION QA-7): `scripts/check_tabrion_api.py --surface` no longer reports a `__x__` name such as
   `tabrion.postgres.SessionSettings.__dataclass_fields__` (`tests/integration/test_session_settings.py`) as missing
   from Tabrion's `docs/api/surface.json`. Such names are public (the `__all__` check already skipped them) and have
