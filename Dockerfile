@@ -15,7 +15,7 @@
 # The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
 
 # --- build: install Axentra and its pinned dependencies into a self-contained venv -------------
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS build
 # Reproducible builds: with --build-arg SOURCE_DATE_EPOCH=<commit time> pip compiles the .pyc files with
 # hash-based invalidation (no source mtime in their headers), so two builds of one commit give identical
 # layers when the output also uses rewrite-timestamp=true. Without the argument the build is unchanged.
@@ -49,7 +49,7 @@ RUN lock=deploy/locks/full.txt; if [ "${EXTRAS}" = "server" ]; then lock=deploy/
     && /opt/axentra/bin/python -m pip uninstall --yes --quiet pip
 
 # --- runtime ------------------------------------------------------------------------------------
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS runtime
 LABEL org.opencontainers.image.title="Axentra" \
       org.opencontainers.image.description="Modular SaaS backend foundation (HTTP API)" \
       org.opencontainers.image.source="https://github.com/peterkarlhuber/axentra" \
