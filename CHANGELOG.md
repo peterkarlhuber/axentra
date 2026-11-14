@@ -25,6 +25,12 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Security (container image, release-candidate hardening): the runtime image contains no `pip` any more (its vendored
+  urllib3, msgpack and setuptools gave 5 HIGH scan findings; `pip check` still runs in the build stage), the
+  `python:3.13-slim` base moves to the current upstream digest (apt CVE-2026-109518), and the runtime stage installs
+  the Debian security fixes of a fixed `snapshot.debian.org` timestamp of `trixie-security` (zlib1g), so the image
+  stays reproducible. A scan then reports no fixable OS or Python finding. docs/operations/RELEASE_SIGNING.md
+  proposes a signing procedure (cosign with a key pair); nothing is signed or published yet.
 - Security (TABRION MIG-AXE-6): role tools run on `tabrion.postgres` (`inspect_role`, `grant_runtime_role`,
   `role_info`); `axentra.data.roles` is a shim with the same `RoleReport`, `as_dict()` and error texts, and the
   grants are identical. The role check is stricter: a role counts as superuser, `BYPASSRLS` or table owner also when

@@ -364,7 +364,7 @@ jobs:
         run: |
           docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:ci-full .
           docker run --rm --entrypoint python axentra:ci-full -c "import axentra.identity.oidc, jwt, httpx, boto3, opentelemetry.sdk, opentelemetry.exporter.otlp.proto.http; print('extras ok')"
-          docker run --rm --entrypoint pip axentra:ci-full check
+          ! docker run --rm --entrypoint python axentra:ci-full -I -c "import pip"  # no installer in the image
           test "$(docker run --rm --entrypoint id axentra:ci-full -u)" = "10001"
       - name: Build the Taskboard demo image
         run: docker build -f examples/taskboard/Dockerfile -t taskboard:ci .
@@ -379,7 +379,7 @@ jobs:
         run: |
           docker run --rm axentra:ci --version
           test "$(docker run --rm --entrypoint id axentra:ci -u)" = "10001"
-          ! docker run --rm --entrypoint pip axentra:ci freeze | grep -Ei "nodestro|orkexa|axentra-studio"
+          ! docker run --rm --entrypoint python axentra:ci -I -c "import importlib.metadata as m; print('\\n'.join(d.metadata['Name'] for d in m.distributions()))" | grep -Ei "nodestro|orkexa|axentra-studio|^pip$"
       # TABRION DC-AX-1: Tabrion in both images is the wheel built from the hashed archive of deploy/locks/tabrion.txt
       # (direct_url.json of a local file), never a release from a package index.
       - name: Images carry the Tabrion built from the hashed archive
