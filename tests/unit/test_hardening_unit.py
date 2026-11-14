@@ -105,3 +105,25 @@ def test_normalize_email_keeps_ordinary_addresses(email: str, normalized: str) -
     from axentra.identity.service import normalize_email
 
     assert normalize_email(email) == normalized
+
+
+@pytest.mark.parametrize(
+    "url", ["http://127.0.0.1:8080", "http://localhost:8080", "http://[::1]:8080", "http://api.localhost"]
+)
+def test_unset_environment_is_fine_for_a_local_trial(url: str) -> None:
+    settings = load_settings(None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url})
+    assert settings.environment == "development"
+    settings.validate_security()
+
+
+@pytest.mark.parametrize("url", ["https://api.example.com", "http://10.0.0.5:8080", "http://0.0.0.0:8080"])
+def test_unset_environment_with_a_reachable_public_url_refuses_to_start(url: str) -> None:
+    """B-03: a forgotten ``environment`` no longer silently runs a reachable installation in development mode."""
+    from axentra.core.errors import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="environment is not set"):
+        load_settings(None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url}).validate_security()
+    # Set explicitly, development stays possible (for example a trial on a LAN host).
+    load_settings(
+        None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url, "AXENTRA__ENVIRONMENT": "development"}
+    ).validate_security()

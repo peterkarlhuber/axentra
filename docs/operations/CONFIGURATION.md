@@ -41,7 +41,11 @@ library). In `environment = "production"` it refuses to start when:
 - `notify.invitation_accept_url` or `notify.account_url` is set and not `https://`.
 
 In every environment: `allowed_origins` must not contain `*`, and `billing.live_payments`
-requires `billing.provider = "stripe"`. At `Axentra.start()`, the database role is checked: a
+requires `billing.provider = "stripe"`. When `environment` is **not set at all** (it then defaults to
+`development`, which skips the checks above), `security.public_url` must be a loopback address
+(`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`): an installation reachable from elsewhere must
+say what it is, `production` or, for a trial, `development` explicitly. The default `public_url`
+(`http://127.0.0.1:8080`) keeps a local quick start working without any setting. At `Axentra.start()`, the database role is checked: a
 superuser or `BYPASSRLS` role is refused in production unless `database.allow_superuser = true`.
 
 The `axentra` command prints such operator errors (invalid or unknown configuration keys, failed
@@ -55,7 +59,7 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 
 | Key | Env | Default | Meaning |
 |---|---|---|---|
-| `environment` | `AXENTRA__ENVIRONMENT` | `"development"` | `development`, `test` or `production`. Production enables the checks above |
+| `environment` | `AXENTRA__ENVIRONMENT` | `"development"` | `development`, `test` or `production`. Production enables the checks above. Unset, only a loopback `public_url` is accepted |
 | `mode` | `AXENTRA__MODE` | `"single"` | `single` or `multi` ([DEPLOYMENT_MODELS](../architecture/DEPLOYMENT_MODELS.md)) |
 | `modules` | `AXENTRA__MODULES` | all known modules | Enabled modules; routers of disabled modules are not mounted. Known: `identity`, `tenancy`, `access`, `data`, `audit`, `storage`, `events`, `usage`, `billing`, `notify`, `search`, `realtime`. `identity`, `tenancy`, `access`, `audit` cannot be disabled. Only modules that are installed have an effect |
 | `features` | `AXENTRA__FEATURES__<NAME>` | `{}` | Free feature flags (`name = true`), read with `Settings.feature(name)` |
