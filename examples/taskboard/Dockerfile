@@ -11,7 +11,7 @@
 
 # The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
 
-FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS build
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS build
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
@@ -33,7 +33,7 @@ RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.
     && /opt/taskboard/bin/python -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d' \
     && /opt/taskboard/bin/taskboard --help > /dev/null
 
-FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS runtime
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
 LABEL org.opencontainers.image.title="Taskboard (Axentra demo)" \
       org.opencontainers.image.licenses="LicenseRef-Proprietary"
 RUN groupadd --system --gid 10001 taskboard \
