@@ -45,7 +45,8 @@ RUN lock=deploy/locks/full.txt; if [ "${EXTRAS}" = "server" ]; then lock=deploy/
     && /opt/axentra/bin/pip check \
     && /opt/axentra/bin/python -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d' \
     && /opt/axentra/bin/axentra --version \
-    && /opt/axentra/bin/python -I deploy/sbom.py --component axentra > /opt/axentra/sbom.cdx.json
+    && /opt/axentra/bin/python -I deploy/sbom.py --component axentra > /opt/axentra/sbom.cdx.json \
+    && /opt/axentra/bin/python -m pip uninstall --yes --quiet pip
 
 # --- runtime ------------------------------------------------------------------------------------
 FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS runtime
@@ -53,7 +54,13 @@ LABEL org.opencontainers.image.title="Axentra" \
       org.opencontainers.image.description="Modular SaaS backend foundation (HTTP API)" \
       org.opencontainers.image.source="https://github.com/peterkarlhuber/axentra" \
       org.opencontainers.image.licenses="LicenseRef-Proprietary"
-RUN groupadd --system --gid 10001 axentra \
+# The server needs no package installer: pip (with its vendored urllib3, msgpack and setuptools, flagged by image
+# scans) and ensurepip's bundled wheel are removed from the base image; the app venv drops its pip in the build stage.
+# `pip check` runs in the build stage, before the removal.
+RUN rm -rf /usr/local/lib/python3.13/site-packages/pip /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+       /usr/local/lib/python3.13/ensurepip /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.13 \
+    && ! python -c "import pip" 2>/dev/null \
+    && groupadd --system --gid 10001 axentra \
     && useradd --system --uid 10001 --gid axentra --home-dir /var/lib/axentra --create-home \
        --shell /usr/sbin/nologin axentra \
     && install -d -o axentra -g axentra -m 0750 /var/lib/axentra/var
