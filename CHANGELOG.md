@@ -25,6 +25,19 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Security (TABRION MIG-AXE-6): role tools run on `tabrion.postgres` (`inspect_role`, `grant_runtime_role`,
+  `role_info`); `axentra.data.roles` is a shim with the same `RoleReport`, `as_dict()` and error texts, and the
+  grants are identical. The role check is stricter: a role counts as superuser, `BYPASSRLS` or table owner also when
+  it can become such a role through role membership (also `NOINHERIT`). `grant_runtime_role` and
+  `axentra db grant-runtime-role` now refuse a member of a superuser or `BYPASSRLS` role and a member of the schema's
+  owner (new messages "can become ... (role membership)"), and `Database.check_role` / `Axentra.start()` refuse an
+  application role that is a member of a `BYPASSRLS` or superuser role. `inspect_role` and `role_info` report
+  `bypass_rls: true` for a superuser. A connection handed to `grant_runtime_role` must not be inside a transaction,
+  and a schema that does not exist is refused with "the schema ... does not exist" (these and names longer than 63
+  bytes are `ConfigurationError`s). A member of `pg_write_all_data` is refused (it could write
+  `axentra_schema_migrations`), and the grant fails when the runtime role can still write the migration bookkeeping
+  afterwards. The start check's message for a superuser or `BYPASSRLS` role now mentions role membership and
+  `axentra db inspect-role`.
 - Changed (TABRION MIG-AXE-2): `-- axentra:no-transaction` migrations and `axentra migrate --dry-run` split SQL with
   `tabrion.sql.split_statements` (`axentra.data.migrations.split_statements` is now that function). Axentra's own
   migrations split byte-identically. A product migration splits differently only where the old splitter was wrong:

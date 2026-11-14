@@ -4,12 +4,12 @@
       "check_role": {
         "allow_superuser=False,allow_table_owner=False": {
           "code": "configuration_error",
-          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS, also through role membership; see `axentra db inspect-role`); use a dedicated application role or set database.allow_superuser = true for local development only",
           "refused": "ConfigurationError"
         },
         "allow_superuser=False,allow_table_owner=True": {
           "code": "configuration_error",
-          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS, also through role membership; see `axentra db inspect-role`); use a dedicated application role or set database.allow_superuser = true for local development only",
           "refused": "ConfigurationError"
         },
         "allow_superuser=True,allow_table_owner=False": {
@@ -337,24 +337,24 @@
       "check_role": {
         "allow_superuser=False,allow_table_owner=False": {
           "code": "configuration_error",
-          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS, also through role membership; see `axentra db inspect-role`); use a dedicated application role or set database.allow_superuser = true for local development only",
           "refused": "ConfigurationError"
         },
         "allow_superuser=False,allow_table_owner=True": {
           "code": "configuration_error",
-          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS, also through role membership; see `axentra db inspect-role`); use a dedicated application role or set database.allow_superuser = true for local development only",
           "refused": "ConfigurationError"
         },
         "allow_superuser=True,allow_table_owner=False": {
           "ok": {
-            "bypass_rls": false,
+            "bypass_rls": true,
             "superuser": true,
             "table_owner": true
           }
         },
         "allow_superuser=True,allow_table_owner=True": {
           "ok": {
-            "bypass_rls": false,
+            "bypass_rls": true,
             "superuser": true,
             "table_owner": true
           }
@@ -367,7 +367,7 @@
       },
       "inspect_role": {
         "ok": {
-          "bypass_rls": false,
+          "bypass_rls": true,
           "can_create": true,
           "connect": true,
           "owned_tables": [
@@ -425,7 +425,7 @@
       },
       "role_info": {
         "ok": {
-          "bypass_rls": false,
+          "bypass_rls": true,
           "superuser": true,
           "table_owner": true
         }
@@ -435,12 +435,12 @@
       "check_role": {
         "allow_superuser=False,allow_table_owner=False": {
           "code": "configuration_error",
-          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS, also through role membership; see `axentra db inspect-role`); use a dedicated application role or set database.allow_superuser = true for local development only",
           "refused": "ConfigurationError"
         },
         "allow_superuser=False,allow_table_owner=True": {
           "code": "configuration_error",
-          "message": "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated application role or set database.allow_superuser = true for local development only",
+          "message": "the database role bypasses row-level security (superuser or BYPASSRLS, also through role membership; see `axentra db inspect-role`); use a dedicated application role or set database.allow_superuser = true for local development only",
           "refused": "ConfigurationError"
         },
         "allow_superuser=True,allow_table_owner=False": {

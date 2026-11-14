@@ -14,6 +14,12 @@ on everything the owner has created and will create in the schema (default privi
 migrations need no new grants. It is idempotent and runs as the owner role
 (``axentra db grant-runtime-role ROLE``); ``deploy/compose/initdb/01-roles.sql`` does the same for a
 new database.
+
+Since TABRION MIG-AXE-6 this module is a shim over ``tabrion.postgres`` (``inspect_role``, ``grant_runtime_role``):
+the grants and the refusals are Tabrion's, the report (:class:`RoleReport`, ``as_dict()``) and the error texts stay
+Axentra's. Tabrion's check is stricter than the one it replaces (contract I-20): a role is as privileged as every
+role it can become through role membership, so a member of a superuser or ``BYPASSRLS`` role, and a role that can become
+the owner role or the schema's owner, is refused too.
 """
 
 from __future__ import annotations
@@ -22,14 +28,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import psycopg
-from psycopg import sql
+from psycopg import pq
 from psycopg.rows import tuple_row
+from tabrion.errors import RoleMissing, RoleUnsafe, UsageError
+from tabrion.postgres import grant_runtime_role as _tabrion_grant_runtime_role
+from tabrion.postgres import inspect_role as _tabrion_inspect_role
 
 from axentra.core.errors import ConfigurationError
 
-#: Privileges of the runtime role: data, never DDL.
+#: Privileges of the runtime role: data, never DDL (granted by ``tabrion.postgres.grant_runtime_role``).
 TABLE_PRIVILEGES = "SELECT, INSERT, UPDATE, DELETE"
 SEQUENCE_PRIVILEGES = "USAGE, SELECT"
+#: The migration bookkeeping stays read-only for the runtime role.
+PROTECTED_TABLES = ("axentra_schema_migrations",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +53,9 @@ class RoleReport:
     tables: int
     #: Whether the role may connect to the database (granted here when the owner may grant it).
     connect: bool
+    #: The role is a superuser or can become one (role membership).
     superuser: bool = False
+    #: The role has ``BYPASSRLS`` or can become a role that has it (role membership).
     bypass_rls: bool = False
     #: Tables of the schema the role owns (or may act as the owner of).
     owned_tables: list[str] = field(default_factory=list)
@@ -69,39 +82,114 @@ class RoleReport:
         }
 
 
-def inspect_role(conn: psycopg.Connection[Any], role: str, schema: str | None = None) -> RoleReport:
-    """How row-level security applies to ``role`` in ``schema`` (default: the current schema). Read-only."""
-    with conn.cursor(row_factory=tuple_row) as cur:
-        cur.execute("SELECT current_user, coalesce(%s, current_schema())", (schema,))
-        owner, schema_name = cur.fetchone() or ("", "")
-        cur.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = %s", (role,))
-        attrs = cur.fetchone()
-        if attrs is None:
-            raise ConfigurationError(f"the database role {role!r} does not exist")
-        cur.execute(
-            "SELECT c.relname, pg_has_role(%s, c.relowner, 'MEMBER') FROM pg_class c"
-            " JOIN pg_namespace n ON n.oid = c.relnamespace"
-            " WHERE n.nspname = %s AND c.relkind IN ('r', 'p') ORDER BY c.relname",
-            (role, schema_name),
-        )
-        tables = cur.fetchall()
-        cur.execute(
-            "SELECT has_database_privilege(%s, current_database(), 'CONNECT'),"
-            " has_schema_privilege(%s, %s, 'CREATE')",
-            (role, role, schema_name),
-        )
-        connect, create = cur.fetchone() or (False, False)
+def _report(found: Any) -> RoleReport:
+    """Axentra's report from ``tabrion.postgres.RoleReport`` (the same fields, without ``database``)."""
     return RoleReport(
-        role=role,
-        schema=str(schema_name),
-        owner=str(owner),
-        tables=len(tables),
-        connect=bool(connect),
-        superuser=bool(attrs[0]),
-        bypass_rls=bool(attrs[1]),
-        owned_tables=[str(name) for name, owned in tables if owned],
-        can_create=bool(create),
+        role=found.role,
+        schema=found.schema,
+        owner=found.owner,
+        tables=found.tables,
+        connect=found.connect,
+        superuser=found.superuser,
+        bypass_rls=found.bypass_rls,
+        owned_tables=list(found.owned_tables),
+        can_create=found.can_create,
     )
+
+
+def _read(conn: psycopg.Connection[Any], query: str, params: tuple[Any, ...]) -> tuple[Any, ...] | None:
+    """One row of a read-only query; rolls back only the implicit transaction it opened itself (T-NOTX)."""
+    opened = not conn.autocommit and conn.info.transaction_status == pq.TransactionStatus.IDLE
+    try:
+        with conn.cursor(row_factory=tuple_row) as cur:
+            cur.execute(query, params)
+            return cur.fetchone()
+    finally:
+        if opened:
+            conn.rollback()
+
+
+def _operator_error(role: str, schema: str | None, exc: Exception) -> ConfigurationError:
+    """``ValueError`` and ``UsageError`` of Tabrion as an operator error (review of #87)."""
+    if isinstance(exc, UsageError):
+        if exc.code == "postgres.schema_missing":
+            return ConfigurationError(f"the schema {schema!r} does not exist")
+        if exc.code == "postgres.nested_transaction":
+            return ConfigurationError(
+                "grant_runtime_role needs a connection that is not inside a transaction (commit or roll back first)"
+            )
+        return ConfigurationError(f"cannot use the database role {role!r}: {exc.code}")
+    return ConfigurationError(f"cannot use the database role {role!r}: {exc}")
+
+
+def _missing(role: str) -> ConfigurationError:
+    return ConfigurationError(f"the database role {role!r} does not exist")
+
+
+def inspect_role(conn: psycopg.Connection[Any], role: str, schema: str | None = None) -> RoleReport:
+    """How row-level security applies to ``role`` in ``schema`` (default: the current schema). Read-only.
+
+    ``superuser`` and ``bypass_rls`` also hold when the role can become such a role (role membership)."""
+    try:
+        return _report(_tabrion_inspect_role(conn, role, schema=schema))
+    except RoleMissing:
+        raise _missing(role) from None
+    except (UsageError, ValueError) as exc:
+        raise _operator_error(role, schema, exc) from None
+
+
+def _refusal(
+    conn: psycopg.Connection[Any], role: str, schema: str | None, reasons: list[str]
+) -> ConfigurationError:
+    """The error text of a refused grant: Axentra's texts, and new ones for what only Tabrion refuses."""
+    before = inspect_role(conn, role, schema)
+    if role == before.owner:
+        return ConfigurationError(f"{role!r} is the connecting (owner) role; name the separate runtime role")
+    direct = _read(
+        conn, "SELECT rolsuper, rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = %s", (role,)
+    ) or (False, False)
+    texts: list[str] = []
+    if "superuser" in reasons:
+        texts.append("is a superuser" if direct[0] else "can become a superuser (role membership)")
+    if "bypass_rls" in reasons and not (direct[0] and not direct[1]):
+        # A superuser is a member of every role, also of the BYPASSRLS ones: "is a superuser" says it all.
+        texts.append("has BYPASSRLS" if direct[1] else "can become a role with BYPASSRLS (role membership)")
+    if "table_owner" in reasons:
+        if before.owned_tables:
+            texts.append(f"owns tables ({', '.join(before.owned_tables[:5])})")
+        else:
+            texts.append("can become the owner role or the owner of the schema (role membership)")
+    return ConfigurationError(
+        f"the runtime role {role!r} {' and '.join(texts)}: row-level security would not apply to it"
+    )
+
+
+def _writes_all_data(conn: psycopg.Connection[Any], role: str) -> bool:
+    """Whether ``role`` is a member of the predefined role ``pg_write_all_data`` (PostgreSQL 14 or later)."""
+    row = _read(
+        conn,
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles r, pg_catalog.pg_roles w"
+        " WHERE r.rolname = %s AND w.rolname = 'pg_write_all_data'"
+        " AND pg_catalog.pg_has_role(r.oid, w.oid, 'MEMBER'))",
+        (role,),
+    )
+    return bool(row and row[0])
+
+
+def _writable_protected_tables(conn: psycopg.Connection[Any], role: str, schema: str) -> list[str]:
+    """The protected tables of ``schema`` that ``role`` may still change after the grant (re-check, review of #87)."""
+    found: list[str] = []
+    for table in PROTECTED_TABLES:
+        row = _read(
+            conn,
+            "SELECT c.oid IS NOT NULL AND pg_catalog.has_table_privilege(%s, c.oid, 'INSERT, UPDATE, DELETE, TRUNCATE')"
+            " FROM (SELECT 1) one LEFT JOIN pg_catalog.pg_class c ON c.relname = %s"
+            " AND c.relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = %s)",
+            (role, table, schema),
+        )
+        if row and row[0]:
+            found.append(table)
+    return found
 
 
 def grant_runtime_role(
@@ -114,74 +202,45 @@ def grant_runtime_role(
     ``EXECUTE`` on every function of the schema, sets the same as default privileges of the owner
     role in the schema, and ``CONNECT`` on the database when the owner may grant it. The migration
     bookkeeping (``axentra_schema_migrations``) stays read-only for the runtime role: run this again
-    after the first ``axentra migrate``. Idempotent.
+    after the first ``axentra migrate``. Idempotent. The grants are ``tabrion.postgres.grant_runtime_role``'s;
+    a connection handed in must not be inside a transaction.
 
     Refused (:class:`~axentra.core.errors.ConfigurationError`, nothing granted) when ``role`` is the
-    connecting role itself, a superuser, has ``BYPASSRLS``, or owns tables of the schema: row-level
-    security would not protect anything for it.
+    connecting role itself, a superuser, has ``BYPASSRLS``, or owns tables of the schema, or can become such a role
+    (role membership) or the owner of the schema: row-level security would not protect anything for it. Also
+    refused when ``role`` is a member of ``pg_write_all_data`` (it could write the migration bookkeeping), and,
+    after the grant, when it can still write a protected table. Invalid names (longer than 63 bytes), a missing
+    schema and a connection inside a transaction are refused as ``ConfigurationError`` too.
     """
     own = isinstance(url_or_conn, str)
     conn = psycopg.connect(url_or_conn, autocommit=True) if isinstance(url_or_conn, str) else url_or_conn
     try:
-        before = inspect_role(conn, role, schema)
-        if role == before.owner:
-            raise ConfigurationError(
-                f"{role!r} is the connecting (owner) role; name the separate runtime role"
-            )
-        if not before.restricted:
-            reasons = [
-                reason
-                for reason, flag in (
-                    ("is a superuser", before.superuser),
-                    ("has BYPASSRLS", before.bypass_rls),
-                    (f"owns tables ({', '.join(before.owned_tables[:5])})", bool(before.owned_tables)),
+        try:
+            before = _tabrion_inspect_role(conn, role, schema=schema)
+            if before.restricted and role != before.owner and _writes_all_data(conn, role):
+                # Refused before anything is granted: the REVOKE on the bookkeeping would not hold.
+                raise ConfigurationError(
+                    f"the runtime role {role!r} is a member of pg_write_all_data (role membership): it could write"
+                    " the migration bookkeeping (axentra_schema_migrations); use a role without it"
                 )
-                if flag
-            ]
-            raise ConfigurationError(
-                f"the runtime role {role!r} {' and '.join(reasons)}: row-level security would not apply to it"
+            report = _report(
+                _tabrion_grant_runtime_role(conn, role, schema=schema, protected_tables=PROTECTED_TABLES)
             )
-        target = sql.Identifier(role)
-        nsp = sql.Identifier(before.schema)
-        with conn.transaction():
-            for statement in (
-                sql.SQL("GRANT USAGE ON SCHEMA {} TO {}"),
-                sql.SQL("GRANT " + TABLE_PRIVILEGES + " ON ALL TABLES IN SCHEMA {} TO {}"),
-                sql.SQL("GRANT " + SEQUENCE_PRIVILEGES + " ON ALL SEQUENCES IN SCHEMA {} TO {}"),
-                sql.SQL("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA {} TO {}"),
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT " + TABLE_PRIVILEGES + " ON TABLES TO {}"
-                ),
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT "
-                    + SEQUENCE_PRIVILEGES
-                    + " ON SEQUENCES TO {}"
-                ),
-                sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT EXECUTE ON FUNCTIONS TO {}"),
-            ):
-                conn.execute(statement.format(nsp, target))
-            # The migration bookkeeping is the owner's: the runtime role may read it (schema gate), never fake it.
-            row = conn.execute(
-                "SELECT to_regclass(format('%%I.%%I', %s::text, 'axentra_schema_migrations')) IS NOT NULL",
-                (before.schema,),
-            ).fetchone()
-            if row and row[0]:
-                conn.execute(
-                    sql.SQL(
-                        "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON {}.axentra_schema_migrations FROM {}"
-                    ).format(nsp, target)
-                )
-        if not before.connect:
-            try:
-                with conn.transaction():
-                    conn.execute(
-                        sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
-                            sql.Identifier(str(conn.info.dbname)), target
-                        )
-                    )
-            except psycopg.errors.InsufficientPrivilege:
-                pass  # reported: connect=False; the database owner grants it
-        return inspect_role(conn, role, before.schema)
+        except RoleMissing:
+            raise _missing(role) from None
+        except RoleUnsafe as exc:
+            reasons = str((exc.details or {}).get("reasons", "")).split(",")
+            raise _refusal(conn, role, schema, reasons) from None
+        except (UsageError, ValueError) as exc:
+            raise _operator_error(role, schema, exc) from None
+        writable = _writable_protected_tables(conn, role, report.schema)
+        if writable:
+            raise ConfigurationError(
+                f"the runtime role {role!r} can still write {', '.join(writable)} after the grant (a privilege"
+                " granted elsewhere, or through role membership): revoke it; the migration bookkeeping must stay"
+                " read-only for the runtime role"
+            )
+        return report
     finally:
         if own:
             conn.close()

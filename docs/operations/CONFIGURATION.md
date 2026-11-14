@@ -46,7 +46,8 @@ requires `billing.provider = "stripe"`. When `environment` is **not set at all**
 (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`): an installation reachable from elsewhere must
 say what it is, `production` or, for a trial, `development` explicitly. The default `public_url`
 (`http://127.0.0.1:8080`) keeps a local quick start working without any setting. At `Axentra.start()`, the database role is checked: a
-superuser or `BYPASSRLS` role is refused in production unless `database.allow_superuser = true`.
+superuser or `BYPASSRLS` role (also one that can become such a role through role membership) is refused in production
+unless `database.allow_superuser = true`.
 
 The `axentra` command prints such operator errors (invalid or unknown configuration keys, failed
 validation, an unreachable database, a database error, a module given to `--load` that does not

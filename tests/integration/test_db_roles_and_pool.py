@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import threading
+from typing import Any
 import uuid
 
 import psycopg
-from psycopg import sql
+from psycopg import pq, sql
 from psycopg.rows import tuple_row
 from psycopg_pool import ConnectionPool
 import pytest
@@ -379,3 +380,191 @@ def test_db_commands(granted, tmp_path, capsys) -> None:  # type: ignore[no-unty
     assert main(["--config", str(cfg), "migrate", "--grant-runtime-role", granted["runtime_role"]]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["applied"] == [] and out["runtime_role"]["restricted"] is True
+
+
+# ---- stricter role check through Tabrion (TABRION MIG-AXE-6, contract I-20) ---------------------------------------
+
+
+def test_roles_that_can_become_an_unsafe_role_are_refused(roles_db: dict[str, str]) -> None:
+    """A role is as privileged as every role it can become (role membership, also NOINHERIT): a member of a
+    ``BYPASSRLS`` or superuser role, and a member of the schema's owner, are refused by ``grant_runtime_role``;
+    an application role that is a member of a ``BYPASSRLS`` role fails ``check_role`` (Peter's decision for
+    MIG-NOD-5 and MIG-AXE-6: adopt Tabrion's stricter check)."""
+    suffix = uuid.uuid4().hex[:6]
+    names = {k: f"ax6_{k}_{suffix}" for k in ("byp", "byp_m", "su", "su_m", "s_own", "s_own_m")}
+    schema = f"ax6_schema_{suffix}"
+    ident = {k: sql.Identifier(v) for k, v in names.items()}
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN BYPASSRLS").format(ident["byp"]))
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN SUPERUSER").format(ident["su"]))
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(ident["s_own"]))
+        for member, parent in (("byp_m", "byp"), ("su_m", "su"), ("s_own_m", "s_own")):
+            admin.execute(
+                sql.SQL("CREATE ROLE {} LOGIN NOINHERIT PASSWORD {}").format(
+                    ident[member], sql.Literal(PASSWORD)
+                )
+            )
+            admin.execute(sql.SQL("GRANT {} TO {}").format(ident[parent], ident[member]))
+        admin.execute(
+            sql.SQL("CREATE SCHEMA {} AUTHORIZATION {}").format(sql.Identifier(schema), ident["s_own"])
+        )
+        admin.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                sql.Identifier(str(admin.info.dbname)), ident["byp_m"]
+            )
+        )
+    try:
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], names["byp_m"])
+        assert str(err.value) == (
+            f"the runtime role {names['byp_m']!r} can become a role with BYPASSRLS (role membership):"
+            " row-level security would not apply to it"
+        )
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], names["su_m"])
+        assert f"the runtime role {names['su_m']!r} can become a superuser (role membership)" in str(
+            err.value
+        )
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], names["s_own_m"], schema=schema)
+        assert str(err.value) == (
+            f"the runtime role {names['s_own_m']!r} can become the owner role or the owner of the schema"
+            " (role membership): row-level security would not apply to it"
+        )
+        with psycopg.connect(roles_db["owner"], autocommit=True) as conn:
+            report = inspect_role(conn, names["byp_m"])
+        assert report.bypass_rls and not report.superuser and not report.restricted
+        db = Database(_with_db(ADMIN_URL, str(conninfo_dbname(roles_db["admin"])), names["byp_m"], PASSWORD))
+        db.open()
+        try:
+            assert db.role_info() == {"superuser": False, "bypass_rls": True, "table_owner": False}
+            with pytest.raises(ConfigurationError, match="bypasses row-level security"):
+                db.check_role(allow_superuser=False, allow_table_owner=False)
+        finally:
+            db.close()
+        # Nothing was granted to the refused roles.
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            granted_to = admin.execute(
+                "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee = ANY(%s)",
+                ([names["byp_m"], names["su_m"], names["s_own_m"]],),
+            ).fetchone()
+            assert granted_to == (0,)
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP SCHEMA IF EXISTS {}").format(sql.Identifier(schema)))
+            admin.execute(
+                sql.SQL("REVOKE ALL ON DATABASE {} FROM {}").format(
+                    sql.Identifier(str(admin.info.dbname)), ident["byp_m"]
+                )
+            )
+            for key in ("byp_m", "su_m", "s_own_m", "byp", "su", "s_own"):
+                admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(ident[key]))
+
+
+def conninfo_dbname(url: str) -> str:
+    from psycopg.conninfo import conninfo_to_dict
+
+    return str(conninfo_to_dict(url)["dbname"])
+
+
+def _make_role(admin: psycopg.Connection[Any], name: str, inherit: str = "NOINHERIT") -> None:
+    admin.execute(
+        sql.SQL("CREATE ROLE {} LOGIN " + inherit + " PASSWORD {}").format(
+            sql.Identifier(name), sql.Literal(PASSWORD)
+        )
+    )
+
+
+def test_a_member_of_pg_write_all_data_is_refused_before_anything_is_granted(
+    roles_db: dict[str, str],
+) -> None:
+    """Review of #87: ``pg_write_all_data`` could write ``axentra_schema_migrations`` despite the REVOKE."""
+    name = f"ax6_wad_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        _make_role(admin, name)
+        admin.execute(sql.SQL("GRANT pg_write_all_data TO {}").format(sql.Identifier(name)))
+    try:
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], name)
+        assert str(err.value) == (
+            f"the runtime role {name!r} is a member of pg_write_all_data (role membership): it could write the"
+            " migration bookkeeping (axentra_schema_migrations); use a role without it"
+        )
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            granted = admin.execute(
+                "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee = %s", (name,)
+            ).fetchone()
+        assert granted == (0,)
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
+
+
+def test_a_protected_table_still_writable_after_the_grant_is_refused(roles_db: dict[str, str]) -> None:
+    """The re-check after the grant: a privilege on the bookkeeping granted elsewhere fails the grant."""
+    name = f"ax6_wr_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        _make_role(admin, name, "INHERIT")
+        # Through a group role, which the REVOKE on the runtime role itself does not touch.
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(name + "_g")))
+        admin.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier(name + "_g"), sql.Identifier(name)))
+    with psycopg.connect(roles_db["owner"], autocommit=True) as owner:
+        owner.execute(
+            sql.SQL("GRANT INSERT ON axentra_schema_migrations TO {}").format(sql.Identifier(name + "_g"))
+        )
+    try:
+        with pytest.raises(
+            ConfigurationError, match="can still write axentra_schema_migrations after the grant"
+        ):
+            grant_runtime_role(roles_db["owner"], name)
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("DROP OWNED BY {}, {}").format(sql.Identifier(name), sql.Identifier(name + "_g"))
+            )
+            admin.execute(
+                sql.SQL("DROP ROLE IF EXISTS {}, {}").format(
+                    sql.Identifier(name), sql.Identifier(name + "_g")
+                )
+            )
+
+
+def test_operator_errors_of_the_grant_are_configuration_errors(granted: dict[str, str]) -> None:
+    runtime = granted["runtime_role"]
+    with pytest.raises(ConfigurationError) as err:
+        grant_runtime_role(granted["owner"], runtime, schema="no_such_schema_x")
+    assert str(err.value) == "the schema 'no_such_schema_x' does not exist"
+    with pytest.raises(ConfigurationError, match="a name longer than 63 bytes"):
+        grant_runtime_role(granted["owner"], runtime, schema="s" * 64)
+    with psycopg.connect(granted["owner"]) as conn:  # not autocommit
+        conn.execute("SELECT 1")  # a transaction is open
+        with pytest.raises(ConfigurationError, match="not inside a transaction"):
+            grant_runtime_role(conn, runtime)
+        assert conn.info.transaction_status == pq.TransactionStatus.INTRANS  # the caller's transaction stays
+        conn.rollback()
+    with psycopg.connect(granted["owner"], autocommit=True) as conn:
+        conn.execute("SELECT set_config('search_path', '', false)")
+        with pytest.raises(ConfigurationError, match="needs a schema"):
+            grant_runtime_role(conn, runtime)
+
+
+def test_admin_only_membership_in_the_owner_is_refused(roles_db: dict[str, str]) -> None:
+    """A role that may only administer the owner role (ADMIN, no INHERIT, no SET on PostgreSQL 16+) can grant
+    itself the membership, so it counts as able to become the owner."""
+    name = f"ax6_adm_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        _make_role(admin, name)
+        owner, member = sql.Identifier(roles_db["owner_role"]), sql.Identifier(name)
+        if admin.info.server_version >= 160000:
+            admin.execute(
+                sql.SQL("GRANT {} TO {} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE").format(owner, member)
+            )
+        else:
+            admin.execute(sql.SQL("GRANT {} TO {} WITH ADMIN OPTION").format(owner, member))
+    try:
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], name)
+        assert str(err.value).startswith(f"the runtime role {name!r} owns tables (")
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))

@@ -32,6 +32,7 @@ from psycopg import pq
 from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import ConnectionPool
 from tabrion.postgres import SessionSettings, configure, session_configurator
+from tabrion.postgres import role_info as _tabrion_role_info
 
 from axentra.core.errors import ConfigurationError, NotFound
 
@@ -385,23 +386,14 @@ class Database:
           owner can switch it off (``ALTER TABLE ... NO FORCE / DISABLE ROW LEVEL SECURITY``) or
           drop the table, so a runtime role should not own the tables (run migrations with a
           separate owner role, ``database.migration_url_ref``).
+
+        Each flag also holds when the role can become such a role through role membership (``tabrion.postgres.role_info``
+        with ``owner_scope="rls"``, contract I-20; TABRION MIG-AXE-6). Read-only: on a connection without
+        autocommit the implicit transaction is rolled back, on a borrowed pool too.
         """
         with self.pool.connection() as conn:
-            try:
-                with conn.cursor(row_factory=dict_row) as cur:
-                    cur.execute(
-                        "SELECT r.rolsuper AS superuser, r.rolbypassrls AS bypass_rls,"
-                        " EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-                        "   WHERE c.relkind IN ('r', 'p') AND c.relrowsecurity"
-                        "   AND n.nspname = ANY (current_schemas(false))"
-                        "   AND pg_has_role(current_user, c.relowner, 'MEMBER')) AS table_owner"
-                        " FROM pg_roles r WHERE r.rolname = current_user"
-                    )
-                    row = cur.fetchone()
-            finally:
-                if not conn.autocommit:
-                    conn.rollback()
-        return {key: bool(row and row[key]) for key in ("superuser", "bypass_rls", "table_owner")}
+            info = _tabrion_role_info(conn, owner_scope="rls")
+        return {"superuser": info.superuser, "bypass_rls": info.bypass_rls, "table_owner": info.table_owner}
 
     def check_role(self, *, allow_superuser: bool, allow_table_owner: bool = True) -> dict[str, bool]:
         """Verify that row-level security applies to the application role (see :meth:`role_info`).
@@ -413,7 +405,8 @@ class Database:
         info = self.role_info()
         if (info["superuser"] or info["bypass_rls"]) and not allow_superuser:
             raise ConfigurationError(
-                "the database role bypasses row-level security (superuser or BYPASSRLS); use a dedicated "
+                "the database role bypasses row-level security (superuser or BYPASSRLS, also through role "
+                "membership; see `axentra db inspect-role`); use a dedicated "
                 "application role or set database.allow_superuser = true for local development only"
             )
         if info["table_owner"] and not (allow_table_owner or allow_superuser):
