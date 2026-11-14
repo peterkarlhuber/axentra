@@ -25,6 +25,9 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Build: the image's build stage takes `SOURCE_DATE_EPOCH` as a build argument, so pip writes hash-based `.pyc`
+  files and two builds of one commit (with `rewrite-timestamp=true`) give identical layers; before, only the `.pyc`
+  source mtimes differed (release-candidate dry run). docs/operations/DEPLOYMENT.md has the command.
 - Security (TABRION DC-AX-1, dependency confusion): Tabrion is not on a package index, and a PyPI project of that
   name would be someone else's. `tests/unit/test_tabrion_requirements.py` now refuses an installed Tabrion that does
   not come from the pin (Git commit of `requirements/tabrion.txt`) or the hashed archive of `deploy/locks/tabrion.txt`,
