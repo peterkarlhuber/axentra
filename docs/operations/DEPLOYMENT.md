@@ -46,6 +46,16 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
   `docker buildx build --no-cache --build-arg SOURCE_DATE_EPOCH=... --output type=image,name=axentra:local,rewrite-timestamp=true .`).
   Two builds of one commit then give the same platform manifest, config and layers (checked in the internal
   release-candidate dry run of 2026-11-14); the image index around them can still differ by its attestations.
+- OS security updates: the runtime stage installs the Debian security fixes of a fixed snapshot of
+  `trixie-security` (`ARG DEBIAN_SECURITY_SNAPSHOT`, a `snapshot.debian.org` timestamp), so the image stays
+  reproducible. When an image scan reports fixable OS packages: move the base digest to the current upstream
+  `python:3.13-slim`, set the snapshot to the current UTC time (`YYYYMMDDTHHMMSSZ`), rebuild twice and rescan.
+  The build needs HTTPS access to `snapshot.debian.org`.
+- No package installer at runtime: the image contains no `pip` (neither the base image's nor the venv's), so
+  its vendored libraries are not shipped. Inspect installed distributions with
+  `docker run --rm --entrypoint python axentra:local -c "import importlib.metadata as m; print(sorted(d.metadata['Name'] for d in m.distributions()))"`.
+- Signing: the images are not signed yet; the proposed procedure and its open key decision are in
+  [RELEASE_SIGNING.md](RELEASE_SIGNING.md).
 - Runs as `axentra` (uid/gid 10001), working directory `/var/lib/axentra`.
 - `ENTRYPOINT ["axentra"]`, default `CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]`, so
   `docker run axentra:local migrate` or `... admin setup-token` run other commands.
