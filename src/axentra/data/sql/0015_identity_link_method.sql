@@ -8,27 +8,39 @@ ALTER TABLE axentra_user_identities
     ADD COLUMN linked_by text NOT NULL DEFAULT 'unknown'
     CHECK (linked_by IN ('unknown', 'email', 'explicit', 'signup'));
 
--- Existing identities take their link method from the audit log (the newest `identity.external.link`
--- or `identity.external.create` record for the same user and provider). Identities without such a
--- record stay `unknown` and are treated like `email` for platform users: a platform admin confirms
--- them with `POST /v1/users/{user_id}/identities` (see the upgrade note in CHANGELOG.md).
+-- Existing identities take their link method from the audit log (`identity.external.link` and
+-- `identity.external.create` records for the same user and provider). The records name no subject, so
+-- the method is taken only where the user has exactly one identity of that provider and every record
+-- agrees; anything else stays `unknown`, which counts like `email` for platform users: a platform
+-- admin confirms such an identity with `POST /v1/users/{user_id}/identities` (upgrade note in
+-- CHANGELOG.md). The audit table forces row-level security for its owner too, so the platform scope
+-- is set for this transaction.
+SELECT set_config('axentra.scope', 'platform', true);
+
 UPDATE axentra_user_identities i SET linked_by = a.method
 FROM (
-    SELECT DISTINCT ON (target_id, details ->> 'provider')
-        target_id AS user_id,
-        details ->> 'provider' AS provider,
-        CASE
-            WHEN action = 'identity.external.create' THEN 'explicit'
-            WHEN details ->> 'how' = 'explicit' THEN 'explicit'
-            WHEN details ->> 'how' = 'linked_by_email' THEN 'email'
-            WHEN details ->> 'how' IN ('created', 'created_without_email') THEN 'signup'
-        END AS method
-    FROM axentra_audit_events
-    WHERE action IN ('identity.external.link', 'identity.external.create')
-      AND outcome = 'success' AND target_type = 'user'
-    ORDER BY target_id, details ->> 'provider', occurred_at DESC, id DESC
+    SELECT user_id, provider, min(method) AS method
+    FROM (
+        SELECT
+            target_id AS user_id,
+            details ->> 'provider' AS provider,
+            CASE
+                WHEN action = 'identity.external.create' THEN 'explicit'
+                WHEN details ->> 'how' = 'explicit' THEN 'explicit'
+                WHEN details ->> 'how' = 'linked_by_email' THEN 'email'
+                WHEN details ->> 'how' IN ('created', 'created_without_email') THEN 'signup'
+                ELSE 'unknown'
+            END AS method
+        FROM axentra_audit_events
+        WHERE action IN ('identity.external.link', 'identity.external.create')
+          AND outcome = 'success' AND target_type = 'user'
+    ) records
+    GROUP BY user_id, provider
+    HAVING count(DISTINCT method) = 1
 ) a
-WHERE a.user_id = i.user_id AND a.provider = i.provider AND a.method IS NOT NULL;
+WHERE a.user_id = i.user_id AND a.provider = i.provider AND a.method <> 'unknown'
+  AND (SELECT count(*) FROM axentra_user_identities o
+       WHERE o.user_id = i.user_id AND o.provider = i.provider) = 1;
 
 -- A session started through an identity linked by email (or `unknown`) without the provider's
 -- `link_platform_users_by_verified_email`. Such a session ends as soon as its user holds a platform

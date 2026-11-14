@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+from axentra.core.errors import Forbidden
 from axentra.data.database import DbScope
 from axentra.identity.oidc import OidcLoginError, OidcService
 from axentra.platform import Axentra
@@ -165,3 +166,63 @@ def test_a_replayed_callback_is_refused_with_context(embedded: tuple[Axentra, Oi
     with pytest.raises(OidcLoginError) as refused:
         service.finish("test", **kwargs)
     assert refused.value.code == "login_expired"
+
+
+@pytest.fixture
+def embedded_linking(ax_factory) -> tuple[Axentra, OidcService, FakeIdP]:  # type: ignore[no-untyped-def]
+    idp = FakeIdP(redirect_uri=HOST_CALLBACK)
+    ax = ax_factory(
+        oidc=[
+            {
+                "id": "test",
+                "name": "Test IdP",
+                "issuer": ISSUER,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "allow_signup": True,
+            }
+        ]
+    )
+    service = OidcService(
+        ax.db, ax.settings, ax.identity, ax.secrets, redirect_uri=lambda _provider: HOST_CALLBACK
+    )
+    service.use_transport(idp.transport(), min_jwks_refresh_seconds=0)
+    yield ax, service, idp
+    service.close()
+
+
+def _host_login(service: OidcService, idp: FakeIdP, subject: str, email: str) -> Any:
+    started = service.start("test", return_to="/", ip="10.0.0.9")
+    query = _callback(idp, started.authorization_url, subject, email=email)
+    return service.finish(
+        "test",
+        state=query["state"],
+        code=query["code"],
+        error=None,
+        browser_state=started.state,
+        ip=None,
+        user_agent="host",
+        start_session=False,
+    )
+
+
+def test_a_host_session_learns_that_the_login_came_through_an_email_link(
+    embedded_linking: tuple[Axentra, OidcService, FakeIdP],
+) -> None:
+    """I5 for hosts with sessions of their own: ``via_email_link`` and the check right before the session."""
+    ax, service, idp = embedded_linking
+    with ax.db.transaction(DbScope.platform()) as tx:
+        uid = ax.identity.create_user(tx, email="ops@example.com", name="ops", password="user password 12345")
+    linked = _host_login(service, idp, "ops-sub", "ops@example.com")
+    assert linked.user_id == uid and linked.via_email_link is True
+    signup = _host_login(service, idp, "new-sub", "new@example.com")
+    assert signup.via_email_link is False
+    # A platform role granted after the link check: the check before the host's session refuses it.
+    with ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("INSERT INTO axentra_platform_roles (user_id, role) VALUES (%s, 'platform_admin')", (uid,))
+    with pytest.raises(Forbidden) as exc:
+        ax.identity.identity_sign_in(uid, (ISSUER, "ops-sub"))
+    assert exc.value.extra["reason"] == "explicit_link_required"
+    with pytest.raises(OidcLoginError) as login:
+        _host_login(service, idp, "ops-sub", "ops@example.com")
+    assert login.value.code == "explicit_link_required"

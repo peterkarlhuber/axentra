@@ -558,24 +558,11 @@ class IdentityService:
         session_id = new_id("ses")
         csrf = new_token(24)
         with self.db.transaction(DbScope.platform()) as tx:
-            via_email_link = False
-            if identity is not None:
-                link = tx.one(
-                    "SELECT i.linked_by, pr.role AS platform_role FROM axentra_user_identities i"
-                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = i.user_id"
-                    " WHERE i.provider = %s AND i.subject = %s AND i.user_id = %s",
-                    (identity[0], identity[1], user_id),
-                )
-                if link is None:
-                    raise Forbidden(
-                        "the identity is not linked to this user", extra={"reason": "login_failed"}
-                    )
-                via_email_link = (
-                    link["linked_by"] in ("email", "unknown") and not link_platform_users_by_verified_email
-                )
-                if via_email_link and link["platform_role"]:
-                    # The user got a platform role after the link was checked (I5).
-                    _refuse_platform_email_link(identity[0])
+            via_email_link = (
+                self._identity_sign_in(tx, user_id, identity, link_platform_users_by_verified_email)
+                if identity is not None
+                else False
+            )
             # Expiry is computed and later checked on the database clock (never the app host's),
             # so clock skew between API hosts and PostgreSQL cannot lengthen or shorten sessions.
             expires = tx.scalar(
@@ -621,6 +608,38 @@ class IdentityService:
                 platform_role=user.platform_role,
             ),
         )
+
+    @staticmethod
+    def _identity_sign_in(
+        tx: Tx, user_id: str, identity: tuple[str, str], link_platform_users_by_verified_email: bool
+    ) -> bool:
+        link = tx.one(
+            "SELECT i.linked_by, pr.role AS platform_role FROM axentra_user_identities i"
+            " LEFT JOIN axentra_platform_roles pr ON pr.user_id = i.user_id"
+            " WHERE i.provider = %s AND i.subject = %s AND i.user_id = %s",
+            (identity[0], identity[1], user_id),
+        )
+        if link is None:
+            raise Forbidden("the identity is not linked to this user", extra={"reason": "login_failed"})
+        via_email_link = (
+            link["linked_by"] in ("email", "unknown") and not link_platform_users_by_verified_email
+        )
+        if via_email_link and link["platform_role"]:
+            # The user got a platform role after the link was checked (I5).
+            _refuse_platform_email_link(identity[0])
+        return bool(via_email_link)
+
+    def identity_sign_in(
+        self, user_id: str, identity: tuple[str, str], *, link_platform_users_by_verified_email: bool = False
+    ) -> bool:
+        """Check a sign-in through ``identity`` ``(provider, subject)`` again right before the caller
+        starts its own session (``OidcService.finish(start_session=False)``): ``403
+        explicit_link_required`` when the identity was linked by email (or before link methods were
+        recorded) and the user holds a platform role now. Returns whether the sign-in came through
+        such a link (``via_email_link``): a host that keeps its own sessions must not grant a platform
+        role to that session and must end it when the user gets one (I5)."""
+        with self.db.transaction(DbScope.platform()) as tx:
+            return self._identity_sign_in(tx, user_id, identity, link_platform_users_by_verified_email)
 
     def resolve_session(
         self, token: str, *, request_id: str | None = None, ip: str | None = None

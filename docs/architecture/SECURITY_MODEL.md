@@ -439,7 +439,10 @@ before any check, the browser must hold the login cookie of exactly this state, 
 nonce, exact issuer, audience/`azp`, asymmetric algorithms only, key rotation with a rate-limited
 JWKS refresh, the per-IP rate limit of starts, the disabled-account check, and the audit of
 refused logins. The host must keep its own session rotation (a new session on login and on any
-change of its session context, the old one ended).
+change of its session context, the old one ended). `finish` checks the identity's link method once
+more right before it returns (I5); `LoginResult.via_email_link` tells the host that the login came
+through an identity linked by email, and the host must not give that session a platform role and
+must end it when the user gets one, as Axentra does with its own sessions.
 
 ## API keys
 

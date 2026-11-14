@@ -380,6 +380,19 @@ def test_promotion_between_link_check_and_session_start_is_refused(make_world) -
     assert principal.platform_role is not None
 
 
+def _run_backfill(w: OidcWorld) -> dict[str, str]:
+    """The data statements of migration 15 as the runner applies them: no scope set beforehand."""
+    sql = (resources.files("axentra.data") / "sql" / "0015_identity_link_method.sql").read_text()
+    statements = [s for s in split_statements(sql) if "ALTER TABLE" not in s]
+    with w.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("UPDATE axentra_user_identities SET linked_by = 'unknown'")
+        tx.execute("SELECT set_config('axentra.scope', '', true)")
+        assert tx.scalar("SELECT count(*) FROM axentra_audit_events") == 0  # forced RLS hides them
+        for statement in statements:
+            tx.execute(statement)
+    return {i["subject"]: i["linked_by"] for i in _identities(w)}
+
+
 def test_existing_identities_take_their_link_method_from_the_audit_log(make_world) -> None:  # type: ignore[no-untyped-def]
     """Migration 15 backfills ``linked_by`` from ``identity.external.*`` audit records; no record stays ``unknown``."""
     w = make_world()
@@ -393,17 +406,36 @@ def test_existing_identities_take_their_link_method_from_the_audit_log(make_worl
         ).status_code
         == 201
     )
-    sql = (resources.files("axentra.data") / "sql" / "0015_identity_link_method.sql").read_text()
-    backfill = next(s for s in split_statements(sql) if "UPDATE axentra_user_identities i" in s)
     with w.ax.db.transaction(DbScope.platform()) as tx:
-        tx.execute("UPDATE axentra_user_identities SET linked_by = 'unknown'")
         tx.execute(
-            "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES ('uid_noaudit', %s, 'other-idp', 'x')",
+            "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES ('uid_noaudit', %s,"
+            " 'other-idp', 'x')",
             (other,),
         )
-        tx.execute(backfill)
-    got = {i["subject"]: i["linked_by"] for i in _identities(w)}
-    assert got == {"email-sub": "email", "signup-sub": "signup", "explicit-sub": "explicit", "x": "unknown"}
+    assert _run_backfill(w) == {
+        "email-sub": "email",
+        "signup-sub": "signup",
+        "explicit-sub": "explicit",
+        "x": "unknown",
+    }
+
+
+def test_backfill_leaves_ambiguous_identities_unknown(make_world) -> None:  # type: ignore[no-untyped-def]
+    """Audit records name no subject: two identities of one user and provider, or records that disagree, stay unknown."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    w.login(subject="email-sub", email="ops@example.com")  # linked by email
+    assert (
+        w.admin.post(
+            f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "admin-sub"}
+        ).status_code
+        == 201
+    )
+    assert _run_backfill(w) == {"email-sub": "unknown", "admin-sub": "unknown"}
+    # One identity left, but the records still disagree (email and explicit): unknown.
+    with w.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("DELETE FROM axentra_user_identities WHERE subject = 'admin-sub'")
+    assert _run_backfill(w) == {"email-sub": "unknown"}
 
 
 def test_bootstrap_admin_is_not_linked_by_verified_email(make_world) -> None:  # type: ignore[no-untyped-def]

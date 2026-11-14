@@ -37,7 +37,10 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   `link_platform_users_by_verified_email` (default `false`) restores the old behavior. Migration 15 records how each
   identity was linked (`axentra_user_identities.linked_by`, taken from the audit log for existing identities), so
   an identity linked by email before the user got a platform role also stops working until it is confirmed, and
-  sessions started through it end when the user gets a platform role (`axentra_sessions.via_email_link`).
+  sessions started through it end when the user gets a platform role (`axentra_sessions.via_email_link`). Hosts
+  that keep their own sessions (`finish(start_session=False)`) get `LoginResult.via_email_link` and the new
+  `IdentityService.identity_sign_in` check (EMBEDDING.md). The audit-log backfill takes a method only where a user
+  has one identity of the provider and every record agrees.
   **Upgrade note:** an existing identity without an `identity.external.*` audit record (for example after audit
   retention removed it) stays `unknown` and counts like an email link for platform users. Before upgrading an
   SSO-only installation, check that every platform admin keeps a way in (a password, or an identity the audit log
