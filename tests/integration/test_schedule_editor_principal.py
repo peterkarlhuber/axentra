@@ -112,3 +112,17 @@ def test_timing_edits_and_the_creators_own_edits_keep_the_creator(world: World) 
     assert s["created_by"] == po_id
     perms = _fired_permissions(world, sid, pid, tid)
     assert {"api_keys:manage", "members:manage", "product_members:manage"} <= perms
+
+
+def test_a_payload_change_of_json_type_alone_hands_the_schedule_over(world: World) -> None:
+    pid, tid, po, jo, po_id, jo_id = _setup(world)
+    body = {"name": "n", "kind": "demo.report", "interval_seconds": 3600, "tenant_id": tid}
+    for old, new in (({"dry_run": True}, {"dry_run": 1}), ({"n": 1}, {"n": 1.0}), ({"n": 0}, {"n": False})):
+        sid = _ok(po.post(f"/v1/products/{pid}/schedules", json=body | {"payload": old}))["id"]
+        # Sending the same payload again keeps the creator.
+        assert (
+            _ok(jo.patch(f"/v1/products/{pid}/schedules/{sid}", json={"payload": old}), 200)["created_by"]
+            == po_id
+        )
+        s = _ok(jo.patch(f"/v1/products/{pid}/schedules/{sid}", json={"payload": new}), 200)
+        assert s["created_by"] == jo_id, (old, new)

@@ -19,6 +19,7 @@ from __future__ import annotations
 import builtins
 import contextlib
 from datetime import datetime
+import json
 import logging
 from typing import Any
 
@@ -117,6 +118,11 @@ class LeaderLock:
 
 def _schedule(row: Row) -> Schedule:
     return Schedule.model_validate(row)
+
+
+def _canonical(value: Any) -> str:
+    """JSON text that tells types apart (``1``, ``1.0`` and ``true`` compare equal in Python)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 class ScheduleService:
@@ -385,7 +391,7 @@ class ScheduleService:
         acting = row["created_by"]
         if (
             merged["kind"] != row["kind"]
-            or merged["payload"] != row["payload"]
+            or _canonical(merged["payload"]) != _canonical(row["payload"])
             or (bool(merged["enabled"]) and not row["enabled"])
         ):
             acting = principal.actor.id
