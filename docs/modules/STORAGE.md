@@ -231,6 +231,24 @@ file that starts with a `#!` shebang). One rule decides for all three reasons, p
   rotation as long as the old key stays in the keyring. A token is a bearer credential for one
   file until it expires; it cannot be revoked individually (deleting the file revokes it). The
   `Referrer-Policy: no-referrer` header keeps tokens out of referrers.
+- Tokens stay out of logs: Axentra's request log (`axentra.http`, message and `path` field) writes
+  `/v1/files/download/[redacted]`, the redaction of every log formatter knows the token format, and
+  `axentra serve` runs uvicorn without its access log. If uvicorn is started another way, the filter
+  `create_app` installs on `uvicorn.access` masks the token in the request line as well.
+  **Reverse proxies log the full path by default**, so a proxy access log carries live tokens. Log
+  without the token segment, for example in nginx:
+
+  ```nginx
+  map $uri $axentra_log_uri {
+      ~^/v1/files/download/  /v1/files/download/[redacted];
+      default                $uri;
+  }
+  log_format axentra '$remote_addr - [$time_local] "$request_method $axentra_log_uri" '
+                     '$status $body_bytes_sent $request_time';
+  access_log /var/log/nginx/axentra.log axentra;
+  ```
+
+  `$uri` has no query string; never log `$request` or `$request_uri`, which carry path and query.
 - Presigned S3 URLs (opt-in) are verified by S3 only: they bypass the product/tenant status
   check and work until they expire as long as the object exists (deleting the file deletes the
   object, which ends them; with bucket versioning see below).

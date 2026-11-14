@@ -117,8 +117,11 @@ curl -s -X POST http://localhost:8080/v1/auth/setup -H 'Content-Type: applicatio
   -d '{"setup_token": "axsetup_...", "email": "you@example.com", "name": "You", "password": "a long passphrase"}'
 ```
 
-`.env.example` starts in `development` so that plain HTTP on localhost works. For production,
-read [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md).
+`.env.example` is a **local trial only**: it runs in `development` so that plain HTTP on localhost
+works, and the compose files publish the API on `127.0.0.1` only (`AXENTRA_BIND_ADDRESS`, default
+`127.0.0.1`). For a server, start from `.env.production.example` (`production`, https, behind a TLS
+reverse proxy) and read [docs/operations/DEPLOYMENT.md](docs/operations/DEPLOYMENT.md). In
+production Axentra refuses to start while a database password is still a `change-me-*` placeholder.
 
 ### Local virtual environment
 

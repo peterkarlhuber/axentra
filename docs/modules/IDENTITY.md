@@ -13,7 +13,10 @@ Connect), HTTP: `src/axentra/api/routes/auth.py`, `users.py`.
 - **User** (`axentra_users`): email (unique, case-insensitive, **optional**), name, locale,
   preferences, `status` `active|disabled`, optional Argon2id password hash, optional platform role
   (`platform_admin`, `platform_viewer`). A user created by an OIDC login has no password
-  (`has_password: false`).
+  (`has_password: false`). An address (of a user, a tenant or product invitation, a verified
+  OIDC or external-user email) is stored trimmed with a lowercased domain and is refused with
+  `422 validation_failed` when it has white space, control or format characters (CR/LF, NUL,
+  U+2028 ...) or one of `,;<>"()`: no mail could be sent to it.
 - **Users without an email address** (`email: null`, migration `0007`): created by an OIDC login
   whose provider sends no verified email (only with `allow_signup_without_email`), by an OIDC
   login with `link_by_verified_email = false` whose address belongs to another user, or by

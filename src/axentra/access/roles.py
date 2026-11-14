@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from psycopg import errors as pg_errors
 
-from axentra.access.authorizer import Authorizer
+from axentra.access.authorizer import Authorizer, Grant
 from axentra.access.definitions import managed_roles
 from axentra.access.models import PermissionInfo, Role
 from axentra.access.permissions import (
@@ -19,7 +19,7 @@ from axentra.access.permissions import (
 from axentra.access.product_permissions import ProductCatalog, load_catalog
 from axentra.audit.log import AuditLog
 from axentra.core.context import Principal
-from axentra.core.errors import Conflict, NotFound, PreconditionFailed, ValidationFailed
+from axentra.core.errors import Conflict, Forbidden, NotFound, PreconditionFailed, ValidationFailed
 from axentra.core.ids import new_id
 from axentra.data.database import Database, DbScope, Tx
 
@@ -97,6 +97,33 @@ class RoleService:
         return sorted(perms)
 
     @staticmethod
+    def _check_ceiling(
+        tx: Tx,
+        principal: Principal,
+        grant: Grant,
+        product_id: str,
+        *,
+        added: set[str] | frozenset[str] = frozenset(),
+        current: list[str] | None = None,
+    ) -> None:
+        """Role ceiling for role definitions: a caller cannot put a permission it does not hold into
+        a role (``added``), nor change or delete a role whose ``current`` permissions exceed its own
+        grant. The grant is the caller's product-level grant, which for product roles includes the
+        tenant permissions they hold in all tenants. Platform admins and system code are exempt."""
+        if principal.is_platform_admin:
+            return
+        missing = sorted(set(added) - grant.permissions)
+        if missing:
+            raise Forbidden(f"you cannot grant permissions you do not hold: {', '.join(missing)}")
+        if current is not None:
+            # Retired and unknown names grant nothing, so they do not count against the caller.
+            above = sorted((set(current) & load_catalog(tx, product_id).known) - grant.permissions)
+            if above:
+                raise Forbidden(
+                    f"you cannot change a role with permissions you do not hold: {', '.join(above)}"
+                )
+
+    @staticmethod
     def _retired_names(tx: Tx, product_id: str) -> set[str]:
         """The product's retired permission names."""
         rows = tx.all(
@@ -116,7 +143,7 @@ class RoleService:
         permissions: list[str],
         description: str = "",
     ) -> Role:
-        self.authz.require(principal, "roles:manage", product_id)
+        grant = self.authz.require(principal, "roles:manage", product_id)
         if scope not in ("product", "tenant"):
             raise ValidationFailed("scope must be product or tenant")
         if key in BUILTIN_ROLES:
@@ -125,6 +152,7 @@ class RoleService:
         try:
             with self.db.transaction(DbScope.product(product_id)) as tx:
                 perms = self._check(tx, product_id, scope, permissions)
+                self._check_ceiling(tx, principal, grant, product_id, added=set(perms))
                 tx.execute(
                     "INSERT INTO axentra_roles (id, product_id, key, name, description, scope, permissions)"
                     " VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -156,7 +184,7 @@ class RoleService:
         permissions: list[str] | None = None,
         if_match: int | None = None,
     ) -> Role:
-        self.authz.require(principal, "roles:manage", product_id)
+        grant = self.authz.require(principal, "roles:manage", product_id)
         with self.db.transaction(DbScope.product(product_id)) as tx:
             row = tx.one_or_404(
                 "SELECT * FROM axentra_roles WHERE id = %s AND product_id = %s FOR UPDATE",
@@ -164,6 +192,7 @@ class RoleService:
                 what="role",
             )
             self._refuse_managed(tx, product_id, row["key"])
+            self._check_ceiling(tx, principal, grant, product_id, current=row["permissions"])
             if if_match is not None and row["version"] != if_match:
                 raise PreconditionFailed("the role was changed by someone else")
             if permissions is None:
@@ -176,6 +205,9 @@ class RoleService:
                 kept = {p for p in permissions if p in stored_retired}
                 checked = self._check(tx, product_id, row["scope"], [p for p in permissions if p not in kept])
                 perms = sorted(set(checked) | kept)
+                self._check_ceiling(
+                    tx, principal, grant, product_id, added=set(perms) - set(row["permissions"])
+                )
             tx.execute(
                 "UPDATE axentra_roles SET name = %s, description = %s, permissions = %s, version = version + 1,"
                 " updated_at = now() WHERE id = %s",
@@ -198,14 +230,15 @@ class RoleService:
         return next(r for r in self.list_roles(Principal.system(), product_id) if r.id == role_id)
 
     def delete_role(self, principal: Principal, product_id: str, role_id: str) -> None:
-        self.authz.require(principal, "roles:manage", product_id)
+        grant = self.authz.require(principal, "roles:manage", product_id)
         with self.db.transaction(DbScope.product(product_id)) as tx:
             row = tx.one_or_404(
-                "SELECT key FROM axentra_roles WHERE id = %s AND product_id = %s",
+                "SELECT key, permissions FROM axentra_roles WHERE id = %s AND product_id = %s",
                 (role_id, product_id),
                 what="role",
             )
             self._refuse_managed(tx, product_id, row["key"])
+            self._check_ceiling(tx, principal, grant, product_id, current=row["permissions"])
             in_use = tx.scalar(
                 "SELECT (SELECT count(*) FROM axentra_memberships WHERE product_id = %(p)s AND role = %(k)s)"
                 " + (SELECT count(*) FROM axentra_product_members WHERE product_id = %(p)s AND role = %(k)s)",

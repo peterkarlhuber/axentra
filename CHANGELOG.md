@@ -36,6 +36,25 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   that again on the built images; the Taskboard image installs that wheel in the same `pip install` as Axentra, so
   Tabrion never comes from the index. The README install table and checkout command, the SDK and Taskboard install
   hints and the implementation report add `-r requirements/tabrion.txt`, and Dependabot ignores `tabrion`.
+- Security (pre-release assessment of 2026-11-13, findings on `1dbd98f`; independent review of the fixes
+  included). **A-01** custom role definitions are bounded by the caller's grant: creating a role, adding
+  permissions to one, or changing or deleting a role whose permissions exceed the caller's is refused with `403`
+  (platform admins and system code exempt; existing roles are not changed). **A-02** an editor who changes a
+  schedule's `kind` or `payload` (compared as canonical JSON) or enables it becomes its acting principal
+  (`created_by`), so its jobs no longer run with the original creator's permissions. **A-03** webhook endpoints
+  whose creator no longer holds `webhooks:manage` get no new deliveries and pending deliveries end `dead`;
+  an editor who changes `url` or `event_types` or enables an endpoint becomes its creator; endpoint responses
+  carry `creator_has_access` (additive OpenAPI field). **B-01** signed download tokens are masked in the request
+  log, uvicorn's access log and free-text redaction. **B-02** redaction covers every Axentra token prefix.
+  **B-03** an installation without an explicit `environment` refuses to start when `public_url` is not loopback,
+  and the container image defaults to `production`. **B-04** NUL characters in the path, query or a JSON body and
+  non-UTF-8 JSON bodies are refused with `422`. **B-05** email addresses with white space, control characters or
+  header separators are refused with `422`. **LD-01** `checkout.session.completed` starts a subscription only when
+  `payment_status` is `paid` or `no_payment_required`; `checkout.session.async_payment_succeeded` and `_failed` are
+  handled. **C-03** the compose stacks publish on `AXENTRA_BIND_ADDRESS` (default `127.0.0.1`), `.env.example` is
+  labeled as a local trial, `.env.production.example` is new, and production refuses the templates' placeholder
+  database passwords. Also: the two-scheduler slot test uses one clock reading (minute-boundary flake).
+
 - Security (TABRION MIG-AXE-3, finding B-06-1): database errors are redacted by Tabrion's `tabrion.errors`
   (`safe_message`, `DbErrorRedactionFilter`) instead of Axentra's local fix (TABRION MIG-AXE-0). Axentra keeps the
   process-wide installation (`install_db_error_redaction`) and the helpers for stored and exported texts

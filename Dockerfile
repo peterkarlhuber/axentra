@@ -54,9 +54,13 @@ RUN groupadd --system --gid 10001 axentra \
        --shell /usr/sbin/nologin axentra \
     && install -d -o axentra -g axentra -m 0750 /var/lib/axentra/var
 COPY --from=build /opt/axentra /opt/axentra
+# The image is a server: production checks by default (B-03). `serve` binds 0.0.0.0, so the settings'
+# loopback check for an unset environment cannot see that the container is reachable. A local trial
+# sets AXENTRA__ENVIRONMENT=development explicitly (deploy/compose/.env.example does).
 ENV PATH=/opt/axentra/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    AXENTRA__ENVIRONMENT=production
 # Relative paths in the configuration (e.g. storage.local_path = "./var/storage") resolve here.
 WORKDIR /var/lib/axentra
 USER 10001:10001
