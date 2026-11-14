@@ -30,8 +30,8 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   from Tabrion's `docs/api/surface.json`. Such names are public (the `__all__` check already skipped them) and have
   no entry of their own: `--surface` now checks the name before the first `__x__` part (here the stable
   `tabrion.postgres.SessionSettings`). New test `test_the_surface_comparison_checks_dunder_names_as_their_owner`;
-  the pinned SHA-256 of the shared script is updated (the copies in tabrion-studio, orkexa and nodestro-runtime
-  still have the old version). CI: the lint job runs
+  the pinned SHA-256 of the shared script is updated, and its docstring names tabrion-studio's copy as the
+  source (the copies in tabrion-studio, orkexa and nodestro-runtime still have the old version). CI: the lint job runs
   `python scripts/check_tabrion_api.py --check-export docs/api-consumers.md --surface <surface.json>` against the
   snapshot of the Tabrion commit pinned in `requirements/tabrion.txt`. Tooling only.
 - Security (QA finding 2026-11-14): `/v1/docs` loads Swagger UI pinned to `swagger-ui-dist@5.34.1` with Subresource
