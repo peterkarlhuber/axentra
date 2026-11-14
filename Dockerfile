@@ -16,6 +16,10 @@
 
 # --- build: install Axentra and its pinned dependencies into a self-contained venv -------------
 FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS build
+# Reproducible builds: with --build-arg SOURCE_DATE_EPOCH=<commit time> pip compiles the .pyc files with
+# hash-based invalidation (no source mtime in their headers), so two builds of one commit give identical
+# layers when the output also uses rewrite-timestamp=true. Without the argument the build is unchanged.
+ARG SOURCE_DATE_EPOCH
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1

@@ -41,6 +41,11 @@ docker build --build-arg EXTRAS=server,oidc,s3,otel -t axentra:full .
   `docker run --rm --entrypoint cat axentra:local /opt/axentra/sbom.cdx.json`; CI keeps it as the
   artifact `sbom-axentra`. It covers Python distributions, not the Debian packages of the base
   image (scan the image for those).
+- Reproducible build: build with `--build-arg SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)` and an output
+  with `rewrite-timestamp=true` (for example
+  `docker buildx build --no-cache --build-arg SOURCE_DATE_EPOCH=... --output type=image,name=axentra:local,rewrite-timestamp=true .`).
+  Two builds of one commit then give the same platform manifest, config and layers (checked in the internal
+  release-candidate dry run of 2026-11-14); the image index around them can still differ by its attestations.
 - Runs as `axentra` (uid/gid 10001), working directory `/var/lib/axentra`.
 - `ENTRYPOINT ["axentra"]`, default `CMD ["serve", "--host", "0.0.0.0", "--port", "8080"]`, so
   `docker run axentra:local migrate` or `... admin setup-token` run other commands.

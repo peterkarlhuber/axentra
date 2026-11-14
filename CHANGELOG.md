@@ -25,6 +25,9 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Build: the image's build stage takes `SOURCE_DATE_EPOCH` as a build argument, so pip writes hash-based `.pyc`
+  files and two builds of one commit (with `rewrite-timestamp=true`) give identical layers; before, only the `.pyc`
+  source mtimes differed (release-candidate dry run). docs/operations/DEPLOYMENT.md has the command.
 - Added (TABRION MIG-AXE-4): settings `database.idle_in_transaction_timeout_ms` (default `0`) and
   `database.application_name` (default empty) for the connections of Axentra's own pool; both are not set by
   default, so the session of a pool connection is unchanged. The pool now sets its session with
