@@ -37,6 +37,14 @@ CHUNK_SIZE = 64 * 1024
 TEMP_PREFIX = ".tmp-"
 
 
+#: botocore client settings of :class:`S3Backend`: SigV4 for every request and presigned URL (SigV2 is
+#: deprecated by AWS and refused by S3-compatible stores when the URL carries ``response-*`` overrides),
+#: and bounded waits so that an unreachable endpoint fails a request within seconds instead of minutes.
+S3_CONNECT_TIMEOUT_SECONDS = 5
+S3_READ_TIMEOUT_SECONDS = 30
+S3_MAX_ATTEMPTS = 3  # total attempts including the first (botocore "standard" retry mode)
+
+
 class ObjectNotFound(NotFound):
     """The backend holds no object under the key."""
 
@@ -244,12 +252,20 @@ class S3Backend(StorageBackend):
                 raise ConfigurationError(
                     "the s3 storage backend needs boto3: pip install 'axentra[s3]'"
                 ) from exc
+            from botocore.config import Config
+
             client = boto3.client(
                 "s3",
                 region_name=region,
                 endpoint_url=endpoint_url,
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
+                config=Config(
+                    signature_version="s3v4",
+                    connect_timeout=S3_CONNECT_TIMEOUT_SECONDS,
+                    read_timeout=S3_READ_TIMEOUT_SECONDS,
+                    retries={"total_max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+                ),
             )
         self.client = client
 

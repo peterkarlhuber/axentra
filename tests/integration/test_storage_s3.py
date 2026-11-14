@@ -114,3 +114,5 @@ def test_s3_signed_and_presigned_urls_and_orphans(s3, ax_factory):
     assert q["response-content-disposition"][0].startswith("attachment")
     assert q["response-content-type"] == ["text/plain"]
     assert urlparse(p["url"]).path.endswith(f"ax/{pid}/{tid}/{fid}")
+    # SigV4 (SigV2 presigned URLs with response-* overrides are refused by S3-compatible stores).
+    assert q["X-Amz-Algorithm"] == ["AWS4-HMAC-SHA256"] and "AWSAccessKeyId" not in q
