@@ -23,9 +23,10 @@ no name used there is nothing to check. With ``--surface`` every used name must 
 snapshot (``docs/api/surface.json``, K10) with stability ``S``, or be a module of it: consumer libraries
 must not use experimental (``X``) names (Tabrion plan 02 §14 S-2). Enum members and dataclass fields have
 no entry of their own: the snapshot lists them in their parent's ``members`` or ``fields``, so
-``tabrion.TLSMode.AUTO`` is checked against the entry ``tabrion.TLSMode``. A ``__x__`` name has no entry either:
-it is checked as the name before it, so ``tabrion.postgres.SessionSettings.__dataclass_fields__`` is checked
-against the entry ``tabrion.postgres.SessionSettings`` and ``tabrion.__version__`` against the module ``tabrion``.
+``tabrion.TLSMode.AUTO`` is checked against the entry ``tabrion.TLSMode``. A ``__x__`` name has no entry
+either: it is checked as the name before it, so ``tabrion.postgres.SessionSettings.__dataclass_fields__`` is
+checked against the entry ``tabrion.postgres.SessionSettings`` and ``tabrion.__version__`` against the module
+``tabrion``.
 
 The check is static, so it does not see:
 
@@ -39,8 +40,8 @@ A local name bound to Tabrion stays bound for the whole file, even after it is a
 
 The used names are written to ``docs/api-consumers.md`` (``--export``), the consumer side of Tabrion's
 ``docs/api-consumers.md``. Standard library only; the same file is used in tabrion-studio, axentra, orkexa,
-nodestro-runtime and nodestro-api (keep the copies identical). Exit codes: 0 clean, 1 findings or a stale export, 2 usage
-errors.
+nodestro-runtime and nodestro-api (keep the copies identical). Exit codes: 0 clean, 1 findings or a stale
+export, 2 usage errors.
 """
 
 from __future__ import annotations

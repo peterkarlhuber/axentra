@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check_tabrion_api.py"
 EXPORT = ROOT / "docs" / "api-consumers.md"
 #: SHA-256 of ``scripts/check_tabrion_api.py``, the same in every repository that has a copy.
-SCRIPT_SHA256 = "2da799412803408f832f16d7c49ce05ed6af78f8324c970109aee0bdc51fc572"
+SCRIPT_SHA256 = "6a0e66bb2c26c9190f7adfa2eac16a1f4ca29fe983e03c37be5020cb7e9d527a"
 
 
 def _load() -> ModuleType:
