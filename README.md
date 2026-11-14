@@ -176,4 +176,4 @@ Axentra runs without Studio; Studio is just another client. Tested combinations 
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Provenance of adapted code: [NOTICE.md](NOTICE.md).
+Proprietary: Copyright (c) 2026 Levuvo. All rights reserved. See [LICENSE](LICENSE). Provenance of adapted code: [NOTICE.md](NOTICE.md).

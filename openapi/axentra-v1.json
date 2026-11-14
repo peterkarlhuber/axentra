@@ -8467,8 +8467,8 @@
   "info": {
     "description": "The public, versioned Axentra HTTP API. See docs/architecture/API_CONVENTIONS.md for authentication, scoping, pagination, errors and versioning rules.",
     "license": {
-      "identifier": "MIT",
-      "name": "MIT"
+      "identifier": "LicenseRef-Proprietary",
+      "name": "Proprietary"
     },
     "summary": "Modular SaaS backend foundation: identity, tenancy, access, data, storage, jobs, usage, billing, notifications, audit.",
     "title": "Axentra API",
