@@ -5,7 +5,7 @@ The central, versioned list of open work for Axentra. Priorities: **P0** blocks 
 Studio has its own list in its repository; items here mention Studio only where the backend is
 involved. Remove an item in the change that completes it.
 
-Last update: 2026-11-14 (phase 3 of the pre-release assessment: N-3, N-4, N-5, I5, S3 adapter fixes, live adapter runs, owner decisions on platforms, C-02 and base images).
+Last update: 2026-11-14 (phase 3 close-out: Tabrion 0.2.1 pin and Swagger UI SRI merged as `3b80af1`, delta check on the final commits passed, stale reproducible-build item removed; earlier phase 3: N-3, N-4, N-5, I5, S3 adapter fixes, live adapter runs, owner decisions on platforms, C-02 and base images).
 Last full review: 2026-11-06 against master at 6f73952 (TODO abatement round).
 Before that: 2026-11-06 against `fea2fd0` (TODO abatement round 2).
 Before that: 2026-11-05 against `b7ddac0` (quality round 3 close-out; TODO consolidated).
@@ -58,7 +58,7 @@ review, no penetration test).
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | security | **Pre-release assessment 2026-11-13/14** (AI-assisted; reports `axentra-sicherheitsbewertung.md`, `delta/delta-pruefung.md` and the phase 3 report in the project files): every code finding is fixed with a regression test that failed before the fix, the last ones (N-3, N-4, N-5, I5 incl. identities linked by email before a platform role was granted) in the change that updates this row; C-02 is handled by TABRION DC-1, its residual risk (an unpinned `pip install`) is accepted by the owner with the pinned install paths as the only supported ones (DEPLOYMENT.md). Still open: the **independent human security review** (status NOT COMPLETED — HUMAN REVIEW REQUIRED; the AI verdict is INCONCLUSIVE); N-2/H-2 (a lone `LINE n:` echo in pre-formatted database error text) is closed by the Tabrion 0.2.1 pin (`af0458d`) of the change that updates this sentence, values in the primary text stay residual R-1; LD-01 in Stripe test mode (does a SEPA subscription checkout send `payment_status = unpaid`?) |
+| P1 | security | **Pre-release assessment 2026-11-13/14** (AI-assisted; reports `axentra-sicherheitsbewertung.md`, `delta/delta-pruefung.md` and the phase 3 report in the project files): every code finding is fixed with a regression test that failed before the fix, the last ones (N-3, N-4, N-5, I5 incl. identities linked by email before a platform role was granted) in the change that updates this row; C-02 is handled by TABRION DC-1, its residual risk (an unpinned `pip install`) is accepted by the owner with the pinned install paths as the only supported ones (DEPLOYMENT.md). Still open: the **independent human security review** (status NOT COMPLETED — HUMAN REVIEW REQUIRED; the AI verdict is INCONCLUSIVE); N-2/H-2 (a lone `LINE n:` echo in pre-formatted database error text) is closed by the Tabrion 0.2.1 pin (`af0458d`) of the change that updates this sentence, values in the primary text stay residual R-1. Delta check on the final commits (Axentra `3b80af1`, Studio `b14e7fe`; 2026-11-14): 1517 tests with Tabrion 0.2.1, isolation probes, two identical image builds each, compose, backup/restore and Studio e2e in both modes passed; LD-01 in Stripe test mode (does a SEPA subscription checkout send `payment_status = unpaid`?) |
 | P1 | tests | **Live adapter runs (2026-11-14, `scripts/live-integration/`, local containers, synthetic data).** Passed live: SMTP STARTTLS (mailpit), S3 (SeaweedFS: CRUD, SigV4 presigned downloads, outage answers 503), OIDC (Keycloak 26, including I5), webhooks (real receivers, SSRF guards, network errors). Still open: **Stripe test mode** (only stripe-mock, which checks request shapes and is no live test; runbook `STRIPE_TEST_MODE.md` needs test keys from the owner), AWS S3 and MinIO (not run), a hung (not stopped) S3 endpoint, review together with the first production-like deployment |
 
 ## Release and verification
@@ -111,7 +111,6 @@ review, no penetration test).
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | build | Reproducible container builds: compare the digests of two independent builds and remove what differs (timestamps, file order). The build tools, hatchling included, come from hash-pinned locks since TODO abatement round 4 (`deploy/locks/build.txt`), and the `python:3.13-slim` base is digest-pinned with a CI check since audit round 2 (OPS2-12) |
 | P2 | tests | Cross-repository compatibility: Studio's contract and e2e jobs (multi- and single-product mode) run only for the commit pinned in Studio's `api/BACKEND_REF` and only on Studio pull requests; nothing on the Axentra side triggers them for a new Axentra commit (Studio's pin must be moved to a pushed commit that contains this round's changes) |
 
 ## Nodestro (Phase 6)
