@@ -97,7 +97,27 @@ def _json_object(value: str | None, what: str) -> dict[str, Any] | None:
         raise ValidationFailed(f"{what} must be a JSON object") from None
     if not isinstance(parsed, dict):
         raise ValidationFailed(f"{what} must be a JSON object")
+    if not _storable(parsed):
+        # Form fields and query strings bypass the JSON-body NUL guard, and a JSON escape can still
+        # produce U+0000 or a lone surrogate, which PostgreSQL refuses with a 500.
+        raise ValidationFailed(f"{what} must not contain NUL characters or lone surrogates")
     return parsed
+
+
+def _storable(value: Any) -> bool:
+    if isinstance(value, str):
+        if "\x00" in value:
+            return False
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        return True
+    if isinstance(value, list):
+        return all(_storable(v) for v in value)
+    if isinstance(value, dict):
+        return all(_storable(k) and _storable(v) for k, v in value.items())
+    return True
 
 
 def _file_response(info: FileInfo, stream: Iterator[bytes]) -> StreamingResponse:

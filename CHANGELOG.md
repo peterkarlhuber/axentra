@@ -37,7 +37,8 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   log, uvicorn's access log and free-text redaction. **B-02** redaction covers every Axentra token prefix.
   **B-03** an installation without an explicit `environment` refuses to start when `public_url` is not loopback,
   and the container image defaults to `production`. **B-04** NUL characters in the path, query or a JSON body and
-  non-UTF-8 JSON bodies are refused with `422`. **B-05** email addresses with white space, control characters or
+  non-UTF-8 JSON bodies are refused with `422`; so are file `metadata` (multipart field and list filter) with a
+  `\u0000` escape or a lone surrogate, which gave a `500` before (delta review N-1). **B-05** email addresses with white space, control characters or
   header separators are refused with `422`. **LD-01** `checkout.session.completed` starts a subscription only when
   `payment_status` is `paid` or `no_payment_required`; `checkout.session.async_payment_succeeded` and `_failed` are
   handled. **C-03** the compose stacks publish on `AXENTRA_BIND_ADDRESS` (default `127.0.0.1`), `.env.example` is

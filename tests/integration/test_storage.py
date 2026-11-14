@@ -219,6 +219,26 @@ def test_empty_file_and_missing_part_are_refused(world):
     assert _upload(world.admin, pid, tid, expires_at="2001-01-01T00:00:00Z").status_code == 422
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"k": "a\\u0000b"}',
+        '{"a\\u0000": 1}',
+        '{"k": "\\ud800"}',
+        '{"k": ["x", {"deep": "\\udfff"}]}',
+    ],
+)
+def test_metadata_with_nul_or_lone_surrogate_is_refused(world, raw):
+    """A JSON escape in the multipart field or the query filter must give 422, never a 500."""
+    pid = _product(world)
+    tid = _tenant(world, pid)
+    r = _upload(world.admin, pid, tid, metadata=raw)
+    assert r.status_code == 422, r.text
+    assert r.json()["code"] == "validation_failed"
+    r = world.admin.get(_files(pid, tid), params={"metadata": raw})
+    assert r.status_code == 422, r.text
+
+
 def test_quota_files_bytes_and_product_default(world):
     pid = _product(world, settings={"storage": {"quota_files": 2}})
     tid = _tenant(world, pid)
