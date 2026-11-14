@@ -32,12 +32,14 @@ COPY pyproject.toml README.md LICENSE CHANGELOG.md NOTICE.md ./
 COPY src ./src
 RUN /opt/build/bin/pip wheel --no-deps --no-build-isolation --no-index -w /tmp/wheels /src
 ARG EXTRAS=server
-# pip check fails when the chosen lock lacks a dependency of the requested extras.
+# pip check fails when the chosen lock lacks a dependency of the requested extras. The installed Tabrion must be the
+# wheel built here from the hashed archive, never one from a package index (dependency confusion, TABRION DC-AX-1).
 RUN lock=deploy/locks/full.txt; if [ "${EXTRAS}" = "server" ]; then lock=deploy/locks/server.txt; fi \
     && /opt/axentra/bin/pip install --require-hashes --no-deps -r "${lock}" \
     && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/tabrion-*.whl)" \
     && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/axentra-*.whl)[${EXTRAS}]" \
     && /opt/axentra/bin/pip check \
+    && /opt/axentra/bin/python -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d' \
     && /opt/axentra/bin/axentra --version \
     && /opt/axentra/bin/python -I deploy/sbom.py --component axentra > /opt/axentra/sbom.cdx.json
 
@@ -46,15 +48,19 @@ FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915
 LABEL org.opencontainers.image.title="Axentra" \
       org.opencontainers.image.description="Modular SaaS backend foundation (HTTP API)" \
       org.opencontainers.image.source="https://github.com/peterkarlhuber/axentra" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="LicenseRef-Proprietary"
 RUN groupadd --system --gid 10001 axentra \
     && useradd --system --uid 10001 --gid axentra --home-dir /var/lib/axentra --create-home \
        --shell /usr/sbin/nologin axentra \
     && install -d -o axentra -g axentra -m 0750 /var/lib/axentra/var
 COPY --from=build /opt/axentra /opt/axentra
+# The image is a server: production checks by default (B-03). `serve` binds 0.0.0.0, so the settings'
+# loopback check for an unset environment cannot see that the container is reachable. A local trial
+# sets AXENTRA__ENVIRONMENT=development explicitly (deploy/compose/.env.example does).
 ENV PATH=/opt/axentra/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    AXENTRA__ENVIRONMENT=production
 # Relative paths in the configuration (e.g. storage.local_path = "./var/storage") resolve here.
 WORKDIR /var/lib/axentra
 USER 10001:10001

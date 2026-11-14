@@ -87,6 +87,11 @@ More specific codes may be added within a status (for example `setup_already_com
 Validation errors add `errors: [{loc, msg}]`. Details never contain secrets, tokens, SQL or stack
 traces.
 
+A NUL character (U+0000) in the path, the query string or a JSON body (the escape `\u0000`) is
+refused with `422 validation_failed` before the request reaches an endpoint: PostgreSQL cannot
+store it in text or JSON. JSON bodies must be UTF-8 (RFC 8259); a body with raw `0x00` bytes
+(UTF-16, UTF-32) is refused the same way. File uploads are not affected.
+
 The OpenAPI document declares this body as the `Problem` schema: it is the `default` response of
 every operation and the body of every documented 4xx response (the `422` of request validation
 included; FastAPI's own `HTTPValidationError` is not used). Its `securitySchemes` name the three

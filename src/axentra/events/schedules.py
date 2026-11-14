@@ -19,6 +19,7 @@ from __future__ import annotations
 import builtins
 import contextlib
 from datetime import datetime
+import json
 import logging
 from typing import Any
 
@@ -135,6 +136,11 @@ class LeaderLock:
 
 def _schedule(row: Row) -> Schedule:
     return Schedule.model_validate(row)
+
+
+def _canonical(value: Any) -> str:
+    """JSON text that tells types apart (``1``, ``1.0`` and ``true`` compare equal in Python)."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 class ScheduleService:
@@ -397,6 +403,16 @@ class ScheduleService:
             if timing_changed
             else row["next_run_at"]
         )
+        # The schedule's jobs act with what its ``created_by`` holds (JobService.principal_for). A
+        # caller who changes what runs (the kind or payload) or turns a disabled schedule on takes
+        # that place, so an editor cannot run its own choice with the creator's permissions.
+        acting = row["created_by"]
+        if (
+            merged["kind"] != row["kind"]
+            or _canonical(merged["payload"]) != _canonical(row["payload"])
+            or (bool(merged["enabled"]) and not row["enabled"])
+        ):
+            acting = principal.actor.id
         with self.db.transaction(job_scope(product_id, row["tenant_id"])) as tx:
             cur = tx.one_or_404(
                 "SELECT version FROM axentra_schedules WHERE id = %s AND product_id = %s FOR UPDATE",
@@ -407,8 +423,8 @@ class ScheduleService:
                 raise PreconditionFailed("the schedule was changed by someone else")
             tx.execute(
                 "UPDATE axentra_schedules SET name = %s, kind = %s, payload = %s, interval_seconds = %s, cron = %s,"
-                " enabled = %s, priority = %s, max_attempts = %s, next_run_at = %s, version = version + 1,"
-                " updated_at = now() WHERE id = %s",
+                " enabled = %s, priority = %s, max_attempts = %s, next_run_at = %s, created_by = %s,"
+                " version = version + 1, updated_at = now() WHERE id = %s",
                 (
                     str(merged["name"]).strip(),
                     merged["kind"],
@@ -419,6 +435,7 @@ class ScheduleService:
                     merged["priority"],
                     merged["max_attempts"],
                     nxt,
+                    acting,
                     schedule_id,
                 ),
             )
@@ -430,7 +447,12 @@ class ScheduleService:
                 target_id=schedule_id,
                 product_id=product_id,
                 tenant_id=row["tenant_id"],
-                details={"fields": sorted(changes)},
+                details={"fields": sorted(changes)}
+                | (
+                    {"created_by": {"from": row["created_by"], "to": acting}}
+                    if acting != row["created_by"]
+                    else {}
+                ),
             )
             out = tx.one_or_404("SELECT * FROM axentra_schedules WHERE id = %s", (schedule_id,))
         return _schedule(out)

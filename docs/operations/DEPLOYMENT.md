@@ -69,7 +69,8 @@ the configuration file (`deploy/config/single.toml` or `multi.toml`):
 job runs `taskboard migrate` (Axentra's and the `taskboard` namespace), and its `app` serves
 Taskboard with the Axentra API mounted under `/axentra`, on port 8090, using its own database.
 
-Values come from `deploy/compose/.env` (template: `.env.example`): database passwords
+Values come from `deploy/compose/.env` (template: `.env.example` for a local trial,
+`.env.production.example` for a server): database passwords
 (URL-safe, e.g. `openssl rand -hex 24`), the keyring (`AXENTRA_MASTER_KEYS`, from
 `axentra keys generate`), and `AXENTRA_ENVIRONMENT`, `AXENTRA_PUBLIC_URL`,
 `AXENTRA_ALLOWED_ORIGINS`, `AXENTRA_HTTP_PORT`, which override the TOML file.
@@ -96,7 +97,11 @@ again (idempotent) before the API restarts. Take a backup first
 ([BACKUP_RESTORE](BACKUP_RESTORE.md)); migrations are forward-only.
 
 The compose files are a starting point for a single host. They do not include a reverse proxy or
-TLS; `.env.example` uses `development` so that plain HTTP on localhost works.
+TLS; `.env.example` uses `development` so that plain HTTP on localhost works. Every stack publishes its
+port on `AXENTRA_BIND_ADDRESS` (default `127.0.0.1`, reachable only from the host itself); set it to
+`0.0.0.0` or a specific address only behind a TLS-terminating proxy and with `AXENTRA_ENVIRONMENT=production`,
+which refuses the placeholder passwords of the templates. The image itself defaults to `production`
+when no environment is passed.
 
 ## Production checklist
 

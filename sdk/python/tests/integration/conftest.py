@@ -5,7 +5,7 @@ PostgreSQL database (owned by a non-superuser role, so row-level security is enf
 by uvicorn on a free loopback port in a background thread, and the SDK talks real HTTP to it.
 
 Needs ``AXENTRA_TEST_DATABASE_URL`` (a superuser URL) and the server package installed
-(``pip install -e "../..[server]"``); otherwise the tests are skipped and reported as skipped.
+(``pip install -r ../../requirements/tabrion.txt -e "../..[server]"``); otherwise the tests are skipped and reported as skipped.
 """
 
 from __future__ import annotations

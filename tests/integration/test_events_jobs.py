@@ -336,10 +336,13 @@ def test_schedule_fires_each_slot_once_with_two_schedulers(fast_ax):
         tx.execute("UPDATE axentra_schedules SET next_run_at = next_run_at - interval '120 seconds'")
     barrier = threading.Barrier(2)
     results: list[list[str]] = []
+    # One clock reading, taken before firing, for every call below: with a 60 s interval a later
+    # utcnow() can already be past the next slot at a minute boundary, which made the test flaky.
+    now = datetime.now(UTC)
 
     def fire():
         barrier.wait()
-        results.append(ax.schedules.fire_due())
+        results.append(ax.schedules.fire_due(now))
 
     threads = [threading.Thread(target=fire) for _ in range(2)]
     for t in threads:
@@ -347,17 +350,17 @@ def test_schedule_fires_each_slot_once_with_two_schedulers(fast_ax):
     for t in threads:
         t.join(10)
     assert sorted(len(r) for r in results) == [0, 1]
-    assert ax.schedules.fire_due() == []
+    assert ax.schedules.fire_due(now) == []
     firings = ax.schedules.firings(pid, s.id)
     assert len(firings) == 1
     jobs = ax.jobs.list(SYS, pid, kind="demo.sched").items
     assert len(jobs) == 1 and jobs[0].tenant_id == tid and jobs[0].schedule_id == s.id
     after = ax.schedules.get(SYS, pid, s.id)
-    assert after.next_run_at > datetime.now(UTC) and after.last_job_id == jobs[0].id
+    assert after.next_run_at > now and after.last_job_id == jobs[0].id
     # Re-firing the same slot (e.g. a leader that lost its lock mid-way) is refused by the key.
     with ax.db.transaction(DbScope.platform()) as tx:
         tx.execute("UPDATE axentra_schedules SET next_run_at = %s", (firings[0][0],))
-    assert ax.schedules.fire_due() == []
+    assert ax.schedules.fire_due(now) == []
 
 
 def test_leader_lock_is_exclusive(fast_ax):
