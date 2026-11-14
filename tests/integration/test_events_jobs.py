@@ -435,12 +435,15 @@ def test_leader_lock_holds_no_connection_while_not_leading(fast_ax):
     a, b = LeaderLock(ax.db.url, key=4244), LeaderLock(ax.db.url, key=4244)
     try:
         with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
+            # Lock connections that exist before this test (an earlier test's scheduler that is still closing, the
+            # app's own leader lock) are not this test's; only connections opened by ``a`` and ``b`` count.
+            before = _lock_backends(admin, dbname)
             assert a.acquire() is True
             leader = a._conn.info.backend_pid
             assert b.acquire() is False
-            assert _settled(lambda: _lock_backends(admin, dbname), {leader}) == {leader}
+            assert _settled(lambda: _lock_backends(admin, dbname, before), {leader}) == {leader}
             a.release()
-            assert _settled(lambda: _lock_backends(admin, dbname), set()) == set()
+            assert _settled(lambda: _lock_backends(admin, dbname, before), set()) == set()
     finally:
         a.release()
         b.release()
