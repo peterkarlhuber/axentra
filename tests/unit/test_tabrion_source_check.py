@@ -3,7 +3,8 @@
 The script is an unchanged copy of nodestro-studio's canonical ``scripts/check_tabrion_source.py`` (DC-NS-2): its
 SHA-256 is pinned here, so a change to one copy fails until every consumer has the new one. CI runs it in the job
 "Install with a poisoned index (Tabrion pin)". Here, offline: a plain ``pip install tabrion`` against the poisoned
-index is RED (it asks the index for the name and gets the poisoned release).
+index is RED (it asks the index for the name and gets the poisoned release, 0.2.99: inside Axentra's range
+``>=0.2,<0.3`` and above the pinned 0.2.1).
 """
 
 from __future__ import annotations
@@ -15,8 +16,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check_tabrion_source.py"
-#: SHA-256 of the canonical copy (nodestro-studio bf51022).
-SCRIPT_SHA256 = "8496bd63327dbee897966bd9d99296d479e2c1c0c55baa9018ee8dba50ab177f"
+#: SHA-256 of the canonical copy (nodestro-studio c036a29, head of #198; the merge commit once #198 is
+#: merged).
+SCRIPT_SHA256 = "f1edfc71b5da4986547abe0824833fb73bba532cb5e6a00e202c9ff317747456"
 
 
 def test_the_script_is_the_shared_copy() -> None:
@@ -36,4 +38,5 @@ def test_an_install_by_name_is_red(tmp_path: Path) -> None:
     )
     assert out.returncode == 1, out.stdout + out.stderr
     assert "RED" in out.stdout.splitlines()[-1], out.stdout
+    assert "ok   control: pip install --dry-run tabrion chooses the poisoned 0.2.99" in out.stdout, out.stdout
     assert "the index was asked for a poisoned name: GET /simple/tabrion/" in out.stdout, out.stdout

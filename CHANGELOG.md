@@ -39,6 +39,11 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   source (the copies in tabrion-studio, orkexa and nodestro-runtime still have the old version). CI: the lint job runs
   `python scripts/check_tabrion_api.py --check-export docs/api-consumers.md --surface <surface.json>` against the
   snapshot of the Tabrion commit pinned in `requirements/tabrion.txt`. Tooling only.
+
+- Security (TABRION DC-AX-1 follow-up, 2026-11-14): `scripts/check_tabrion_source.py` is nodestro-studio's new copy
+  (#198, SHA-256 `f1edfc71b5da4986547abe0824833fb73bba532cb5e6a00e202c9ff317747456`): the poisoned `tabrion` is 0.2.99
+  (was 0.1.0, outside Axentra's `>=0.2,<0.3`), so an install by range would pick it over the pinned 0.2.1. The test
+  also checks that the positive control chooses 0.2.99.
 - Security (QA finding 2026-11-14): `/v1/docs` loads Swagger UI pinned to `swagger-ui-dist@5.34.1` with Subresource
   Integrity (`sha384`, checked against the npm package) and `crossorigin`, instead of the moving `@5` without
   integrity, and no longer loads a favicon from fastapi.tiangolo.com. Production keeps `/v1/docs` disabled by

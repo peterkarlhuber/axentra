@@ -156,12 +156,13 @@ jobs:
 
   tabrion-source:
     # TABRION DC-AX-1 (dependency confusion): the documented development install (as in the lint and test jobs), with
-    # pip's index replaced by a poisoned one (scripts/check_tabrion_source.py, the shared copy of nodestro-studio's). It
-    # serves a tabrion 0.1.0 whose wheel forges direct_url.json and whose sdist and wheel run code, and forwards every
-    # other name to PyPI. Red when pip asks that index for tabrion at all, when the install made no index request
-    # (it did not use the index), when an index option or variable would bypass it, when poisoned code ran, or when
-    # the installed tabrion is not the pin; a positive control first shows that "pip install tabrion" would take the
-    # poisoned release. No pip cache. Reported by ci-ok (.github/ci-manifest.json); not a branch protection check.
+    # pip's index replaced by a poisoned one (scripts/check_tabrion_source.py, the shared copy of nodestro-studio's).
+    # It serves a tabrion 0.2.99 (inside >=0.2,<0.3, above the pinned 0.2.1) whose wheel forges direct_url.json and
+    # whose sdist and wheel run code, and forwards every other name to PyPI. Red when pip asks that index for tabrion
+    # at all, when the install made no index request (it did not use the index), when an index option or variable
+    # would bypass it, when poisoned code ran, or when the installed tabrion is not the pin; a positive control first
+    # shows that "pip install tabrion" would take the poisoned release. No pip cache. Reported by ci-ok
+    # (.github/ci-manifest.json); not a branch protection check.
     name: Install with a poisoned index (Tabrion pin)
     runs-on: ubuntu-latest
     timeout-minutes: 20 # new job (TABRION DC-AX-1): one install without cache (about 4 min locally)
