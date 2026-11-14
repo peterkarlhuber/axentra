@@ -1,0 +1,49 @@
+# Opt-in live integration services for scripts/live-integration (never part of CI).
+# Images are pinned by digest (resolved 2026-11-14). All ports bind to 127.0.0.1 only.
+# Credentials below are synthetic test values for throwaway local containers.
+name: lc-axentra-live
+
+services:
+  mailpit-starttls:
+    image: axllent/mailpit@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    container_name: lc-mailpit-starttls
+    environment:
+      MP_SMTP_TLS_CERT: /certs/server.pem
+      MP_SMTP_TLS_KEY: /certs/server.key
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+      MP_SMTP_AUTH: "lcmailer:lc-smtp-Secr3t-synthetic"
+    volumes: ["${LC_CERTS:?run make_certs.sh and export LC_CERTS}:/certs:ro"]
+    ports: ["127.0.0.1:19125:1025", "127.0.0.1:19126:8025"]
+
+  mailpit-tls:
+    image: axllent/mailpit@sha256:aef2aacc11f075ec0fb6874275ee4a421e688e11a96ebb296134d1735c7761ce
+    container_name: lc-mailpit-tls
+    environment:
+      MP_SMTP_TLS_CERT: /certs/server.pem
+      MP_SMTP_TLS_KEY: /certs/server.key
+      MP_SMTP_REQUIRE_TLS: "true"          # implicit TLS (SMTPS) from the first byte
+      MP_SMTP_AUTH: "lcmailer:lc-smtp-Secr3t-synthetic"
+    volumes: ["${LC_CERTS:?run make_certs.sh and export LC_CERTS}:/certs:ro"]
+    ports: ["127.0.0.1:19465:1025", "127.0.0.1:19127:8025"]
+
+  seaweedfs:
+    image: chrislusf/seaweedfs@sha256:ccad23e18639c8b98cee17e7100b95830a06077b56d8e5b006d6dcf8ec5e94a0
+    container_name: lc-seaweedfs
+    command: ["server", "-s3", "-s3.config=/cfg/s3.json", "-dir=/data", "-volume.max=100", "-master.volumeSizeLimitMB=64"]
+    volumes: ["./seaweedfs-s3.json:/cfg/s3.json:ro"]
+    ports: ["127.0.0.1:19333:8333"]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858  # 26.0
+    container_name: lc-keycloak
+    command: ["start-dev"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: lcadmin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: lc-kc-admin-synthetic
+    ports: ["127.0.0.1:19180:8080"]
+
+  stripe-mock:
+    # MOCK: validates request shapes against Stripe's OpenAPI spec; not Stripe test mode.
+    image: stripe/stripe-mock@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78
+    container_name: lc-stripe-mock
+    ports: ["127.0.0.1:19111:12111"]
