@@ -317,7 +317,15 @@ def test_nul_characters_in_input_are_a_422_problem(world: World, caplog):
     r = anon.post("/v1/auth/login/password", json={"email": "a\x00@example.com", "password": "x" * 12})
     assert r.status_code == 422 and r.headers["content-type"] == "application/problem+json", r.text
     assert r.json()["code"] == "validation_failed"
-    assert r.json()["detail"] == "text must not contain NUL characters"
+    assert r.json()["detail"] == "JSON bodies must be UTF-8 and must not contain NUL characters"
+    # UTF-16 and UTF-32 bodies (the JSON parser accepts them) are refused, not passed on with a NUL.
+    for encoding in ("utf-16", "utf-16-le", "utf-16-be", "utf-32"):
+        r = anon.post(
+            "/v1/auth/login/password",
+            content=json.dumps({"email": "a\x00@example.com", "password": "x" * 12}).encode(encoding),
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 422 and r.json()["code"] == "validation_failed", (encoding, r.text)
     # Also in a chunked JSON body, split inside the escape.
     raw = b'{"email": "a\\u0000@example.com", "password": "xxxxxxxxxxxx"}'
     r = anon.post(
@@ -333,6 +341,9 @@ def test_nul_characters_in_input_are_a_422_problem(world: World, caplog):
     tid = world.admin.post(f"/v1/products/{pid}/tenants", json={"slug": "acme", "name": "Acme"}).json()["id"]
     base = f"/v1/products/{pid}/tenants/{tid}/records/items"
     r = world.admin.post(base, json={"title": "nul \x00 inside"})
+    assert r.status_code == 422 and r.json()["code"] == "validation_failed"
+    # A large body is searched off the event loop, with the same result.
+    r = world.admin.post(base, json={"title": "x" * 400_000 + "\x00"})
     assert r.status_code == 422 and r.json()["code"] == "validation_failed"
     assert world.admin.post(base, json={"title": "tab\tand\nnewline"}).status_code == 201
     r = world.admin.get(f"/v1/products/{pid}%00/tenants")

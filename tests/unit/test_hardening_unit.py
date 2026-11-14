@@ -200,3 +200,34 @@ def test_placeholder_database_password_is_refused_in_production(password: str, d
         },
     )
     assert _database_url(ok) == url.replace(password, "9f3a1c")
+
+
+@pytest.mark.parametrize(
+    ("body", "has_nul"),
+    [
+        (b'{"a": "x"}', False),
+        (b'{"a": "\\u0000"}', True),
+        (b'{"a": "\\\\\\u0000"}', True),
+        (b'{"a": "\\\\u0000"}', False),
+        (b'{"a": "\\\\\\\\u0000"}', False),
+        ('{"a": "x"}'.encode("utf-16"), True),
+        ('{"a": "x"}'.encode("utf-32-le"), True),
+        (b'{"a": "\x00"}', True),
+    ],
+)
+def test_json_nul_detection(body: bytes, has_nul: bool) -> None:
+    from axentra.api.nul_guard import _json_body_has_nul
+
+    assert _json_body_has_nul(body) is has_nul
+
+
+def test_json_nul_detection_is_fast_without_an_escape() -> None:
+    """B-04 review: the regex runs only when the body holds the text ``\\u0000``."""
+    from unittest import mock
+
+    from axentra.api import nul_guard
+
+    body = b'"' + b"\\\\" * (1 << 20) + b'"'
+    with mock.patch.object(nul_guard, "_JSON_NUL") as regex:
+        assert nul_guard._json_body_has_nul(body) is False
+    regex.search.assert_not_called()

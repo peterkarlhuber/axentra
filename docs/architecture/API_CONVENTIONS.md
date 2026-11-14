@@ -88,8 +88,9 @@ Validation errors add `errors: [{loc, msg}]`. Details never contain secrets, tok
 traces.
 
 A NUL character (U+0000) in the path, the query string or a JSON body (the escape `\u0000`) is
-refused with `422 validation_failed` ("text must not contain NUL characters") before the request
-reaches an endpoint: PostgreSQL cannot store it in text or JSON. File uploads are not affected.
+refused with `422 validation_failed` before the request reaches an endpoint: PostgreSQL cannot
+store it in text or JSON. JSON bodies must be UTF-8 (RFC 8259); a body with raw `0x00` bytes
+(UTF-16, UTF-32) is refused the same way. File uploads are not affected.
 
 The OpenAPI document declares this body as the `Problem` schema: it is the `default` response of
 every operation and the body of every documented 4xx response (the `422` of request validation
