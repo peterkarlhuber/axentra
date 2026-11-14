@@ -24,7 +24,7 @@ from axentra.core.context import Principal
 from axentra.core.errors import ConfigurationError
 from axentra.data.database import Database, DbScope, join
 from axentra.data.migrations import MigrationRunner
-from axentra.data.roles import grant_runtime_role, inspect_role
+from axentra.data.roles import _refusal, grant_runtime_role, inspect_role
 from tests.conftest import ADMIN_URL, _with_db
 
 pytestmark = pytest.mark.postgres
@@ -495,6 +495,33 @@ def test_a_member_of_pg_write_all_data_is_refused_before_anything_is_granted(
                 "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee = %s", (name,)
             ).fetchone()
         assert granted == (0,)
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
+
+
+def test_the_refusal_names_predefined_roles_and_unknown_reasons(roles_db: dict[str, str]) -> None:
+    """Tabrion's ``predefined_role`` reason (TB-150) and a reason Axentra does not know get their own text.
+
+    Called directly: the pinned Tabrion does not raise ``predefined_role`` yet, a later pin does."""
+    name = f"ax6_pre_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        _make_role(admin, name)
+        admin.execute(sql.SQL("GRANT pg_read_all_data, pg_monitor TO {}").format(sql.Identifier(name)))
+    try:
+        with psycopg.connect(roles_db["owner"], autocommit=True) as conn:
+            text = str(_refusal(conn, name, None, ["predefined_role"]))
+            assert text.startswith(f"the runtime role {name!r} is a member of the predefined roles ")
+            assert "pg_read_all_data" in text and "pg_monitor" in text and "pg_read_all_settings" in text
+            assert text.endswith(" (role membership): row-level security would not apply to it")
+            assert str(_refusal(conn, name, None, ["predefined_role", "new_reason"])).endswith(
+                " and is refused by tabrion.postgres.grant_runtime_role (new_reason): row-level security would not"
+                " apply to it"
+            )
+            assert str(_refusal(conn, name, None, [""])) == (
+                f"the runtime role {name!r} is refused by tabrion.postgres.grant_runtime_role (no reason given):"
+                " row-level security would not apply to it"
+            )
     finally:
         with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
             admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))

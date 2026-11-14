@@ -159,9 +159,39 @@ def _refusal(
             texts.append(f"owns tables ({', '.join(before.owned_tables[:5])})")
         else:
             texts.append("can become the owner role or the owner of the schema (role membership)")
+    if "predefined_role" in reasons and "superuser" not in reasons:
+        # A superuser is a member of every predefined role: "is a superuser" says it all.
+        broad = _predefined_roles(conn, role)
+        texts.append(
+            f"is a member of the predefined role{'s' if len(broad) > 1 else ''} {', '.join(broad)} (role membership)"
+            if broad
+            else "is a member of a predefined role (role membership)"
+        )
+    unknown = sorted({r for r in reasons if r and r not in _KNOWN_REASONS})
+    if unknown or not texts:
+        # A reason this Axentra does not know yet (a newer Tabrion): name it instead of an empty sentence.
+        texts.append(
+            f"is refused by tabrion.postgres.grant_runtime_role ({', '.join(unknown) or 'no reason given'})"
+        )
     return ConfigurationError(
         f"the runtime role {role!r} {' and '.join(texts)}: row-level security would not apply to it"
     )
+
+
+#: The reasons of Tabrion's ``RoleUnsafe`` that :func:`_refusal` words itself.
+_KNOWN_REASONS = frozenset({"superuser", "bypass_rls", "table_owner", "predefined_role"})
+
+
+def _predefined_roles(conn: psycopg.Connection[Any], role: str) -> list[str]:
+    """The predefined roles (``pg_*`` with a system OID) that ``role`` is a member of, directly or not."""
+    row = _read(
+        conn,
+        "SELECT coalesce(array_agg(p.rolname::text ORDER BY p.rolname), '{}') FROM pg_catalog.pg_roles r,"
+        " pg_catalog.pg_roles p WHERE r.rolname = %s AND p.rolname LIKE 'pg\\_%%' AND p.oid < 16384"
+        " AND p.oid <> r.oid AND pg_catalog.pg_has_role(r.oid, p.oid, 'MEMBER')",
+        (role,),
+    )
+    return list(row[0]) if row else []
 
 
 def _writes_all_data(conn: psycopg.Connection[Any], role: str) -> bool:
