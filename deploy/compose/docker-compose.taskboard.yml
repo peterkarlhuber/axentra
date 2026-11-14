@@ -73,7 +73,8 @@ services:
       # Runtime role without superuser/BYPASSRLS: row-level security applies to Taskboard's tables too.
       AXENTRA_DATABASE_URL: postgresql://axentra_app:${AXENTRA_DB_APP_PASSWORD}@db:5432/taskboard
     ports:
-      - "${TASKBOARD_HTTP_PORT:-8090}:8090"
+      # Loopback only by default (C-03); set AXENTRA_BIND_ADDRESS to publish on other interfaces.
+      - "${AXENTRA_BIND_ADDRESS:-127.0.0.1}:${TASKBOARD_HTTP_PORT:-8090}:8090"
     volumes:
       - appdata:/var/lib/taskboard/var
     tmpfs:

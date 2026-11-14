@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+import re
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -127,3 +130,58 @@ def test_unset_environment_with_a_reachable_public_url_refuses_to_start(url: str
     load_settings(
         None, environ={"AXENTRA__SECURITY__PUBLIC_URL": url, "AXENTRA__ENVIRONMENT": "development"}
     ).validate_security()
+
+
+COMPOSE_DIR = Path(__file__).resolve().parents[2] / "deploy" / "compose"
+
+
+@pytest.mark.parametrize("name", ["single", "multi", "taskboard"])
+def test_compose_publishes_on_loopback_by_default(name: str) -> None:
+    """C-03: a quick start never publishes the API on every host interface."""
+    text = (COMPOSE_DIR / f"docker-compose.{name}.yml").read_text(encoding="utf-8")
+    ports = re.findall(r'^\s+- "([^"]*:\d+)"\s*$', text, re.MULTILINE)
+    assert ports
+    assert all(p.startswith("${AXENTRA_BIND_ADDRESS:-127.0.0.1}:") for p in ports), ports
+
+
+def _env_template(name: str) -> dict[str, str]:
+    lines = (COMPOSE_DIR / name).read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+
+
+def test_compose_env_templates() -> None:
+    trial = _env_template(".env.example")
+    assert trial["AXENTRA_ENVIRONMENT"] == "development" and trial["AXENTRA_BIND_ADDRESS"] == "127.0.0.1"
+    assert "LOCAL TRIAL" in (COMPOSE_DIR / ".env.example").read_text(encoding="utf-8")
+    production = _env_template(".env.production.example")
+    assert production["AXENTRA_ENVIRONMENT"] == "production"
+    assert production["AXENTRA_PUBLIC_URL"].startswith("https://")
+    assert production["AXENTRA_BIND_ADDRESS"] == "127.0.0.1"
+    assert set(trial) - {"TASKBOARD_ORIGIN", "TASKBOARD_HTTP_PORT"} == set(production)
+
+
+@pytest.mark.parametrize("password", ["change-me-app", "change-me-owner", "CHANGE-ME", "replace-with-x"])
+def test_placeholder_database_password_is_refused_in_production(password: str, caplog) -> None:  # type: ignore[no-untyped-def]
+    """C-03: the template passwords of .env.example never reach a production database connection."""
+    from axentra.core.errors import ConfigurationError
+    from axentra.platform import _database_url, _migration_url
+
+    url = f"postgresql://axentra_app:{password}@db:5432/axentra"
+    environ = {"AXENTRA__DATABASE__URL": url, "AXENTRA__SECURITY__PUBLIC_URL": "https://api.example.com"}
+    production = load_settings(None, environ={**environ, "AXENTRA__ENVIRONMENT": "production"})
+    with pytest.raises(ConfigurationError, match="placeholder password"):
+        _database_url(production)
+    with pytest.raises(ConfigurationError, match="placeholder password"):
+        _migration_url(production)
+    development = load_settings(None, environ={**environ, "AXENTRA__ENVIRONMENT": "development"})
+    assert _database_url(development) == url
+    assert "placeholder password" in caplog.text
+    ok = load_settings(
+        None,
+        environ={
+            **environ,
+            "AXENTRA__ENVIRONMENT": "production",
+            "AXENTRA__DATABASE__URL": url.replace(password, "9f3a1c"),
+        },
+    )
+    assert _database_url(ok).endswith("@db:5432/axentra")
