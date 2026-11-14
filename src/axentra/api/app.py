@@ -219,7 +219,7 @@ def create_app(
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
-        license_info={"name": "MIT", "identifier": "MIT"},
+        license_info={"name": "Proprietary", "identifier": "LicenseRef-Proprietary"},
     )
     app.state.axentra = ax
     app.state.server_version = __version__
