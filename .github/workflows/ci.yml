@@ -145,6 +145,33 @@ jobs:
           /tmp/lib/bin/python -c "import axentra, tabrion; print('axentra', axentra.__version__, 'tabrion', tabrion.__version__)"
           ! /tmp/lib/bin/python -c "import pytest" 2>/dev/null
 
+  tabrion-source:
+    # TABRION DC-AX-1 (dependency confusion): the documented development install (as in the lint and test jobs), with
+    # pip's index replaced by a poisoned one (scripts/check_tabrion_source.py, the shared copy of nodestro-studio's). It
+    # serves a tabrion 0.1.0 whose wheel forges direct_url.json and whose sdist and wheel run code, and forwards every
+    # other name to PyPI. Red when pip asks that index for tabrion at all, when the install made no index request
+    # (it did not use the index), when an index option or variable would bypass it, when poisoned code ran, or when
+    # the installed tabrion is not the pin; a positive control first shows that "pip install tabrion" would take the
+    # poisoned release. No pip cache. Reported by ci-ok (.github/ci-manifest.json); not a branch protection check.
+    name: Install with a poisoned index (Tabrion pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # new job (TABRION DC-AX-1): one install without cache (about 4 min locally)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Development install against a poisoned index
+        run: |
+          python -m venv /tmp/dev
+          /tmp/dev/bin/python -m pip install --upgrade pip
+          python -I scripts/check_tabrion_source.py --lock requirements/tabrion.txt --python /tmp/dev/bin/python -- \
+            /tmp/dev/bin/python -m pip install --no-cache-dir -r requirements/tabrion.txt -e ".[dev]"
+      - name: The installed tabrion is the pin
+        run: /tmp/dev/bin/python -m pytest -q -p no:cacheprovider tests/unit/test_tabrion_requirements.py
+
   sdk-typescript:
     name: TypeScript SDK (generated types, unit tests, build)
     runs-on: ubuntu-latest
@@ -353,6 +380,13 @@ jobs:
           docker run --rm axentra:ci --version
           test "$(docker run --rm --entrypoint id axentra:ci -u)" = "10001"
           ! docker run --rm --entrypoint pip axentra:ci freeze | grep -Ei "nodestro|orkexa|axentra-studio"
+      # TABRION DC-AX-1: Tabrion in both images is the wheel built from the hashed archive of deploy/locks/tabrion.txt
+      # (direct_url.json of a local file), never a release from a package index.
+      - name: Images carry the Tabrion built from the hashed archive
+        run: |
+          for image in axentra:ci axentra:ci-full; do
+            docker run --rm --entrypoint python "$image" -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d'
+          done
 
   security:
     name: Security scans

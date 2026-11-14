@@ -35,7 +35,7 @@ command, with pip 25.0 or newer (see [docs/development/DEVELOPMENT.md](docs/deve
 
 | | Library | HTTP API |
 |---|---|---|
-| Install | `pip install "axentra @ git+https://github.com/peterkarlhuber/axentra.git@<commit>"` | `pip install "axentra[server] @ git+https://github.com/peterkarlhuber/axentra.git@<commit>"` or the container image |
+| Install | `pip install -r requirements/tabrion.txt "axentra @ git+https://github.com/peterkarlhuber/axentra.git@<commit>"` | `pip install -r requirements/tabrion.txt "axentra[server] @ git+https://github.com/peterkarlhuber/axentra.git@<commit>"` or the container image |
 | Entry point | `axentra.platform.Axentra` | `axentra serve`, `/v1/...` |
 | Security context | You pass a `Principal` to every service call | Built from the session cookie, bearer session token or API key |
 | Typical user | A Python product backend that runs Axentra in-process | Frontends, other languages, Axentra Studio |

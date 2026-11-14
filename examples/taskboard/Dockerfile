@@ -6,7 +6,8 @@
 # Installs Axentra from this repository (pinned by deploy/constraints.txt) plus the Taskboard
 # package; runs as an unprivileged user like the Axentra image. Tabrion is not on a package index:
 # it comes first, built offline (no build isolation) from the hash-pinned source archive of
-# deploy/locks/tabrion.txt with the hash-pinned hatchling of deploy/locks/build.txt, in a separate venv.
+# deploy/locks/tabrion.txt with the hash-pinned hatchling of deploy/locks/build.txt, in a separate venv. The build
+# fails unless the installed Tabrion is that wheel (not one from a package index, TABRION DC-AX-1).
 
 # The base is pinned by digest in each FROM line (Dependabot's docker ecosystem keeps both current).
 
@@ -28,6 +29,8 @@ RUN /opt/build/bin/pip install --require-hashes --no-deps -r deploy/locks/build.
     && /opt/taskboard/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/tabrion-*.whl)" \
     && /opt/taskboard/bin/pip install --constraint deploy/constraints.txt "/src[server]" \
     && /opt/taskboard/bin/pip install --no-deps ./examples/taskboard \
+    && /opt/taskboard/bin/pip check \
+    && /opt/taskboard/bin/python -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d' \
     && /opt/taskboard/bin/taskboard --help > /dev/null
 
 FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS runtime

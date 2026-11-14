@@ -32,12 +32,14 @@ COPY pyproject.toml README.md LICENSE CHANGELOG.md NOTICE.md ./
 COPY src ./src
 RUN /opt/build/bin/pip wheel --no-deps --no-build-isolation --no-index -w /tmp/wheels /src
 ARG EXTRAS=server
-# pip check fails when the chosen lock lacks a dependency of the requested extras.
+# pip check fails when the chosen lock lacks a dependency of the requested extras. The installed Tabrion must be the
+# wheel built here from the hashed archive, never one from a package index (dependency confusion, TABRION DC-AX-1).
 RUN lock=deploy/locks/full.txt; if [ "${EXTRAS}" = "server" ]; then lock=deploy/locks/server.txt; fi \
     && /opt/axentra/bin/pip install --require-hashes --no-deps -r "${lock}" \
     && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/tabrion-*.whl)" \
     && /opt/axentra/bin/pip install --no-deps --no-index "$(ls /tmp/wheels/axentra-*.whl)[${EXTRAS}]" \
     && /opt/axentra/bin/pip check \
+    && /opt/axentra/bin/python -I -c 'import json, importlib.metadata as m; d = json.loads(m.distribution("tabrion").read_text("direct_url.json") or "null"); assert d and "archive_info" in d and d["url"].startswith("file:///tmp/wheels/tabrion-"), d' \
     && /opt/axentra/bin/axentra --version \
     && /opt/axentra/bin/python -I deploy/sbom.py --component axentra > /opt/axentra/sbom.cdx.json
 

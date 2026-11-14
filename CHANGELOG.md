@@ -25,6 +25,16 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Security (TABRION DC-AX-1, dependency confusion): Tabrion is not on a package index, and a PyPI project of that
+  name would be someone else's. `tests/unit/test_tabrion_requirements.py` now refuses an installed Tabrion that does
+  not come from the pin (Git commit of `requirements/tabrion.txt`) or the hashed archive of `deploy/locks/tabrion.txt`,
+  in particular one without `direct_url.json` (an index install); a sibling checkout is accepted only with
+  `AXENTRA_TABRION_LOCAL_CHECKOUT=1`. The new CI job "Install with a poisoned index (Tabrion pin)" runs the
+  development install against a poisoned index (`scripts/check_tabrion_source.py`, a checksummed copy of
+  nodestro-studio's) and is red if pip asks it for `tabrion` at all; ci-ok reports it. Both images (and the Taskboard
+  image, with `pip check`) fail to build unless Tabrion is the wheel built from the hashed archive, and CI checks
+  that again on the built images. The README install table adds `-r requirements/tabrion.txt`, and Dependabot ignores
+  `tabrion`.
 - Security (TABRION MIG-AXE-3, finding B-06-1): database errors are redacted by Tabrion's `tabrion.errors`
   (`safe_message`, `DbErrorRedactionFilter`) instead of Axentra's local fix (TABRION MIG-AXE-0). Axentra keeps the
   process-wide installation (`install_db_error_redaction`) and the helpers for stored and exported texts
