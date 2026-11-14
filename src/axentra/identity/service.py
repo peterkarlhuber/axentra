@@ -56,9 +56,23 @@ _USER_FROM = "axentra_users u LEFT JOIN axentra_platform_roles pr ON pr.user_id 
 _LAST_SEEN_RESOLUTION = timedelta(seconds=60)
 
 
+#: Characters that separate or quote addresses in a mail header; never part of an address Axentra accepts.
+_EMAIL_FORBIDDEN = frozenset(',;<>"()')
+
+
 def normalize_email(email: str) -> str:
+    """Trimmed address with a lowercased domain. Refuses white space, control and format characters
+    (CR/LF, NUL, U+2028 ...) and the header separators ``,;<>"()``, so that a stored address is always
+    one a mail can be sent to (B-05)."""
     email = email.strip()
-    if "@" not in email or len(email) > 320 or email.startswith("@") or email.endswith("@") or " " in email:
+    if (
+        "@" not in email
+        or len(email) > 320
+        or email.startswith("@")
+        or email.endswith("@")
+        or not email.isprintable()
+        or any(c.isspace() or c in _EMAIL_FORBIDDEN for c in email)
+    ):
         raise ValidationFailed("invalid email address")
     local, _, domain = email.rpartition("@")
     return f"{local}@{domain.lower()}"

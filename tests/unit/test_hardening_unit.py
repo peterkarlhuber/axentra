@@ -65,3 +65,43 @@ def test_load_settings_is_exported_from_the_package():
     assert axentra.Settings.__name__ == "Settings"
     with pytest.raises(AttributeError):
         axentra.nope  # noqa: B018
+
+
+BAD_EMAILS = [
+    "victim@x.test\r\nBcc:evil@evil.test",
+    "victim@x.test\nBcc:evil@evil.test",
+    "a@x.test,b@evil.test",
+    "a@x.test;b@evil.test",
+    "Name <a@x.test>",
+    '"a"@x.test',
+    "a(comment)@x.test",
+    "a\tb@x.test",
+    "a b@x.test",
+    "a\x00@x.test",
+    "a\u2028@x.test",
+    "a\u200b@x.test",
+]
+
+
+@pytest.mark.parametrize("email", BAD_EMAILS)
+def test_normalize_email_refuses_header_separators_and_control_characters(email: str) -> None:
+    """B-05: such an address was stored, but no mail could ever be sent to it."""
+    from axentra.core.errors import ValidationFailed
+    from axentra.identity.service import normalize_email
+
+    with pytest.raises(ValidationFailed):
+        normalize_email(email)
+
+
+@pytest.mark.parametrize(
+    ("email", "normalized"),
+    [
+        (" Ops@Example.COM ", "Ops@example.com"),
+        ("o'brien+tag@x.test", "o'brien+tag@x.test"),
+        ("jörg@bücher.de", "jörg@bücher.de"),
+    ],
+)
+def test_normalize_email_keeps_ordinary_addresses(email: str, normalized: str) -> None:
+    from axentra.identity.service import normalize_email
+
+    assert normalize_email(email) == normalized
