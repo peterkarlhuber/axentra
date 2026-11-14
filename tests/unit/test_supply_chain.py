@@ -78,4 +78,44 @@ def test_lock_check_finds_drift(tmp_path: Path, server: str, problem: str) -> No
 
 def test_lock_check_requires_both_image_locks(tmp_path: Path) -> None:
     root = _tree(tmp_path, "a==1.0\n", {"server.txt": "a==1.0 --hash=sha256:aa\n"})
-    assert check_locks["check"](root) == ["deploy/locks/full.txt is missing"]
+    assert check_locks["check"](root) == [
+        "deploy/locks/full.txt is missing",
+        "deploy/locks/tabrion.txt is missing",
+    ]
+
+
+SHA = "d5821faa8742dea012abda3b663549c038d76543"
+ARCHIVE = f"tabrion @ https://github.com/peterkarlhuber/tabrion/archive/{SHA}.tar.gz"
+
+
+@pytest.mark.parametrize(
+    ("lock", "problem"),
+    [
+        (f"# comment\n{ARCHIVE} \\\n    --hash=sha256:aa\n", None),
+        (f"{ARCHIVE}\n", "no --hash"),
+        (
+            ARCHIVE.replace("d5821f", "000000") + " --hash=sha256:aa\n",
+            "is not the one requirements/tabrion.txt pins",
+        ),
+        (f"tabrion @ git+https://github.com/peterkarlhuber/tabrion.git@{SHA}\n", "not the source archive"),
+        (
+            f"tabrion @ https://example.com/peterkarlhuber/tabrion/archive/{SHA}.tar.gz --hash=sha256:aa\n",
+            "not the source",
+        ),
+        ("tabrion==0.1.0 --hash=sha256:aa\n", "not the source archive"),
+        (f"{ARCHIVE} --hash=sha256:aa\nother==1 --hash=sha256:bb\n", "exactly one requirement"),
+    ],
+)
+def test_lock_check_of_the_tabrion_archive(tmp_path: Path, lock: str, problem: str | None) -> None:
+    """TABRION MIG-AXE-3: Tabrion is not on a package index; its lock pins the archive of the pinned commit."""
+    ok = "a==1.0 --hash=sha256:aa\n"
+    root = _tree(tmp_path, "a==1.0\n", {"server.txt": ok, "full.txt": ok, "tabrion.txt": lock})
+    (root / "requirements").mkdir()
+    (root / "requirements/tabrion.txt").write_text(
+        f"# pin\ntabrion @ git+https://github.com/peterkarlhuber/tabrion.git@{SHA}\n", encoding="utf-8"
+    )
+    problems = check_locks["check"](root)
+    if problem is None:
+        assert problems == []
+    else:
+        assert len(problems) == 1 and problem in problems[0], problems

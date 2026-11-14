@@ -26,6 +26,10 @@ dependencies = [
     "psycopg[binary,pool]>=3.2,<4",
     "cryptography>=42",
     "argon2-cffi>=23.1",
+    # Database error redaction (finding B-06-1, TABRION MIG-AXE-3): tabrion.errors. A range of final versions only
+    # (RC-1, RC-8); Tabrion is not on a package index, so install with `-r requirements/tabrion.txt` (pip 25.0 or
+    # newer, TABRION VER-1). The postgres extra adds only psycopg, which Axentra requires anyway.
+    "tabrion[postgres]>=0.1,<0.2",
 ]
 
 [project.optional-dependencies]
