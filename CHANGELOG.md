@@ -25,6 +25,11 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Changed (TABRION MIG-AXE-2): `-- axentra:no-transaction` migrations and `axentra migrate --dry-run` split SQL with
+  `tabrion.sql.split_statements` (`axentra.data.migrations.split_statements` is now that function). Axentra's own
+  migrations split byte-identically. A product migration splits differently only where the old splitter was wrong:
+  `E'...'` strings with backslash escapes, nested block comments, dollar-quote tags with digits, a `--` comment
+  ending at a carriage return; a statement of block comments only is now dropped instead of sent.
 - Build: the image's build stage takes `SOURCE_DATE_EPOCH` as a build argument, so pip writes hash-based `.pyc`
   files and two builds of one commit (with `rewrite-timestamp=true`) give identical layers; before, only the `.pyc`
   source mtimes differed (release-candidate dry run). docs/operations/DEPLOYMENT.md has the command.

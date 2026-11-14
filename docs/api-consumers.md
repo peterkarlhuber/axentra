@@ -18,6 +18,7 @@ is used.
 | `tabrion.postgres.configure` | `src/axentra/data/database.py` |
 | `tabrion.postgres.session_configurator` | `src/axentra/data/database.py` |
 | `tabrion.postgres.wait_advisory_lock` | `src/axentra/data/migrations.py` |
+| `tabrion.sql.split_statements` | `src/axentra/data/migrations.py`, `tests/unit/test_split_statements_golden.py` |
 | `tabrion.testing.PostgresDatabaseHandle` | `tests/conftest.py` |
 | `tabrion.testing.RoleSetup` | `tests/conftest.py` |
 | `tabrion.testing.configure` | `tests/conftest.py` |

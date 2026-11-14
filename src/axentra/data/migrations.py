@@ -59,6 +59,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import tuple_row
 from tabrion.postgres import advisory_unlock, wait_advisory_lock
+from tabrion.sql import split_statements as split_statements  # re-exported (G-AX-6, TABRION MIG-AXE-2)
 
 from axentra.core.errors import ConfigurationError
 
@@ -71,7 +72,6 @@ NO_TRANSACTION_MARKER = "-- axentra:no-transaction"
 _TIMEOUT_DIRECTIVE = re.compile(r"^--\s*axentra:(lock|statement)-timeout\s*=(.*)$", re.IGNORECASE)
 #: Durations accepted in timeout directives (a number with an optional PostgreSQL unit).
 _DURATION = re.compile(r"^[0-9]{1,9}(us|ms|s|min|h|d)?$")
-_DOLLAR_TAG = re.compile(r"\$[A-Za-z_]*\$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,62 +120,6 @@ class Migration:
                 raise ValueError(f"migration {self.label}: invalid {m.group(1)}-timeout {m.group(2)!r}")
             found[f"{m.group(1).lower()}_timeout"] = value
         return found
-
-
-def split_statements(sql: str) -> list[str]:
-    """Split SQL into statements at top-level semicolons.
-
-    Understands quoted strings and identifiers, dollar-quoted bodies and comments; used only for
-    ``-- axentra:no-transaction`` migrations, whose statements must be sent one at a time."""
-    out: list[str] = []
-    buf: list[str] = []
-    i, n = 0, len(sql)
-    while i < n:
-        c = sql[i]
-        if c == "-" and sql.startswith("--", i):
-            end = sql.find("\n", i)
-            end = n if end < 0 else end
-            buf.append(sql[i:end])
-            i = end
-        elif c == "/" and sql.startswith("/*", i):
-            end = sql.find("*/", i + 2)
-            end = n if end < 0 else end + 2
-            buf.append(sql[i:end])
-            i = end
-        elif c in ("'", '"'):
-            j = i + 1
-            while j < n:
-                if sql[j] == c:
-                    if j + 1 < n and sql[j + 1] == c:  # doubled quote
-                        j += 2
-                        continue
-                    break
-                j += 1
-            buf.append(sql[i : j + 1])
-            i = j + 1
-        elif c == "$" and (m := _DOLLAR_TAG.match(sql, i)):
-            tag = m.group(0)
-            end = sql.find(tag, i + len(tag))
-            end = n if end < 0 else end + len(tag)
-            buf.append(sql[i:end])
-            i = end
-        elif c == ";":
-            out.append("".join(buf))
-            buf = []
-            i += 1
-        else:
-            buf.append(c)
-            i += 1
-    out.append("".join(buf))
-    return [s.strip() for s in out if _has_code(s)]
-
-
-def _has_code(statement: str) -> bool:
-    for line in statement.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("--"):
-            return True
-    return False
 
 
 class SchemaNotCurrent(ConfigurationError):
