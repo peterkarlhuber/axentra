@@ -27,7 +27,10 @@ Axentra names [Tabrion](https://github.com/peterkarlhuber/tabrion) only by a ver
 URL fail); CI runs with pip 25.0 and the current pip. Without it pip looks for Tabrion on
 PyPI and fails. `tests/unit/test_tabrion_requirements.py` checks the file (one pin, full SHA of a final release) and
 the ranges (no direct URL, no pre-release specifier). A Tabrion update changes the pin and, for a new minor, the
-ranges, after Axentra's CI is green against it.
+ranges, after Axentra's CI is green against it. Since TABRION MIG-AXE-3 Axentra requires
+`tabrion[postgres]>=0.1,<0.2` at runtime too (database error redaction, `tabrion.errors`), so every install needs
+`-r requirements/tabrion.txt`; the container image takes the same commit from `deploy/locks/tabrion.txt`
+(`scripts/update_locks.sh` regenerates both locks).
 
 The `dev` extra needs Tabrion for the PostgreSQL test fixtures (`tests/conftest.py` on `tabrion.testing`,
 TABRION MIG-AXE-1). They create the roles `axentra_test_app` (and `axentra_test_owner` with

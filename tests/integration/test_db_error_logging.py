@@ -1,4 +1,4 @@
-"""Database errors in logs and HTTP answers (finding B-06-1, TABRION MIG-AXE-0).
+"""Database errors in logs and HTTP answers (finding B-06-1, TABRION MIG-AXE-0, kept by TABRION MIG-AXE-3).
 
 A psycopg error carries the server's ``DETAIL`` text, and for a unique, foreign key or check violation that text
 holds the offending values (``Key (email)=(someone@example.com) already exists.``). These tests make a real
@@ -678,7 +678,8 @@ def test_tb031_h2_container_errors_name_the_sqlstate(pg_urls: dict[str, str]) ->
     # The process-wide redaction runs when the record is created.
     record = logging.getLogRecordFactory()("x", logging.ERROR, __file__, 1, "x %s", ([exc],), None)
     assert canary not in record.getMessage()
-    assert "unique violation (SQLSTATE 23505, constraint canary_people_email_key)" in record.getMessage()
+    # Tabrion's safe message (TABRION MIG-AXE-3) also names the table: ``..., table canary_people)``.
+    assert "unique violation (SQLSTATE 23505, constraint canary_people_email_key" in record.getMessage()
     assert (record.db_sqlstate, record.db_constraint) == ("23505", "canary_people_email_key")  # type: ignore[attr-defined]
 
 
@@ -774,7 +775,8 @@ def test_tb031_h1_commit_lost_while_handling_a_unique_violation(
     assert isinstance(lost.__context__, psycopg.errors.UniqueViolation)
     assert getattr(lost, "sqlstate", None) is None
     text = format_error(lost)
-    assert text.startswith("OperationalError: database client error")
+    # Tabrion's safe message of the lost connection (TABRION MIG-AXE-3; the local fix said "database client error").
+    assert text.startswith("OperationalError: connection error")
     assert "23505" not in text and canary not in text
     # The service wraps the lost connection (raised in its handler, so the 23505 is two contexts down).
     wrapper: BaseException | None = None
@@ -873,7 +875,11 @@ def test_f1_exc_info_without_a_chain(pg_urls: dict[str, str]) -> None:
 def test_f2_failed_emit_while_handling_a_database_error(
     pg_urls: dict[str, str], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """F-2: a log call that fails while the database error is handled reports through ``handleError``."""
+    """F-2: a log call that fails while the database error is handled. Logging would report it through
+    ``handleError`` with the database error as the ``__context__`` of the formatting error. Tabrion's filter
+    (TABRION MIG-AXE-3) already keeps such a record with a fixed message that names the error, so the call no longer
+    fails in ``emit``; either way, neither the handler's output nor stderr carries the value, and the failure is
+    visible."""
     canary, exc = _db_error(pg_urls["admin"])
     saved = logging.raiseExceptions
     logging.raiseExceptions = True
@@ -885,13 +891,13 @@ def test_f2_failed_emit_while_handling_a_database_error(
             except psycopg.Error:
                 lg.error("user %s failed with %s", "bob")  # too few arguments
 
-        _plain_handler_output(log)
+        out = _plain_handler_output(log)
     finally:
         logging.raiseExceptions = saved
     err = capsys.readouterr().err
-    assert "--- Logging error ---" in err
-    assert canary not in err and "DETAIL" not in err, err
-    assert "23505" in err
+    assert "--- Logging error ---" in err or "could not be formatted: 'user %s failed with %s'" in out
+    assert canary not in err + out and "DETAIL" not in err + out, err + out
+    assert "23505" in err + out
 
 
 @pytest.mark.usefixtures("ax")

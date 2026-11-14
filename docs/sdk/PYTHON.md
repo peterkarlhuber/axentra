@@ -160,7 +160,7 @@ Adding an endpoint: add a method to the resource class in `_async/client.py` (mo
 
 ```bash
 cd sdk/python
-pip install -e "../..[server]" -e ".[test]"
+pip install -r ../../requirements/tabrion.txt -e "../..[server]" -e ".[test]"
 python scripts/unasync.py
 ruff check src tests scripts && ruff format --check src tests scripts && mypy
 AXENTRA_TEST_DATABASE_URL=postgresql://postgres:pg@127.0.0.1:5432/postgres pytest -ra

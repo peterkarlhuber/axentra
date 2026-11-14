@@ -1,8 +1,10 @@
 # Pinned runtime dependencies for the container image (all extras: server, oidc, s3, otel).
 # Regenerate after changing dependencies in pyproject.toml:
-#   uv pip compile pyproject.toml --extra server --extra oidc --extra s3 --extra otel \
+#   uv pip compile pyproject.toml requirements/tabrion.txt --no-emit-package tabrion \
+#     --extra server --extra oidc --extra s3 --extra otel \
 #     --python-version 3.13 --python-platform x86_64-manylinux_2_28 --no-header --no-annotate -o deploy/constraints.txt
-# (then re-add this header). Used with pip --constraint, so it pins versions without adding packages.
+# (then re-add this header). Used with pip --constraint, so it pins versions without adding packages. Tabrion is not
+# on a package index and is pinned by requirements/tabrion.txt (and deploy/locks/tabrion.txt for the image).
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.16.0

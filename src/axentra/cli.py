@@ -462,6 +462,23 @@ DATABASE_URL_HINT = (
 )
 
 
+def _unreachable_text(exc: BaseException) -> str:
+    """Why the database cannot be reached, for an operator: Tabrion's safe message of the error as a failed
+    connection attempt, and for an error raised by the client (no SQLSTATE: refused, timed out, a failed login) the
+    client's own reason, which names hosts and roles but no row values, without any server text part (B-06-1)."""
+    from tabrion.errors import classify, safe_message
+
+    from axentra.core.db_errors import strip_server_text
+
+    classification = classify(exc, sent=False)
+    text = safe_message(classification)
+    if classification.sqlstate is None:
+        reason = strip_server_text(str(exc)).strip()
+        if reason:
+            text = f"{text}: {reason}"
+    return text
+
+
 def _operator_error(exc: BaseException) -> tuple[str, str] | None:
     """``(code, message)`` for errors an operator causes and can fix, ``None`` for anything else
     (a bug keeps its traceback)."""
@@ -479,7 +496,7 @@ def _operator_error(exc: BaseException) -> tuple[str, str] | None:
         return exc.code, redact_text(str(exc))
     if isinstance(exc, (psycopg.OperationalError, PoolTimeout)):
         # No DETAIL values on stderr (B-06-1); --debug shows the full traceback.
-        return "database_unreachable", redact_text(safe_message(exc).strip()) + "\n" + DATABASE_URL_HINT
+        return "database_unreachable", redact_text(_unreachable_text(exc)) + "\n" + DATABASE_URL_HINT
     if isinstance(exc, psycopg.Error):
         return "database_error", redact_text(safe_message(exc).strip())
     if isinstance(exc, ModuleNotFoundError):
@@ -492,11 +509,15 @@ def main(argv: list[str] | None = None) -> int:
     ``--debug`` (or ``AXENTRA_DEBUG=1``) shows the traceback instead."""
     import os
 
-    from axentra.core.db_errors import install_db_error_redaction
+    from axentra.core.db_errors import install_db_error_redaction, redacted_excepthook
 
     # Commands that never call configure_logging (migrate, purge, ...) log through logging.lastResort or the
     # operator's handlers: their records must not carry database values either (B-06-1).
     install_db_error_redaction()
+    # An exception that is no operator error (a bug, or --debug) ends the process with a traceback that the
+    # interpreter prints outside any log filter: without database values as well (TABRION MIG-AXE-3).
+    if sys.excepthook is sys.__excepthook__:
+        sys.excepthook = redacted_excepthook
     args = build_parser().parse_args(argv)
     try:
         try:

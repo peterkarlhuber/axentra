@@ -81,19 +81,23 @@ There is no automatic database instrumentation yet.
 JSON logs (`observability.log_format = "json"`) carry `request_id`, method, path, status and
 duration; messages and exceptions are redacted (API keys, bearer tokens, JWTs, invitation tokens,
 database passwords). Database errors are logged without the values of the server's `DETAIL` text: a log record
-names the SQLSTATE and the constraint (`unique violation (SQLSTATE 23505, constraint users_email_key)`; JSON logs
-also carry `db_sqlstate` and `db_constraint`). This holds for every log record of the process, also with an
-application's own handlers or logging configuration: creating an `Axentra` instance installs the redaction in the
-log record factory. Trace spans, job and notification `last_error` and CLI error messages use the same text.
+names the kind, the SQLSTATE and the object names (`unique violation (SQLSTATE 23505, constraint users_email_key,
+table users)`; JSON logs also carry `db_sqlstate` and `db_constraint`). The redaction is Tabrion's
+(`tabrion.errors.safe_message` and `DbErrorRedactionFilter`, TABRION MIG-AXE-3); Axentra installs it. This holds for
+every log record of the process, also with an application's own handlers or logging configuration: creating an
+`Axentra` instance installs the redaction in the log record factory. Trace spans, job and notification
+`last_error` and CLI error messages use the same text; the CLI also prints the traceback of an uncaught exception
+without database values (its `sys.excepthook`; an application that embeds Axentra keeps its own hooks).
 The redaction also covers an error logged inside a list, tuple, set or dict argument, in an exception's `args`,
 as a non-`str` message, and in `repr` form (`f"{e!r}"`, `%r`). In a message that was formatted before it was
 logged, everything from a `DETAIL:`, `HINT:` or `CONTEXT:` label (also as the escaped `\nDETAIL:` of a `repr`) to
 the end of the message is replaced by `[redacted: database server text]` (inside a formatted traceback: up to the
 next traceback line), also for non-database text that uses these labels, so a logged value that contains such a
-label truncates the rest of that message visibly. Tracebacks are redacted the same way when an exception carries
+label truncates the rest of that message visibly. SQLAlchemy's `[parameters: ...]` text is removed as well. Tracebacks are redacted the same way when an exception carries
 database text in its message, `args` or notes without the database error itself (a retry loop's
 `RuntimeError(f"gave up: {last}")`), and the report that logging prints to stderr when a handler fails
-(`--- Logging error ---`) carries no database values either. `db_sqlstate` and `db_constraint` are reserved record
+(`--- Logging error ---`) carries no database values either; a log call that cannot be formatted (too few
+arguments) while a database error is handled is kept as a record with a fixed message that names the error. `db_sqlstate` and `db_constraint` are reserved record
 attributes; a value passed in `extra=` wins.
 
 The redaction patches two standard library methods for the whole process (`install_db_error_redaction`):
@@ -128,7 +132,8 @@ The processor also fits the standard library integration (before `wrap_for_forma
 of defense.
  Values in the first line of a pre-formatted message (for example `invalid input syntax for type integer:
 "..."`) and `extra=` values are not redacted: log the error object (`log.error("... %s", exc)` or
-`exc_info=True`), never its text.
+`exc_info=True`), never its text. `tests/unit/test_db_error_text_rules.py` holds Axentra's own logging calls to that
+rule (no f-string, `%` or `.format()` message, no `str(exc)`/`repr(exc)` argument).
 
 ## Maintenance and retention
 
