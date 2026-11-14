@@ -25,6 +25,11 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Changed (TABRION MIG-AXE-2): `-- axentra:no-transaction` migrations and `axentra migrate --dry-run` split SQL with
+  `tabrion.sql.split_statements` (`axentra.data.migrations.split_statements` is now that function). Axentra's own
+  migrations split byte-identically. A product migration splits differently only where the old splitter was wrong:
+  `E'...'` strings with backslash escapes, nested block comments, dollar-quote tags with digits, a `--` comment
+  ending at a carriage return; a statement of block comments only is now dropped instead of sent.
 - Security (TABRION MIG-AXE-3, finding B-06-1): database errors are redacted by Tabrion's `tabrion.errors`
   (`safe_message`, `DbErrorRedactionFilter`) instead of Axentra's local fix (TABRION MIG-AXE-0). Axentra keeps the
   process-wide installation (`install_db_error_redaction`) and the helpers for stored and exported texts

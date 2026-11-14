@@ -10,6 +10,7 @@ is used.
 | `tabrion.errors.DbErrorRedactionFilter` | `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
 | `tabrion.errors.classify` | `src/axentra/cli.py` |
 | `tabrion.errors.safe_message` | `src/axentra/cli.py`, `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
+| `tabrion.sql.split_statements` | `src/axentra/data/migrations.py`, `tests/unit/test_split_statements_golden.py` |
 | `tabrion.testing.PostgresDatabaseHandle` | `tests/conftest.py` |
 | `tabrion.testing.RoleSetup` | `tests/conftest.py` |
 | `tabrion.testing.configure` | `tests/conftest.py` |

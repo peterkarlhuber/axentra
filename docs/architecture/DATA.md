@@ -81,7 +81,8 @@ also visible in tenant scope of the same product (see
   mode (for `CREATE INDEX CONCURRENTLY`, or `ALTER TYPE ... ADD VALUE` before PostgreSQL 12), and
   is recorded after its last statement. It cannot be rolled back halfway: make every statement
   re-runnable (`IF NOT EXISTS`, `CREATE OR REPLACE`). Statements are split at top-level
-  semicolons (quotes, dollar quotes and comments are respected).
+  semicolons by `tabrion.sql.split_statements` (PostgreSQL's quoting rules: quotes, `E'...'` escapes, dollar
+  quotes and nested comments are respected).
   An interrupted `CREATE INDEX CONCURRENTLY` leaves an `INVALID` index that `IF NOT EXISTS` would
   keep: find it with `SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid`, drop it
   (`DROP INDEX CONCURRENTLY ...`) and run `axentra migrate` again. Axentra's own `0014` (time-sort
