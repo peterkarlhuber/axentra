@@ -538,6 +538,8 @@ class WebhookService:
         # Each creator's access is checked on this transaction's connection (savepoints, Database.joined), not on
         # a second pooled connection per check (delta review N-4): a dispatch job holds one connection, so
         # concurrent jobs cannot exhaust the pool waiting on themselves.
+        # A denial audit written by the authorizer during these checks shares the transaction: if the dispatch
+        # rolls back, the audit row is lost while the denial throttle already counts it (accepted, review r3 L-1).
         with self.db.joined(tx.conn):
             access = {
                 creator: self.creator_has_access(event.product_id, creator)

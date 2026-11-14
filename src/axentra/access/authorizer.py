@@ -69,7 +69,9 @@ def _active_product_role(tx: Tx, product_id: str, user_id: str | None) -> tuple[
     The one rule for a disabled or deleted user (delta review N-5): no product or tenant relation, wherever the
     principal comes from (a session, an API key's creator, the creator of a webhook endpoint, a schedule or a
     job). Their memberships stay, so enabling the user again restores them. A principal that is no user has no
-    membership and is not subject to this rule."""
+    membership and is not subject to this rule. The rule covers relations read here only: platform permissions the
+    principal already carries are not re-read (sessions and API keys of a disabled user are refused when they
+    are resolved)."""
     if user_id is None:
         return True, None
     row = tx.one(
