@@ -13,6 +13,7 @@ import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import hashlib
+from importlib import resources
 import json
 import secrets
 import time
@@ -26,7 +27,9 @@ from jwt.algorithms import RSAAlgorithm
 import pytest
 
 from axentra.api.app import create_app
+from axentra.core.errors import Forbidden
 from axentra.data.database import DbScope
+from axentra.data.migrations import split_statements
 from tests.integration.conftest import ADMIN_EMAIL, Browser, World, bootstrap_admin
 
 ISSUER = "https://idp.test"
@@ -333,6 +336,74 @@ def test_signup_identity_keeps_working_after_promotion(make_world) -> None:  # t
     assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_viewer"}).status_code == 200
     b, r = w.login(subject="new-sub", email="new@example.com")
     assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
+def test_session_from_an_email_link_ends_when_the_user_gets_a_platform_role(make_world) -> None:  # type: ignore[no-untyped-def]
+    """I5 for a session that already exists: promoting the user ends sessions started through an email link."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    assert b.get("/v1/users").status_code == 401
+    assert b.get("/v1/auth/session").status_code == 401
+    # Revoked, not only refused: removing the role again does not bring the session back.
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "none"}).status_code == 200
+    assert b.get("/v1/auth/session").status_code == 401
+    # A password session of the same user is not affected.
+    owner = w.browser()
+    owner.login("ops@example.com", "user password 12345")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    assert owner.get("/v1/users").status_code == 200
+
+
+def test_promotion_between_link_check_and_session_start_is_refused(make_world) -> None:  # type: ignore[no-untyped-def]
+    """The race the session check closes: the role is granted after the link check, before the session exists."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    _, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    with pytest.raises(Forbidden) as exc:
+        w.ax.identity.start_session(uid, "oidc:test", ip=None, user_agent="", identity=(ISSUER, "ops-sub"))
+    assert exc.value.extra["reason"] == "explicit_link_required"
+    # With the provider's opt-in the session starts and is not marked.
+    session = w.ax.identity.start_session(
+        uid,
+        "oidc:test",
+        ip=None,
+        user_agent="",
+        identity=(ISSUER, "ops-sub"),
+        link_platform_users_by_verified_email=True,
+    )
+    principal, _ = w.ax.identity.resolve_session(session.token)
+    assert principal.platform_role is not None
+
+
+def test_existing_identities_take_their_link_method_from_the_audit_log(make_world) -> None:  # type: ignore[no-untyped-def]
+    """Migration 15 backfills ``linked_by`` from ``identity.external.*`` audit records; no record stays ``unknown``."""
+    w = make_world()
+    w.user("ops@example.com")
+    w.login(subject="email-sub", email="ops@example.com")  # linked_by_email
+    w.login(subject="signup-sub", email="new@example.com")  # created
+    other = w.user("other@example.com")
+    assert (
+        w.admin.post(
+            f"/v1/users/{other}/identities", json={"provider": ISSUER, "subject": "explicit-sub"}
+        ).status_code
+        == 201
+    )
+    sql = (resources.files("axentra.data") / "sql" / "0015_identity_link_method.sql").read_text()
+    backfill = next(s for s in split_statements(sql) if "UPDATE axentra_user_identities i" in s)
+    with w.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("UPDATE axentra_user_identities SET linked_by = 'unknown'")
+        tx.execute(
+            "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES ('uid_noaudit', %s, 'other-idp', 'x')",
+            (other,),
+        )
+        tx.execute(backfill)
+    got = {i["subject"]: i["linked_by"] for i in _identities(w)}
+    assert got == {"email-sub": "email", "signup-sub": "signup", "explicit-sub": "explicit", "x": "unknown"}
 
 
 def test_bootstrap_admin_is_not_linked_by_verified_email(make_world) -> None:  # type: ignore[no-untyped-def]

@@ -159,7 +159,8 @@ def _write_redacted(
             exc = exc_type()
         text = redacted_traceback(exc, tb)
     except Exception:
-        text = f"{exc_type.__module__}.{exc_type.__qualname__}: {safe_message(exc)}"
+        message = safe_message(exc) if exc is not None else ""
+        text = f"{exc_type.__module__}.{exc_type.__qualname__}: {message}"
     if header is not None:
         text = f"{header}\n{text}"
     with contextlib.suppress(Exception):

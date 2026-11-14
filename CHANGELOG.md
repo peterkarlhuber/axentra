@@ -35,8 +35,15 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   platform role by verified email; the sign-in is refused with `explicit_link_required` and an administrator links
   the identity explicitly (`POST /v1/users/{user_id}/identities`). The new per-provider OIDC setting
   `link_platform_users_by_verified_email` (default `false`) restores the old behavior. Migration 15 records how each
-  identity was linked (`axentra_user_identities.linked_by`), so an identity linked by email before the user got a
-  platform role also stops working until it is confirmed.
+  identity was linked (`axentra_user_identities.linked_by`, taken from the audit log for existing identities), so
+  an identity linked by email before the user got a platform role also stops working until it is confirmed, and
+  sessions started through it end when the user gets a platform role (`axentra_sessions.via_email_link`).
+  **Upgrade note:** an existing identity without an `identity.external.*` audit record (for example after audit
+  retention removed it) stays `unknown` and counts like an email link for platform users. Before upgrading an
+  SSO-only installation, check that every platform admin keeps a way in (a password, or an identity the audit log
+  shows as created or explicitly linked); otherwise a platform admin who can still sign in confirms the others'
+  identities with `POST /v1/users/{user_id}/identities`, or the provider's
+  `link_platform_users_by_verified_email = true` is set for the upgrade and turned off again afterwards.
 - Security (delta review N-5): a disabled user has no product or tenant access any more through any principal, also
   not through the API keys, webhook endpoints, schedules or jobs they created.
 - Security (delta review N-3): uncaught exceptions in threads and unraisable exceptions are logged through the same

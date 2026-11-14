@@ -111,7 +111,7 @@
       "version": 14
     },
     {
-      "checksum": "3cc38fa43767f28090e4293357688885149dd98d0586f76a07b7d92a1bad95b1",
+      "checksum": "9f7a0398720717efdcb552818fba3da209cddc2d99ba02b87f63728bb581343c",
       "name": "identity_link_method",
       "namespace": "axentra",
       "version": 15
@@ -4133,6 +4133,14 @@
           "name": "revoked_at",
           "not_null": false,
           "type": "timestamp with time zone"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "via_email_link",
+          "not_null": true,
+          "type": "boolean"
         }
       ],
       "constraints": [

@@ -27,9 +27,12 @@ Changes since then, each rewritten with the tool and explained in its pull reque
   security review of #87 extended the `check_role` refusal of a superuser or `BYPASSRLS` role with "also through role
   membership; see `axentra db inspect-role`" (6 lines of `message`).
 - I5 (identity link method): `schema.json` (`--only schema write`). Migration 15 `identity_link_method` adds
-  `axentra_user_identities.linked_by` (`unknown`, `email`, `explicit`, `signup`; default `unknown`) and its check
-  constraint, so an identity linked by verified email stops working once the user holds a platform role, until an
-  administrator confirms the link. The other four files are identical.
+  `axentra_user_identities.linked_by` (`unknown`, `email`, `explicit`, `signup`; default `unknown`) with its check
+  constraint and `axentra_sessions.via_email_link`, so an identity linked by verified email stops working once the user holds a platform role, until an
+  administrator confirms the link (and sessions started through it end). The other four files are identical.
+- S3 storage outages: `problems.json` (`--only problems write`). Two new error classes,
+  `axentra.core.errors.ServiceUnavailable` and `axentra.storage.backends.StorageUnavailable` (`503
+  service_unavailable`, `Retry-After: 10`); every existing entry is unchanged.
 
 A pull request that changes a snapshot on purpose (a new migration, or a step whose plan allows the change) rewrites
 the file with the tool and says why; the diff is part of the review. A rollback (revert pull request) is verified by

@@ -537,19 +537,51 @@ class IdentityService:
     # -- sessions -------------------------------------------------------------------------------
 
     def start_session(
-        self, user_id: str, method: str, *, ip: str | None, user_agent: str, request_id: str | None = None
+        self,
+        user_id: str,
+        method: str,
+        *,
+        ip: str | None,
+        user_agent: str,
+        request_id: str | None = None,
+        identity: tuple[str, str] | None = None,
+        link_platform_users_by_verified_email: bool = False,
     ) -> NewSession:
         """Create a session and record ``identity.login`` with the user's email (else name, else
-        id) as ``actor_display`` and the request's ``ip`` and ``request_id``."""
+        id) as ``actor_display`` and the request's ``ip`` and ``request_id``.
+
+        ``identity`` is the ``(provider, subject)`` the user signed in with. When it was linked by
+        email (or before link methods were recorded) and ``link_platform_users_by_verified_email``
+        is off, the session is marked ``via_email_link``: it is refused now if the user holds a
+        platform role, and :meth:`resolve_session` ends it as soon as the user gets one (I5)."""
         token = new_token()
         session_id = new_id("ses")
         csrf = new_token(24)
         with self.db.transaction(DbScope.platform()) as tx:
+            via_email_link = False
+            if identity is not None:
+                link = tx.one(
+                    "SELECT i.linked_by, pr.role AS platform_role FROM axentra_user_identities i"
+                    " LEFT JOIN axentra_platform_roles pr ON pr.user_id = i.user_id"
+                    " WHERE i.provider = %s AND i.subject = %s AND i.user_id = %s",
+                    (identity[0], identity[1], user_id),
+                )
+                if link is None:
+                    raise Forbidden(
+                        "the identity is not linked to this user", extra={"reason": "login_failed"}
+                    )
+                via_email_link = (
+                    link["linked_by"] in ("email", "unknown") and not link_platform_users_by_verified_email
+                )
+                if via_email_link and link["platform_role"]:
+                    # The user got a platform role after the link was checked (I5).
+                    _refuse_platform_email_link(identity[0])
             # Expiry is computed and later checked on the database clock (never the app host's),
             # so clock skew between API hosts and PostgreSQL cannot lengthen or shorten sessions.
             expires = tx.scalar(
-                "INSERT INTO axentra_sessions (id, user_id, token_hash, csrf_token, auth_method, ip, user_agent, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s)) RETURNING expires_at",
+                "INSERT INTO axentra_sessions (id, user_id, token_hash, csrf_token, auth_method, ip, user_agent,"
+                " expires_at, via_email_link)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s), %s) RETURNING expires_at",
                 (
                     session_id,
                     user_id,
@@ -559,6 +591,7 @@ class IdentityService:
                     ip,
                     user_agent[:400],
                     self.settings.security.session_ttl_hours,
+                    via_email_link,
                 ),
             )
             user_row = tx.one(
@@ -595,7 +628,7 @@ class IdentityService:
         with self.db.transaction(DbScope.platform()) as tx:
             # Absolute and idle expiry are compared with the database clock (see start_session).
             row = tx.one(
-                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.revoked_at, u.status,"
+                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.revoked_at, s.via_email_link, u.status,"
                 " s.expires_at > now() AND s.last_seen_at + make_interval(mins => %s) > now() AS live,"
                 " now() - s.last_seen_at > %s AS touch"
                 " FROM axentra_sessions s JOIN axentra_users u ON u.id = s.user_id WHERE s.token_hash = %s",
@@ -614,6 +647,15 @@ class IdentityService:
                     what="user",
                 )
             )
+            if row["via_email_link"] and user.platform_role:
+                # Started through an identity linked by email; the user holds a platform role now, so the
+                # session ends until a platform admin confirms the link and the user signs in again (I5).
+                tx.execute(
+                    "UPDATE axentra_sessions SET revoked_at = now() WHERE id = %s AND revoked_at IS NULL",
+                    (row["id"],),
+                )
+        if row["via_email_link"] and user.platform_role:
+            raise Unauthenticated("the session is invalid or expired")
         role = PlatformRole(user.platform_role) if user.platform_role else None
         principal = Principal(
             actor=Actor(ActorKind.USER, user.id, user.display),
@@ -1185,8 +1227,8 @@ class IdentityService:
 
         Refuses an identity that is linked to another user (``409``) and an unknown user (``404``).
         For an identity that is already linked to this user by verified email (or from before link
-        methods were recorded), it confirms the link, which a user with a platform role needs to sign
-        in with it (I5); an explicitly linked one gives ``409``. Platform admins (or a system
+        methods were recorded, or one that created the account), it confirms the link, which a user with
+        a platform role needs to sign in with it (I5); an explicitly linked one gives ``409``. Platform admins (or a system
         principal) only; audited as ``identity.external.link``."""
         self._require_platform_admin(principal)
         self._check_identity(provider, subject)

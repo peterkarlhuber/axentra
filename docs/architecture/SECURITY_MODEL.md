@@ -408,7 +408,9 @@ visible in the message log of the delivering product. Details: modules/IDENTITY.
 is `true`) that matches an existing account links that account to the provider subject, **except for
 platform users** (owner decision I5, 2026-11-14): when the account has a platform role, the login is refused
 with `explicit_link_required`, and a platform admin links the identity explicitly
-(`POST /v1/users/{user_id}/identities`); `oidc[].link_platform_users_by_verified_email = true` turns
+(`POST /v1/users/{user_id}/identities`). An identity linked by email before the user got a platform role
+stops working at the promotion, and sessions started through it end (`axentra_sessions.via_email_link`).
+`oidc[].link_platform_users_by_verified_email = true` turns
 the old behavior back on for one provider. This is the usual behaviour and keeps invitations working, but it trusts every
 configured provider to be authoritative for the email domains it vouches for. Configure
 `oidc[].allowed_email_domains` for each provider (and use providers whose email claims are verified

@@ -754,13 +754,21 @@ class OidcService:
         identity = ExternalIdentity(
             provider=provider.issuer, subject=str(claims["sub"]), email=email, name=str(name)[:200]
         )
-        session = (
-            self.identity.start_session(
-                user_id, f"oidc:{provider.id}", ip=ip, user_agent=user_agent, request_id=request_id
-            )
-            if start_session
-            else None
-        )
+        session = None
+        if start_session:
+            try:
+                session = self.identity.start_session(
+                    user_id,
+                    f"oidc:{provider.id}",
+                    ip=ip,
+                    user_agent=user_agent,
+                    request_id=request_id,
+                    identity=(provider.issuer, str(claims["sub"])),
+                    link_platform_users_by_verified_email=provider.link_platform_users_by_verified_email,
+                )
+            except Forbidden as exc:
+                reason = str(exc.extra.get("reason", "login_failed"))
+                raise OidcLoginError(reason if reason in ERROR_CODES else "login_failed", exc.detail) from exc
         accepted = False
         tenant_id: str | None = None
         product_id: str | None = None

@@ -191,8 +191,11 @@ cannot make Axentra read or buffer more (MUP-ONA VB-3).
   user has a platform role (`platform_admin` or `platform_viewer`), the login is refused with
   `explicit_link_required` and nothing is linked or created (owner decision I5, 2026-11-14). A platform
   admin links the identity explicitly (`POST /v1/users/{user_id}/identities` with the issuer and
-  subject); the next login then succeeds. `link_platform_users_by_verified_email = true` restores the
-  old behavior for a provider.
+  subject); the next login then succeeds. The same holds for an identity that was linked by email
+  while the user had no platform role: once the user gets one, sign-ins with it are refused and
+  sessions started through it end (migration 15 records the link method in `linked_by`; older
+  identities take it from the audit log, or stay `unknown` and need the explicit link too). `link_platform_users_by_verified_email = true`
+  restores the old behavior for a provider.
 - With `link_by_verified_email = false`, an unknown identity is **never** linked to an existing
   user by email. It gets a new user: with the address when it is free, or **without an address**
   when another user already has it (needs `allow_signup`; otherwise `signup_disabled`). The
