@@ -56,7 +56,7 @@ event of the same name (outbox, delivered at least once).
 | Provider | Behaviour |
 |---|---|
 | `ManualProvider` | Checkout completes locally (`completed: true`, no URL). The operator sets statuses. No webhooks; the webhook route returns `404`. |
-| `FakeProvider` | A deterministic test double. Checkout returns `cs_fake_000001_<subscription id>` (unique across process restarts) and `https://checkout.fake.invalid/...`. `signed_event()` and `complete_checkout()` produce webhook bodies signed with the Stripe scheme and the fake's own secret (`billing.webhook_secret_ref`, or a random one per process). |
+| `FakeProvider` | A deterministic test double. Checkout returns `cs_fake_000001_<subscription id>` (unique across process restarts) and `https://checkout.fake.invalid/...`. `signed_event()`, `complete_checkout(payment_status=...)` and `settle_checkout(succeeded=...)` (the async payment outcome) produce webhook bodies signed with the Stripe scheme and the fake's own secret (`billing.webhook_secret_ref`, or a random one per process). |
 | `StripeProvider` | httpx calls to `api.stripe.com`: create customer, create Checkout Session (`mode=subscription`, trial days, metadata), cancel (now or at period end), resume. It refuses to run unless `billing.provider = "stripe"`, `api_key_ref` resolves to a Stripe secret key and, for live keys, `live_payments = true`. POSTs carry idempotency keys. Errors never contain the key or the provider's message. Tests use only `httpx.MockTransport`. |
 
 Plan changes for Stripe subscriptions are made in Stripe (for example the customer portal).
@@ -80,8 +80,13 @@ The `customer.subscription.updated` webhook then maps the Stripe price id back t
    `axentra_tenant_id` in the payload is never trusted.
 5. **Out-of-order safety:** events whose `created` is older than the last applied event for the
    subscription are recorded as `stale` and ignored.
-6. Mapping: `checkout.session.completed` changes incomplete to trialing (if the plan has a trial)
-   or active and links the subscription and customer ids. `customer.subscription.created|updated`
+6. Mapping: `checkout.session.completed` links the subscription and customer ids. Only when its
+   `payment_status` is `paid` or `no_payment_required` (a trial) does it change incomplete to
+   trialing (if the plan has a trial) or active. With a delayed payment method (SEPA debit and
+   similar) the session completes `unpaid`: the subscription stays incomplete, not entitled, until
+   `checkout.session.async_payment_succeeded` starts it the same way. `checkout.session.async_payment_failed`
+   records the ids and leaves it incomplete (the provider's subscription events then expire or cancel
+   it). Subscribe the Stripe endpoint to both async events. `customer.subscription.created|updated`
    maps the provider status (`unpaid`/`paused` become past_due, `incomplete_expired` becomes
    canceled) and copies periods, trial end, cancel-at-period-end and the plan (by price id).
    `customer.subscription.deleted` cancels. `invoice.paid|payment_succeeded` changes past_due or

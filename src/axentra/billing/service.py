@@ -906,7 +906,7 @@ class BillingService:
     ) -> tuple[str, str, str] | None:
         """Find the subscription through ids Axentra stored itself (never payload metadata)."""
         row: Row | None = None
-        if event_type == "checkout.session.completed":
+        if event_type in _CHECKOUT_EVENTS:
             cid = _ext_id(obj.get("id"))
             if cid:
                 row = tx.one(
@@ -962,14 +962,23 @@ class BillingService:
             return "stale"
         changes: dict[str, Any] = {}
         target = sub["status"]
-        if event_type == "checkout.session.completed":
+        if event_type in _CHECKOUT_EVENTS:
             sid = _ext_id(obj.get("subscription"))
             customer = _ext_id(obj.get("customer"))
             if sid:
                 changes["provider_subscription_id"] = sid
             if customer:
                 changes["provider_customer_id"] = customer
-            if sub["status"] == "incomplete":
+            # A completed checkout is not a payment: with a delayed payment method (SEPA debit, ...) the
+            # session completes "unpaid" and the provider reports the outcome later with
+            # checkout.session.async_payment_succeeded or _failed (LD-01). Only a paid session (or one
+            # that needs no payment, such as a trial) starts the subscription; otherwise it stays
+            # incomplete with the provider ids recorded.
+            paid = (
+                event_type != "checkout.session.async_payment_failed"
+                and obj.get("payment_status") in _PAID_CHECKOUT
+            )
+            if paid and sub["status"] == "incomplete":
                 plan = tx.one_or_404(
                     "SELECT trial_days FROM axentra_billing_plans WHERE id = %s", (sub["plan_id"],)
                 )
@@ -1142,9 +1151,20 @@ class BillingService:
         return BillingUsagePolicy(self)
 
 
-_HANDLED = frozenset(
+#: Checkout session events, matched through the checkout id Axentra stored.
+_CHECKOUT_EVENTS = frozenset(
     {
         "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+        "checkout.session.async_payment_failed",
+    }
+)
+#: ``payment_status`` values of a checkout session that may start the subscription.
+_PAID_CHECKOUT = frozenset({"paid", "no_payment_required"})
+
+_HANDLED = frozenset(
+    {
+        *_CHECKOUT_EVENTS,
         "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",

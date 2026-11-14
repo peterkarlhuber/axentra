@@ -212,19 +212,35 @@ class FakeProvider:
         header = sign_payload(secret or self._secret, body, now if signed_at is None else signed_at)
         return body, {"Stripe-Signature": header, "Content-Type": "application/json"}
 
-    def complete_checkout(self, checkout_id: str, **kw: Any) -> tuple[bytes, dict[str, str]]:
-        """``checkout.session.completed`` for a checkout created by this instance."""
+    def _checkout_session(self, checkout_id: str, payment_status: str) -> dict[str, Any]:
         req = self.checkouts[checkout_id]
         n = checkout_id.removeprefix("cs_fake_")
-        obj = {
+        return {
             "id": checkout_id,
             "object": "checkout.session",
             "customer": req.customer_id or f"cus_fake_{n}",
             "subscription": f"sub_fake_{n}",
             "client_reference_id": req.subscription_id,
-            "payment_status": "paid",
+            "payment_status": payment_status,
         }
+
+    def complete_checkout(
+        self, checkout_id: str, *, payment_status: str = "paid", **kw: Any
+    ) -> tuple[bytes, dict[str, str]]:
+        """``checkout.session.completed`` for a checkout created by this instance (``payment_status``
+        ``unpaid`` simulates a delayed payment method such as SEPA debit)."""
+        obj = self._checkout_session(checkout_id, payment_status)
         return self.signed_event("checkout.session.completed", obj, **kw)
+
+    def settle_checkout(
+        self, checkout_id: str, *, succeeded: bool, **kw: Any
+    ) -> tuple[bytes, dict[str, str]]:
+        """``checkout.session.async_payment_succeeded`` or ``_failed``: the outcome of a delayed payment."""
+        if succeeded:
+            obj = self._checkout_session(checkout_id, "paid")
+            return self.signed_event("checkout.session.async_payment_succeeded", obj, **kw)
+        obj = self._checkout_session(checkout_id, "unpaid")
+        return self.signed_event("checkout.session.async_payment_failed", obj, **kw)
 
 
 def _form(data: Mapping[str, Any], prefix: str = "") -> list[tuple[str, str]]:
