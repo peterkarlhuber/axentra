@@ -906,7 +906,9 @@ def test_f8_rewritten_label_with_the_error_object(pg_urls: dict[str, str]) -> No
     canary, exc = _db_error(pg_urls["admin"])
     out = _plain_handler_output(lambda lg: lg.error("x %s / %s", exc, " ".join(str(exc).split())))
     assert canary not in out, out
-    assert "[redacted]" in out
+    # Tabrion 0.1 replaced the known DETAIL value; since 0.2.1 a label in the middle of a line starts a removed part
+    # (TB-145), so the whole server text goes.
+    assert "[redacted]" in out or "[redacted: database server text]" in out
 
 
 # --- Delta review of the fix round (axe-tb031-review.md D-1, D-2) ---------------------------------------------------

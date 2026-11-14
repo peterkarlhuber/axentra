@@ -28,7 +28,7 @@ dependencies = [
     # Database error redaction (finding B-06-1, TABRION MIG-AXE-3): tabrion.errors. A range of final versions only
     # (RC-1, RC-8); Tabrion is not on a package index, so install with `-r requirements/tabrion.txt` (pip 25.0 or
     # newer, TABRION VER-1). The postgres extra adds only psycopg, which Axentra requires anyway.
-    "tabrion[postgres]>=0.1,<0.2",
+    "tabrion[postgres]>=0.2,<0.3",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +65,7 @@ dev = [
     "structlog>=24",
     # The PostgreSQL test fixtures of tests/conftest.py (TABRION MIG-AXE-1). A range only (RC-1): Tabrion is not on
     # a package index, so install with `pip install -r requirements/tabrion.txt -e ".[dev]"` (pip 25.0 or newer).
-    "tabrion[testing,postgres]>=0.1,<0.2",
+    "tabrion[testing,postgres]>=0.2,<0.3",
 ]
 
 [project.scripts]

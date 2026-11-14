@@ -30,7 +30,7 @@ No package is open.
 ## TABRION
 
 Packages of the Tabrion ecosystem consolidation plan (migration plan, document 06; backlog, document 09) that touch
-Axentra, referenced as "TABRION <WP-ID>". Since MIG-AXE-3 Axentra requires `tabrion[postgres]>=0.1,<0.2` at runtime. A done
+Axentra, referenced as "TABRION <WP-ID>". Since MIG-AXE-3 Axentra requires `tabrion[postgres]>=0.2,<0.3` at runtime. A done
 package stays listed until the package that replaces it is done.
 
 | Pri | Package | Status | Item |
@@ -58,7 +58,7 @@ review, no penetration test).
 
 | Pri | Area | Item |
 |---|---|---|
-| P1 | security | **Pre-release assessment 2026-11-13/14** (AI-assisted; reports `axentra-sicherheitsbewertung.md`, `delta/delta-pruefung.md` and the phase 3 report in the project files): every code finding is fixed with a regression test that failed before the fix, the last ones (N-3, N-4, N-5, I5 incl. identities linked by email before a platform role was granted) in the change that updates this row; C-02 is handled by TABRION DC-1, its residual risk (an unpinned `pip install`) is accepted by the owner with the pinned install paths as the only supported ones (DEPLOYMENT.md). Still open: the **independent human security review** (status NOT COMPLETED — HUMAN REVIEW REQUIRED; the AI verdict is INCONCLUSIVE); N-2/H-2 (values in pre-formatted database error text) closes with the Tabrion 0.2.x pin that contains `22fa7ad` (TABRION pin move, joint with the migration); LD-01 in Stripe test mode (does a SEPA subscription checkout send `payment_status = unpaid`?) |
+| P1 | security | **Pre-release assessment 2026-11-13/14** (AI-assisted; reports `axentra-sicherheitsbewertung.md`, `delta/delta-pruefung.md` and the phase 3 report in the project files): every code finding is fixed with a regression test that failed before the fix, the last ones (N-3, N-4, N-5, I5 incl. identities linked by email before a platform role was granted) in the change that updates this row; C-02 is handled by TABRION DC-1, its residual risk (an unpinned `pip install`) is accepted by the owner with the pinned install paths as the only supported ones (DEPLOYMENT.md). Still open: the **independent human security review** (status NOT COMPLETED — HUMAN REVIEW REQUIRED; the AI verdict is INCONCLUSIVE); N-2/H-2 (a lone `LINE n:` echo in pre-formatted database error text) is closed by the Tabrion 0.2.1 pin (`af0458d`) of the change that updates this sentence, values in the primary text stay residual R-1; LD-01 in Stripe test mode (does a SEPA subscription checkout send `payment_status = unpaid`?) |
 | P1 | tests | **Live adapter runs (2026-11-14, `scripts/live-integration/`, local containers, synthetic data).** Passed live: SMTP STARTTLS (mailpit), S3 (SeaweedFS: CRUD, SigV4 presigned downloads, outage answers 503), OIDC (Keycloak 26, including I5), webhooks (real receivers, SSRF guards, network errors). Still open: **Stripe test mode** (only stripe-mock, which checks request shapes and is no live test; runbook `STRIPE_TEST_MODE.md` needs test keys from the owner), AWS S3 and MinIO (not run), a hung (not stopped) S3 endpoint, review together with the first production-like deployment |
 
 ## Release and verification

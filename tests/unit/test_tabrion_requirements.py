@@ -27,7 +27,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 REQUIREMENTS = ROOT / "requirements" / "tabrion.txt"
 
-FINAL_RELEASES = {"d5821faa8742dea012abda3b663549c038d76543": "0.1.0"}
+FINAL_RELEASES = {
+    "d5821faa8742dea012abda3b663549c038d76543": "0.1.0",
+    "af0458d54467571abfc1afdd44d76e1f4d727c06": "0.2.1",
+}
 """Final Tabrion releases a pin may name: commit SHA -> version (``src/tabrion/_version.py`` at that commit)."""
 
 PIN = re.compile(
