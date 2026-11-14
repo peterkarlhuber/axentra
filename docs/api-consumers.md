@@ -10,6 +10,11 @@ is used.
 | `tabrion.errors.DbErrorRedactionFilter` | `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
 | `tabrion.errors.classify` | `src/axentra/cli.py` |
 | `tabrion.errors.safe_message` | `src/axentra/cli.py`, `src/axentra/core/db_errors.py`, `tests/unit/test_db_errors.py` |
+| `tabrion.postgres.SessionLock` | `src/axentra/events/schedules.py` |
+| `tabrion.postgres.SessionSettings` | `src/axentra/data/database.py` |
+| `tabrion.postgres.advisory_unlock` | `src/axentra/data/migrations.py` |
+| `tabrion.postgres.configure` | `src/axentra/data/database.py` |
+| `tabrion.postgres.wait_advisory_lock` | `src/axentra/data/migrations.py` |
 | `tabrion.testing.PostgresDatabaseHandle` | `tests/conftest.py` |
 | `tabrion.testing.RoleSetup` | `tests/conftest.py` |
 | `tabrion.testing.configure` | `tests/conftest.py` |

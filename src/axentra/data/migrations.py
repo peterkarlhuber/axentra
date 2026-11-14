@@ -54,11 +54,11 @@ from importlib import metadata, resources
 import logging
 from pathlib import Path
 import re
-import time
 from typing import Any
 
 import psycopg
 from psycopg.rows import tuple_row
+from tabrion.postgres import advisory_unlock, wait_advisory_lock
 
 from axentra.core.errors import ConfigurationError
 
@@ -306,17 +306,6 @@ def discover_migrations(
     return out
 
 
-def _wait_for_lock(conn: psycopg.Connection[Any], poll_seconds: float = 0.2) -> None:
-    """Take the migration lock, polling instead of blocking in ``pg_advisory_lock``.
-
-    A blocking ``pg_advisory_lock`` keeps a statement (and its snapshot) open while it waits, and
-    ``CREATE INDEX CONCURRENTLY`` in a ``-- axentra:no-transaction`` migration of the runner that
-    holds the lock waits for every open snapshot: the two runners would deadlock. Between tries no
-    statement is open here."""
-    while not conn.execute("SELECT pg_try_advisory_lock(%s)", (MIGRATION_LOCK,)).fetchone()[0]:  # type: ignore[index]
-        time.sleep(poll_seconds)
-
-
 def render_plan(pending: Sequence[Migration], timeouts: dict[str, str] | None = None) -> str:
     """A reviewable SQL script of ``pending`` in apply order (``axentra migrate --dry-run``).
 
@@ -497,7 +486,10 @@ class MigrationRunner:
         raises, nothing is applied."""
         done: list[str] = []
         with psycopg.connect(self.url, autocommit=True) as conn:
-            _wait_for_lock(conn)
+            # Polls pg_try_advisory_lock (TABRION MIG-AXE-5): a blocking pg_advisory_lock keeps a statement, and its
+            # snapshot, open while it waits, and CREATE INDEX CONCURRENTLY in a no-transaction migration of the
+            # runner that holds the lock waits for every open snapshot: the two runners would deadlock.
+            wait_advisory_lock(conn, MIGRATION_LOCK)
             try:
                 self._ensure_table(conn)
                 pending = self._checked_pending(conn, allow_newer=allow_newer)
@@ -508,7 +500,7 @@ class MigrationRunner:
                     logger.info("applied migration %s", mig.label)
                     done.append(mig.label)
             finally:
-                conn.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK,))
+                advisory_unlock(conn, MIGRATION_LOCK)
         return done
 
     def plan(self, *, allow_newer: bool = False) -> list[Migration]:

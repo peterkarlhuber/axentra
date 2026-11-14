@@ -20,6 +20,7 @@ from axentra.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from axentra.data.database import DbScope
 from axentra.events import JobCancelled, JobWorker, PermanentJobError
 from axentra.events.schedules import LeaderLock
+from tests.conftest import ADMIN_URL
 
 SYS = Principal.system("test")
 FAST = {"events": {"backoff_base_seconds": 0.01, "backoff_max_seconds": 0.05, "listen_notify": False}}
@@ -367,6 +368,53 @@ def test_leader_lock_is_exclusive(fast_ax):
         assert a.acquire() is True
         a.release()
         assert b.acquire() is True
+    finally:
+        a.release()
+        b.release()
+
+
+def test_leader_loss_re_elects_and_never_has_two_leaders(fast_ax, caplog):
+    """TABRION MIG-AXE-5: the leader's lock connection is killed (``pg_terminate_backend``). The lock is free at
+    once, another process takes it, the old leader notices at its next tick, logs the loss and is not the leader
+    any more; after the new leader releases, it is elected again on a new connection."""
+    ax = fast_ax
+    a, b = LeaderLock(ax.db.url, key=4243), LeaderLock(ax.db.url, key=4243)
+    try:
+        assert a.acquire() is True and a.held
+        lost_pid = a._conn.info.backend_pid
+        with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
+            assert admin.execute("SELECT pg_terminate_backend(%s)", (lost_pid,)).fetchone() == (True,)
+            for _ in range(50):  # the backend is gone (and its lock with it) shortly after the signal
+                gone = admin.execute(
+                    "SELECT NOT EXISTS (SELECT FROM pg_stat_activity WHERE pid = %s)", (lost_pid,)
+                )
+                if gone.fetchone()[0]:
+                    break
+                time.sleep(0.1)
+        assert b.acquire() is True
+        with caplog.at_level("WARNING", logger="axentra.events.schedules"):
+            assert a.acquire() is False
+        assert "scheduler leader connection lost; re-electing" in caplog.text
+        assert not a.held and a._conn is None
+        assert b.acquire() is True  # still the leader
+        b.release()
+        assert a.acquire() is True
+        assert a._conn.info.backend_pid != lost_pid
+    finally:
+        a.release()
+        b.release()
+
+
+def test_leader_lock_holds_no_connection_while_not_leading(fast_ax):
+    """As before TABRION MIG-AXE-5: a process that is not the leader keeps no lock connection open."""
+    ax = fast_ax
+    a, b = LeaderLock(ax.db.url, key=4244), LeaderLock(ax.db.url, key=4244)
+    try:
+        assert a.acquire() is True
+        assert b.acquire() is False
+        assert b._lock is None and b._conn is None
+        a.release()
+        assert a._lock is None
     finally:
         a.release()
         b.release()

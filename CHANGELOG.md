@@ -25,6 +25,13 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Added (TABRION MIG-AXE-4): settings `database.idle_in_transaction_timeout_ms` (default `0`) and
+  `database.application_name` (default empty) for the connections of Axentra's own pool; both are not set by
+  default, so the session of a pool connection is unchanged. The pool now sets its session with
+  `tabrion.postgres.configure`; a pool borrowed with `Database.on_pool` is still never configured.
+- Changed (TABRION MIG-AXE-5): the scheduler leader lock (`LeaderLock`) runs on `tabrion.postgres.SessionLock`, and
+  the migration lock waits with `tabrion.postgres.wait_advisory_lock`. Keys, polling and the connections used are
+  unchanged.
 - Security (TABRION MIG-AXE-3, finding B-06-1): database errors are redacted by Tabrion's `tabrion.errors`
   (`safe_message`, `DbErrorRedactionFilter`) instead of Axentra's local fix (TABRION MIG-AXE-0). Axentra keeps the
   process-wide installation (`install_db_error_redaction`) and the helpers for stored and exported texts

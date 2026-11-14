@@ -24,6 +24,7 @@ from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
+from tabrion.postgres import SessionLock
 
 from axentra.access.authorizer import Authorizer
 from axentra.audit.log import AuditLog
@@ -70,49 +71,66 @@ def _validate_timing(interval_seconds: int | None, cron: str | None) -> None:
 
 
 class LeaderLock:
-    """A session-level advisory lock held on a dedicated (non-pooled) connection."""
+    """A session-level advisory lock held on a dedicated (non-pooled) connection.
+
+    Delegates to ``tabrion.postgres.SessionLock`` (TABRION MIG-AXE-5) with the same key and the same footprint as
+    before: an autocommit connection (``connect_timeout=10``) only while it leads or tries to, nothing set on its
+    session, closed after a failed attempt and on :meth:`release`."""
 
     def __init__(self, url: str, key: int = SCHEDULER_LOCK) -> None:
         self.url = url
         self.key = key
-        self._conn: psycopg.Connection[Any] | None = None
+        self._lock: SessionLock | None = None
+        self._session: psycopg.Connection[Any] | None = None
+        self._leading = False
+
+    def _remember(self, conn: psycopg.Connection[Any]) -> None:
+        """``SessionLock``'s ``configure`` callback: notes the lock connection and sets nothing on its session."""
+        self._session = conn
+
+    @property
+    def _conn(self) -> psycopg.Connection[Any] | None:
+        """The connection that holds the lock while this process leads (``None`` otherwise)."""
+        return self._session if self._leading else None
 
     @property
     def held(self) -> bool:
-        return self._conn is not None
+        return self._leading
 
     def acquire(self) -> bool:
         """``True`` while this process is the leader; re-checks the connection every call."""
-        if self._conn is not None:
-            try:
-                self._conn.execute("SELECT 1")
-                return True
-            except psycopg.Error:
-                logger.warning("scheduler leader connection lost; re-electing")
-                self._drop()
         try:
-            conn = psycopg.connect(self.url, autocommit=True, connect_timeout=10)
+            if self._leading and self._lock is not None:
+                if self._lock.holds(self.key):  # SELECT 1 on the lock connection
+                    return True
+                logger.warning("scheduler leader connection lost; re-electing")
+                self._leading = False
+            if self._lock is None:
+                self._lock = SessionLock(
+                    self.url,
+                    connect_kwargs={"autocommit": True, "connect_timeout": 10},
+                    configure=self._remember,
+                )
+            self._leading = self._lock.try_acquire(self.key)
         except psycopg.Error:
             logger.warning("scheduler cannot connect for the leader lock", exc_info=True)
-            return False
-        row = conn.execute("SELECT pg_try_advisory_lock(%s)", (self.key,)).fetchone()
-        if row and row[0]:
-            self._conn = conn
-            return True
-        conn.close()
-        return False
+            self._leading = False
+        if not self._leading:
+            self._close()
+        return self._leading
 
-    def _drop(self) -> None:
-        if self._conn is not None:
-            with contextlib.suppress(psycopg.Error):
-                self._conn.close()
-        self._conn = None
+    def _close(self) -> None:
+        lock, self._lock = self._lock, None
+        self._leading = False
+        self._session = None
+        if lock is not None:
+            lock.close()  # closing the connection frees the lock
 
     def release(self) -> None:
-        if self._conn is not None:
+        if self._lock is not None and self._leading:
             with contextlib.suppress(psycopg.Error):
-                self._conn.execute("SELECT pg_advisory_unlock(%s)", (self.key,))
-        self._drop()
+                self._lock.release(self.key)
+        self._close()
 
 
 def _schedule(row: Row) -> Schedule:
