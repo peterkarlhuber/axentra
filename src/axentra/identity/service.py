@@ -78,6 +78,17 @@ def normalize_email(email: str) -> str:
     return f"{local}@{domain.lower()}"
 
 
+def _refuse_platform_email_link(provider: str) -> None:
+    """Owner decision I5: a link by verified email never reaches a user with a platform role."""
+    logger.warning(
+        "OIDC login refused: provider %s links a platform user by email; link it explicitly", provider
+    )
+    raise Forbidden(
+        "this account must be linked to the identity provider by a platform admin",
+        extra={"reason": "explicit_link_required"},
+    )
+
+
 class IdentityService:
     def __init__(self, db: Database, settings: Settings, audit: AuditLog) -> None:
         self.db = db
@@ -526,19 +537,38 @@ class IdentityService:
     # -- sessions -------------------------------------------------------------------------------
 
     def start_session(
-        self, user_id: str, method: str, *, ip: str | None, user_agent: str, request_id: str | None = None
+        self,
+        user_id: str,
+        method: str,
+        *,
+        ip: str | None,
+        user_agent: str,
+        request_id: str | None = None,
+        identity: tuple[str, str] | None = None,
+        link_platform_users_by_verified_email: bool = False,
     ) -> NewSession:
         """Create a session and record ``identity.login`` with the user's email (else name, else
-        id) as ``actor_display`` and the request's ``ip`` and ``request_id``."""
+        id) as ``actor_display`` and the request's ``ip`` and ``request_id``.
+
+        ``identity`` is the ``(provider, subject)`` the user signed in with. When it was linked by
+        email (or before link methods were recorded) and ``link_platform_users_by_verified_email``
+        is off, the session is marked ``via_email_link``: it is refused now if the user holds a
+        platform role, and :meth:`resolve_session` ends it as soon as the user gets one (I5)."""
         token = new_token()
         session_id = new_id("ses")
         csrf = new_token(24)
         with self.db.transaction(DbScope.platform()) as tx:
+            via_email_link = (
+                self._identity_sign_in(tx, user_id, identity, link_platform_users_by_verified_email)
+                if identity is not None
+                else False
+            )
             # Expiry is computed and later checked on the database clock (never the app host's),
             # so clock skew between API hosts and PostgreSQL cannot lengthen or shorten sessions.
             expires = tx.scalar(
-                "INSERT INTO axentra_sessions (id, user_id, token_hash, csrf_token, auth_method, ip, user_agent, expires_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s)) RETURNING expires_at",
+                "INSERT INTO axentra_sessions (id, user_id, token_hash, csrf_token, auth_method, ip, user_agent,"
+                " expires_at, via_email_link)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, now() + make_interval(hours => %s), %s) RETURNING expires_at",
                 (
                     session_id,
                     user_id,
@@ -548,6 +578,7 @@ class IdentityService:
                     ip,
                     user_agent[:400],
                     self.settings.security.session_ttl_hours,
+                    via_email_link,
                 ),
             )
             user_row = tx.one(
@@ -578,13 +609,45 @@ class IdentityService:
             ),
         )
 
+    @staticmethod
+    def _identity_sign_in(
+        tx: Tx, user_id: str, identity: tuple[str, str], link_platform_users_by_verified_email: bool
+    ) -> bool:
+        link = tx.one(
+            "SELECT i.linked_by, pr.role AS platform_role FROM axentra_user_identities i"
+            " LEFT JOIN axentra_platform_roles pr ON pr.user_id = i.user_id"
+            " WHERE i.provider = %s AND i.subject = %s AND i.user_id = %s",
+            (identity[0], identity[1], user_id),
+        )
+        if link is None:
+            raise Forbidden("the identity is not linked to this user", extra={"reason": "login_failed"})
+        via_email_link = (
+            link["linked_by"] in ("email", "unknown") and not link_platform_users_by_verified_email
+        )
+        if via_email_link and link["platform_role"]:
+            # The user got a platform role after the link was checked (I5).
+            _refuse_platform_email_link(identity[0])
+        return bool(via_email_link)
+
+    def identity_sign_in(
+        self, user_id: str, identity: tuple[str, str], *, link_platform_users_by_verified_email: bool = False
+    ) -> bool:
+        """Check a sign-in through ``identity`` ``(provider, subject)`` again right before the caller
+        starts its own session (``OidcService.finish(start_session=False)``): ``403
+        explicit_link_required`` when the identity was linked by email (or before link methods were
+        recorded) and the user holds a platform role now. Returns whether the sign-in came through
+        such a link (``via_email_link``): a host that keeps its own sessions must not grant a platform
+        role to that session and must end it when the user gets one (I5)."""
+        with self.db.transaction(DbScope.platform()) as tx:
+            return self._identity_sign_in(tx, user_id, identity, link_platform_users_by_verified_email)
+
     def resolve_session(
         self, token: str, *, request_id: str | None = None, ip: str | None = None
     ) -> tuple[Principal, SessionInfo]:
         with self.db.transaction(DbScope.platform()) as tx:
             # Absolute and idle expiry are compared with the database clock (see start_session).
             row = tx.one(
-                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.revoked_at, u.status,"
+                "SELECT s.id, s.user_id, s.csrf_token, s.expires_at, s.revoked_at, s.via_email_link, u.status,"
                 " s.expires_at > now() AND s.last_seen_at + make_interval(mins => %s) > now() AS live,"
                 " now() - s.last_seen_at > %s AS touch"
                 " FROM axentra_sessions s JOIN axentra_users u ON u.id = s.user_id WHERE s.token_hash = %s",
@@ -603,6 +666,15 @@ class IdentityService:
                     what="user",
                 )
             )
+            if row["via_email_link"] and user.platform_role:
+                # Started through an identity linked by email; the user holds a platform role now, so the
+                # session ends until a platform admin confirms the link and the user signs in again (I5).
+                tx.execute(
+                    "UPDATE axentra_sessions SET revoked_at = now() WHERE id = %s AND revoked_at IS NULL",
+                    (row["id"],),
+                )
+        if row["via_email_link"] and user.platform_role:
+            raise Unauthenticated("the session is invalid or expired")
         role = PlatformRole(user.platform_role) if user.platform_role else None
         principal = Principal(
             actor=Actor(ActorKind.USER, user.id, user.display),
@@ -1004,6 +1076,7 @@ class IdentityService:
         allow_signup: bool,
         allowed_domains: list[str],
         link_by_verified_email: bool = True,
+        link_platform_users_by_verified_email: bool = False,
         allow_signup_without_email: bool = False,
         ip: str | None = None,
         request_id: str | None = None,
@@ -1014,6 +1087,11 @@ class IdentityService:
         - With a verified email and ``link_by_verified_email`` (default), an existing user with
           that email is linked. Otherwise a new user is created when ``allow_signup`` is set or an
           open invitation exists for the email.
+        - An existing user with a platform role is linked that way only with
+          ``link_platform_users_by_verified_email`` (off by default, decision I5); otherwise ``403
+          explicit_link_required``: a platform admin links the identity explicitly
+          (:meth:`link_identity`), so a provider that is wrong about an address cannot take over a
+          platform account.
         - With ``link_by_verified_email=False``, an unknown identity is never linked to an existing
           user. A new user is created (``allow_signup`` or an invitation); if another user already
           has the email, the new user is created *without* an email address (only
@@ -1025,11 +1103,21 @@ class IdentityService:
         """
         with self.db.transaction(DbScope.platform()) as tx:
             row = tx.one(
-                "SELECT user_id FROM axentra_user_identities WHERE provider = %s AND subject = %s",
+                "SELECT i.user_id, i.linked_by, pr.role AS platform_role FROM axentra_user_identities i"
+                " LEFT JOIN axentra_platform_roles pr ON pr.user_id = i.user_id"
+                " WHERE i.provider = %s AND i.subject = %s",
                 (provider, subject),
             )
             if row:
                 user_id: str = row["user_id"]
+                if (
+                    row["platform_role"]
+                    and row["linked_by"] in ("email", "unknown")
+                    and not link_platform_users_by_verified_email
+                ):
+                    # Linked by email (or before link methods were recorded) and the user has a platform
+                    # role now: the link counts only once a platform admin confirms it (I5).
+                    _refuse_platform_email_link(provider)
             else:
                 verified = bool(email and email_verified)
                 if verified:
@@ -1047,6 +1135,8 @@ class IdentityService:
                 user_email: str | None = email if verified else None
                 how = "created"
                 if existing and link_by_verified_email:
+                    if existing["platform_role"] and not link_platform_users_by_verified_email:
+                        _refuse_platform_email_link(provider)
                     user_id = existing["id"]
                     how = "linked_by_email"
                 elif existing:
@@ -1070,9 +1160,16 @@ class IdentityService:
                 else:
                     raise Forbidden("no account exists for this login", extra={"reason": "signup_disabled"})
                 tx.execute(
-                    "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
-                    " VALUES (%s, %s, %s, %s, %s)",
-                    (new_id("uid"), user_id, provider, subject, email if verified else ""),
+                    "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email, linked_by)"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (
+                        new_id("uid"),
+                        user_id,
+                        provider,
+                        subject,
+                        email if verified else "",
+                        "email" if how == "linked_by_email" else "signup",
+                    ),
                 )
                 self.audit.record(
                     tx,
@@ -1130,8 +1227,8 @@ class IdentityService:
                 raise Conflict("this external identity is already linked")
             user_id = self.create_user(tx, email=user_email, name=name, email_verified=True)
             tx.execute(
-                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email)"
-                " VALUES (%s, %s, %s, %s, %s)",
+                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, email, linked_by)"
+                " VALUES (%s, %s, %s, %s, %s, 'explicit')",
                 (new_id("uid"), user_id, provider, subject, (email or "").strip()[:320]),
             )
             self.audit.record(
@@ -1147,19 +1244,25 @@ class IdentityService:
     def link_identity(self, principal: Principal, user_id: str, *, provider: str, subject: str) -> None:
         """Link an external identity to an existing user (for migrations and imports).
 
-        Refuses an identity that is already linked (to this or another user, ``409``) and an
-        unknown user (``404``). Platform admins (or a system principal) only; audited as
-        ``identity.external.link``."""
+        Refuses an identity that is linked to another user (``409``) and an unknown user (``404``).
+        For an identity that is already linked to this user by verified email (or from before link
+        methods were recorded, or one that created the account), it confirms the link, which a user with
+        a platform role needs to sign in with it (I5); an explicitly linked one gives ``409``. Platform admins (or a system
+        principal) only; audited as ``identity.external.link``."""
         self._require_platform_admin(principal)
         self._check_identity(provider, subject)
         with self.db.transaction(DbScope.platform()) as tx:
             tx.one_or_404("SELECT id FROM axentra_users WHERE id = %s FOR UPDATE", (user_id,), what="user")
             inserted = tx.one(
-                "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES (%s, %s, %s, %s)"
-                " ON CONFLICT (provider, subject) DO NOTHING RETURNING id",
+                "INSERT INTO axentra_user_identities (id, user_id, provider, subject, linked_by)"
+                " VALUES (%s, %s, %s, %s, 'explicit') ON CONFLICT (provider, subject) DO NOTHING RETURNING id",
                 (new_id("uid"), user_id, provider, subject),
             )
-            if inserted is None:
+            if inserted is None and not tx.one(
+                "UPDATE axentra_user_identities SET linked_by = 'explicit' WHERE provider = %s AND subject = %s"
+                " AND user_id = %s AND linked_by <> 'explicit' RETURNING id",
+                (provider, subject, user_id),
+            ):
                 raise Conflict("this external identity is already linked")
             self.audit.record(
                 tx,

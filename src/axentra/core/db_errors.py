@@ -17,7 +17,8 @@ what Axentra adds around them:
   exported (job and notification ``last_error``, trace spans);
 - :func:`strip_server_text` for a text whose error object is gone;
 - :func:`redact_db_errors_processor`, an optional structlog processor;
-- :func:`redacted_excepthook`, which the CLI installs for uncaught exceptions.
+- :func:`redacted_excepthook`, :func:`redacted_threading_excepthook` and :func:`redacted_unraisablehook`, which
+  the CLI installs (:func:`install_redacted_excepthooks`) for uncaught and unraisable exceptions.
 
 Each of them runs Tabrion's filter on a record of its own, so there is one redaction rule (no second copy of the
 patterns here). TABRION MIG-AXE-3 replaced Axentra's local fix (TABRION MIG-AXE-0); its regression tests in
@@ -32,7 +33,7 @@ import logging
 import sys
 import threading
 import traceback
-from types import TracebackType
+from types import BuiltinFunctionType, FunctionType, MethodType, TracebackType
 from typing import Any
 
 from tabrion.errors import DbErrorRedactionFilter, safe_message
@@ -41,9 +42,12 @@ __all__ = [
     "DB_ERROR_LOGGERS",
     "DbErrorRedactionFilter",
     "install_db_error_redaction",
+    "install_redacted_excepthooks",
     "redact_db_errors_processor",
     "redacted_excepthook",
+    "redacted_threading_excepthook",
     "redacted_traceback",
+    "redacted_unraisablehook",
     "safe_error_text",
     "safe_message",
     "strip_server_text",
@@ -140,12 +144,66 @@ def redacted_excepthook(exc_type: type[BaseException], exc: BaseException, tb: T
     The interpreter prints an uncaught exception with its whole chain, outside any log filter: for an exception
     raised from a database error that is the ``DETAIL`` text with row values. The CLI installs this hook (an
     application that embeds Axentra decides on its own hooks)."""
+    _write_redacted(None, exc_type, exc, tb)
+
+
+def _write_redacted(
+    header: str | None,
+    exc_type: type[BaseException],
+    exc: BaseException | None,
+    tb: TracebackType | None,
+) -> None:
+    """Print ``header`` (if any) and the traceback of ``exc`` without database values to stderr; never raises."""
     try:
+        if exc is None:
+            exc = exc_type()
         text = redacted_traceback(exc, tb)
     except Exception:
-        text = f"{exc_type.__module__}.{exc_type.__qualname__}: {safe_message(exc)}"
+        message = safe_message(exc) if exc is not None else ""
+        text = f"{exc_type.__module__}.{exc_type.__qualname__}: {message}"
+    if header is not None:
+        text = f"{header}\n{text}"
     with contextlib.suppress(Exception):
-        sys.stderr.write(text + "\n")
+        if sys.stderr is not None:
+            sys.stderr.write(text + "\n")
+            sys.stderr.flush()
+
+
+def redacted_threading_excepthook(args: threading.ExceptHookArgs) -> None:
+    """A :data:`threading.excepthook` that prints an exception that ended a thread without database values (N-3).
+
+    The standard hook prints the whole chain to stderr outside any log filter, as :data:`sys.excepthook` does.
+    ``SystemExit`` stays silent, as there."""
+    if args.exc_type is SystemExit:
+        return
+    name = args.thread.name if args.thread is not None else str(threading.get_ident())
+    _write_redacted(f"Exception in thread {name}:", args.exc_type, args.exc_value, args.exc_traceback)
+
+
+def redacted_unraisablehook(unraisable: Any) -> None:
+    """A :data:`sys.unraisablehook` (an exception raised in ``__del__``, a finalizer or a weakref callback) that
+    prints its traceback without database values (N-3). The object is named by its qualified name (a function) or
+    its type only: its ``repr`` may hold values."""
+    header = unraisable.err_msg or "Exception ignored in"
+    obj = unraisable.object
+    if isinstance(obj, (FunctionType, MethodType, BuiltinFunctionType)):
+        header = f"{header}: <{type(obj).__name__} {obj.__qualname__}>"
+    elif obj is not None:
+        header = f"{header}: <{type(obj).__qualname__} object>"
+    _write_redacted(header, unraisable.exc_type, unraisable.exc_value, unraisable.exc_traceback)
+
+
+def install_redacted_excepthooks() -> None:
+    """Install :func:`redacted_excepthook`, :func:`redacted_threading_excepthook` and
+    :func:`redacted_unraisablehook` as ``sys.excepthook``, ``threading.excepthook`` and ``sys.unraisablehook``,
+    each only where the interpreter's default is still in place (a hook set by the operator stays). The CLI calls
+    it; the library sets no hooks (an application that embeds Axentra decides on its own)."""
+    if sys.excepthook is sys.__excepthook__:
+        sys.excepthook = redacted_excepthook
+    if threading.excepthook is threading.__excepthook__:
+        threading.excepthook = redacted_threading_excepthook
+    if sys.unraisablehook is sys.__unraisablehook__:
+        sys.unraisablehook = redacted_unraisablehook
 
 
 #: Loggers that also get the filter itself (besides the record factory), so that records created there are

@@ -140,6 +140,9 @@ value is set at once from the environment: `AXENTRA__OIDC='[{"id": "corp", ...}]
 | `scopes` | `["openid", "email", "profile"]` | Requested scopes |
 | `allow_signup` | `false` | Create unknown users on first login; otherwise only existing or invited users |
 | `allowed_email_domains` | `[]` | Restrict logins to these email domains (empty: any) |
+| `link_by_verified_email` | `true` | Link an unknown identity to the existing user with the same verified email |
+| `link_platform_users_by_verified_email` | `false` | Also do that when the existing user has a platform role (I5); off: `explicit_link_required`, link explicitly |
+| `allow_signup_without_email` | `false` | With `allow_signup`: create a user without an address when no verified email is sent |
 
 ## Sections for modules in development
 
@@ -156,11 +159,19 @@ These sections are accepted and validated now; they take effect when the corresp
 | `s3_endpoint_url` | none |
 | `s3_region` | `"eu-central-1"` |
 | `s3_access_key_ref`, `s3_secret_key_ref` | none |
+| `s3_prefix` | `""` (key prefix inside the bucket) |
+| `s3_server_side_encryption` | none (`AES256` or `aws:kms`) |
+| `s3_presigned_downloads` | `false` (`true`: `download-url` returns a presigned S3 URL, signed with SigV4, instead of an Axentra URL) |
 | `max_file_bytes` | `52428800` (50 MiB) |
 | `allowed_content_types` | `[]` (all except always-blocked executable/HTML types) |
 | `store_blocked_as_inert` | `false` (`true`: store executable/HTML/SVG/script uploads as inert `application/octet-stream` attachments instead of refusing them with 415; the installation default, products override it in `settings.storage.blocked_types`, see modules/STORAGE.md) |
 | `signed_url_ttl_seconds` | `300` (10-86400) |
 | `deleted_object_retention_hours` | `0` (0-2160; keep objects of deleted or expired files this long before the purge removes them, for consistent database + file backups; see operations/BACKUP_RESTORE.md) |
+
+The S3 client signs every request and presigned URL with SigV4 and bounds its waits: 5 s to connect,
+30 s per read, at most 3 attempts per request (botocore "standard" retries). When the object store is
+unreachable, times out or answers 5xx/`SlowDown`, storage requests answer `503 service_unavailable`
+with `Retry-After: 10` (see modules/STORAGE.md). These values are not configurable.
 
 `[notify]`
 
@@ -172,7 +183,9 @@ These sections are accepted and validated now; they take effect when the corresp
 | `smtp_port` | `587` |
 | `smtp_username` | none |
 | `smtp_password_ref` | none |
-| `smtp_starttls` | `true` |
+| `smtp_starttls` | `true` (STARTTLS on the submission port; required in production unless the host is loopback. Implicit TLS (SMTPS, port 465) is not supported) |
+| `smtp_ca_file` | none (PEM CA bundle used to verify the SMTP server certificate, e.g. a private CA; default: the system CAs. Verification is always on) |
+| `smtp_timeout_seconds` | `20` (greater than 0, at most 300; timeout of the SMTP connection and of each reply, per message) |
 | `invitation_accept_url` | none: `<security.public_url>/accept-invitation`. Link in invitation emails and in `accept_url` of `POST .../invitations`, used when the product sets no own `settings.invitation_accept_url`. Absolute `http(s)` URL (`https` in production); `{token}` is replaced by the token, otherwise `?token=` is appended; a `#fragment` only together with `{token}`. Set it when the frontend that accepts invitations is not on the API origin, e.g. `https://studio.example.com/invitations/accept` (env `AXENTRA__NOTIFY__INVITATION_ACCEPT_URL`; see modules/NOTIFY.md "Invitation hook") |
 | `account_url` | none: the origin of `invitation_accept_url`, else `security.public_url`. Base URL of the frontend serving `/reset-password` and `/verify-email` (Studio does), used in password reset and email verification emails. Absolute `http(s)` URL without query or fragment (`https` in production); a path is kept (env `AXENTRA__NOTIFY__ACCOUNT_URL`; see modules/IDENTITY.md) |
 | `tenant_send_limit_per_hour` | `1000` (0-1000000; messages one tenant may send through `POST .../notify/send` in any rolling hour, `429 rate_limited` with `Retry-After` beyond it; counted in the database, so it holds across processes; system sends such as invitations do not count; `0` = off; see modules/NOTIFY.md) |

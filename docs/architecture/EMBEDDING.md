@@ -220,7 +220,9 @@ login: build an `OidcService` with `redirect_uri=` (the host's callback URL), ca
 browser_state=<login cookie>, ip=..., user_agent=..., start_session=False)`, map
 `OidcLoginError.code` to the host's error codes, read `result.user_id`, `result.identity` and
 `result.context`, and start the host's session. Rotate the session on login (end the session the
-browser held) and whenever its context changes. Details in
+browser held) and whenever its context changes. When `result.via_email_link` is true (the identity
+was linked by verified email, I5), never give that session a platform role and end it when the user
+gets one; `finish` already refuses such a login for a user who holds a platform role. Details in
 [SECURITY_MODEL](SECURITY_MODEL.md#passwords) ("OIDC logins on a host product's routes").
 
 ## Version checks

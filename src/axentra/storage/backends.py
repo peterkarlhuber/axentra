@@ -25,7 +25,7 @@ import secrets
 import time
 from typing import TYPE_CHECKING, Any
 
-from axentra.core.errors import ConfigurationError, NotFound
+from axentra.core.errors import ConfigurationError, NotFound, ServiceUnavailable
 
 if TYPE_CHECKING:
     from axentra.config.settings import StorageSettings
@@ -35,6 +35,56 @@ logger = logging.getLogger(__name__)
 _KEY = re.compile(r"^[A-Za-z0-9_-]{1,128}(/[A-Za-z0-9_-]{1,128}){0,7}$")
 CHUNK_SIZE = 64 * 1024
 TEMP_PREFIX = ".tmp-"
+
+
+#: botocore client settings of :class:`S3Backend`: SigV4 for every request and presigned URL (SigV2 is
+#: deprecated by AWS and refused by S3-compatible stores when the URL carries ``response-*`` overrides),
+#: and bounded waits so that an unreachable endpoint fails a request within seconds instead of minutes.
+S3_CONNECT_TIMEOUT_SECONDS = 5
+S3_READ_TIMEOUT_SECONDS = 30
+S3_MAX_ATTEMPTS = 3  # total attempts including the first (botocore "standard" retry mode)
+#: S3 error codes that mean "try again later" even without a 5xx status.
+_S3_RETRY_LATER_CODES = frozenset(
+    {"SlowDown", "ServiceUnavailable", "InternalError", "RequestTimeout", "Throttling", "ThrottlingException"}
+)
+
+
+class StorageUnavailable(ServiceUnavailable):
+    """The object store did not answer, timed out or reported a server-side failure (5xx/SlowDown)."""
+
+    def __init__(self, detail: str | None = None, *, retry_after: int | None = None) -> None:
+        super().__init__(
+            detail or "The file storage is temporarily unavailable. Try again later.", retry_after=retry_after
+        )
+
+
+def _s3_unavailable(exc: BaseException) -> bool:
+    """True for botocore connection/timeout errors and S3 answers that mean "retry later"."""
+    try:
+        from botocore import exceptions as bce
+    except ImportError:  # pragma: no cover - only without the s3 extra
+        return False
+    # EndpointConnectionError, ConnectTimeoutError, ReadTimeoutError, ConnectionClosedError, ...
+    if isinstance(exc, (bce.HTTPClientError, bce.ConnectionError)):
+        return True
+    if isinstance(exc, bce.ClientError):
+        resp = exc.response or {}
+        code = str(resp.get("Error", {}).get("Code", ""))
+        status = resp.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        return code in _S3_RETRY_LATER_CODES or (isinstance(status, int) and status >= 500)
+    return False
+
+
+@contextlib.contextmanager
+def _s3_errors(op: str) -> Iterator[None]:
+    """Turn an unavailable object store into :class:`StorageUnavailable` (``503``); other errors pass."""
+    try:
+        yield
+    except Exception as exc:
+        if _s3_unavailable(exc):
+            logger.warning("S3 %s failed: the object store is unavailable (%s)", op, type(exc).__name__)
+            raise StorageUnavailable() from exc
+        raise
 
 
 class ObjectNotFound(NotFound):
@@ -244,12 +294,20 @@ class S3Backend(StorageBackend):
                 raise ConfigurationError(
                     "the s3 storage backend needs boto3: pip install 'axentra[s3]'"
                 ) from exc
+            from botocore.config import Config
+
             client = boto3.client(
                 "s3",
                 region_name=region,
                 endpoint_url=endpoint_url,
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
+                config=Config(
+                    signature_version="s3v4",
+                    connect_timeout=S3_CONNECT_TIMEOUT_SECONDS,
+                    read_timeout=S3_READ_TIMEOUT_SECONDS,
+                    retries={"total_max_attempts": S3_MAX_ATTEMPTS, "mode": "standard"},
+                ),
             )
         self.client = client
 
@@ -263,6 +321,10 @@ class S3Backend(StorageBackend):
         return extra
 
     def put(self, key: str, chunks: Iterable[bytes], *, content_type: str) -> None:
+        with _s3_errors("upload"):
+            self._put(key, chunks, content_type=content_type)
+
+    def _put(self, key: str, chunks: Iterable[bytes], *, content_type: str) -> None:
         k = self._k(key)
         buf = bytearray()
         upload_id: str | None = None
@@ -312,7 +374,10 @@ class S3Backend(StorageBackend):
 
     def get(self, key: str, *, chunk_size: int = CHUNK_SIZE) -> Iterator[bytes]:
         try:
-            obj = self.client.get_object(Bucket=self.bucket, Key=self._k(key))
+            with _s3_errors("download"):
+                obj = self.client.get_object(Bucket=self.bucket, Key=self._k(key))
+        except StorageUnavailable:
+            raise
         except Exception as exc:
             if self._is_missing(exc):
                 raise ObjectNotFound("object not found") from None
@@ -329,12 +394,16 @@ class S3Backend(StorageBackend):
 
     def delete(self, key: str) -> bool:
         existed = self.exists(key)
-        self.client.delete_object(Bucket=self.bucket, Key=self._k(key))
+        with _s3_errors("delete"):
+            self.client.delete_object(Bucket=self.bucket, Key=self._k(key))
         return existed
 
     def exists(self, key: str) -> bool:
         try:
-            self.client.head_object(Bucket=self.bucket, Key=self._k(key))
+            with _s3_errors("head"):
+                self.client.head_object(Bucket=self.bucket, Key=self._k(key))
+        except StorageUnavailable:
+            raise
         except Exception as exc:
             if self._is_missing(exc):
                 return False
@@ -342,12 +411,13 @@ class S3Backend(StorageBackend):
         return True
 
     def list_keys(self, prefix: str = "") -> Iterator[str]:
-        paginator = self.client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix + prefix):
-            for item in page.get("Contents", []) or []:
-                key = str(item["Key"])[len(self.prefix) :]
-                if _KEY.match(key):
-                    yield key
+        with _s3_errors("list"):
+            paginator = self.client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=self.prefix + prefix):
+                for item in page.get("Contents", []) or []:
+                    key = str(item["Key"])[len(self.prefix) :]
+                    if _KEY.match(key):
+                        yield key
 
     def presigned_url(
         self, key: str, *, ttl_seconds: int, filename_header: str, content_type: str

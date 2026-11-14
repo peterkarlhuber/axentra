@@ -405,8 +405,13 @@ reset ends every session of the user. The emails use sensitive templates, so the
 visible in the message log of the delivering product. Details: modules/IDENTITY.md.
 
 **OIDC account linking (design decision).** The first OIDC login with a verified email (`email_verified`
-is `true`) that matches an existing account links that account to the provider subject, also for
-platform admins. This is the usual behaviour and keeps invitations working, but it trusts every
+is `true`) that matches an existing account links that account to the provider subject, **except for
+platform users** (owner decision I5, 2026-11-14): when the account has a platform role, the login is refused
+with `explicit_link_required`, and a platform admin links the identity explicitly
+(`POST /v1/users/{user_id}/identities`). An identity linked by email before the user got a platform role
+stops working at the promotion, and sessions started through it end (`axentra_sessions.via_email_link`).
+`oidc[].link_platform_users_by_verified_email = true` turns
+the old behavior back on for one provider. This is the usual behaviour and keeps invitations working, but it trusts every
 configured provider to be authoritative for the email domains it vouches for. Configure
 `oidc[].allowed_email_domains` for each provider (and use providers whose email claims are verified
 and owned by the organization); a provider that lets users claim arbitrary verified emails could
@@ -434,7 +439,10 @@ before any check, the browser must hold the login cookie of exactly this state, 
 nonce, exact issuer, audience/`azp`, asymmetric algorithms only, key rotation with a rate-limited
 JWKS refresh, the per-IP rate limit of starts, the disabled-account check, and the audit of
 refused logins. The host must keep its own session rotation (a new session on login and on any
-change of its session context, the old one ended).
+change of its session context, the old one ended). `finish` checks the identity's link method once
+more right before it returns (I5); `LoginResult.via_email_link` tells the host that the login came
+through an identity linked by email, and the host must not give that session a platform role and
+must end it when the user gets one, as Axentra does with its own sessions.
 
 ## API keys
 

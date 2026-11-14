@@ -109,6 +109,12 @@
       "name": "record_time_indexes",
       "namespace": "axentra",
       "version": 14
+    },
+    {
+      "checksum": "47beefe85c8ee4f0541c764815eb92c16ad008d9feccdf2d57e8a7e50ee88dc3",
+      "name": "identity_link_method",
+      "namespace": "axentra",
+      "version": 15
     }
   ],
   "relations": {
@@ -4127,6 +4133,14 @@
           "name": "revoked_at",
           "not_null": false,
           "type": "timestamp with time zone"
+        },
+        {
+          "default": "false",
+          "generated": "",
+          "identity": "",
+          "name": "via_email_link",
+          "not_null": true,
+          "type": "boolean"
         }
       ],
       "constraints": [
@@ -5300,9 +5314,22 @@
           "name": "created_at",
           "not_null": true,
           "type": "timestamp with time zone"
+        },
+        {
+          "default": "'unknown'::text",
+          "generated": "",
+          "identity": "",
+          "name": "linked_by",
+          "not_null": true,
+          "type": "text"
         }
       ],
       "constraints": [
+        {
+          "definition": "CHECK ((linked_by = ANY (ARRAY['unknown'::text, 'email'::text, 'explicit'::text, 'signup'::text])))",
+          "name": "axentra_user_identities_linked_by_check",
+          "type": "c"
+        },
         {
           "definition": "PRIMARY KEY (id)",
           "name": "axentra_user_identities_pkey",

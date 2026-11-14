@@ -17,6 +17,7 @@ from axentra.core.errors import (
     NotFound,
     QuotaExceeded,
     RateLimited,
+    ServiceUnavailable,
     problem_details,
 )
 
@@ -57,6 +58,9 @@ def test_every_axentra_error_maps_to_a_status_and_code():
                 "some detail",
             )
             assert not info.internal
+        elif issubclass(cls, ServiceUnavailable):
+            assert (info.status, info.code, info.internal) == (503, cls.code, True)
+            assert info.headers["Retry-After"].isdigit()
         else:
             assert (info.status, info.code, info.internal) == (500, "internal", True)
             assert info.detail == "An internal error occurred."
@@ -74,6 +78,14 @@ def test_problem_details_extra_headers_and_redaction():
     assert problem_details(RateLimited()).headers == {"Retry-After": "60"}
     assert problem_details(QuotaExceeded(retry_after=5)).headers == {"Retry-After": "5"}
     assert problem_details(NotFound()).detail == "Not found"
+
+
+def test_service_unavailable_is_a_503_with_retry_after():
+    info = problem_details(ServiceUnavailable("The file storage is temporarily unavailable."))
+    assert (info.status, info.code, info.title) == (503, "service_unavailable", "Service unavailable")
+    assert info.headers == {"Retry-After": "10"} and info.internal
+    assert info.detail == "The file storage is temporarily unavailable."
+    assert problem_details(ServiceUnavailable(retry_after=3)).headers == {"Retry-After": "3"}
 
 
 def test_problem_details_hides_internal_errors():

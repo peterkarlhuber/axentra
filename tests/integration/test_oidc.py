@@ -13,6 +13,7 @@ import base64
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import hashlib
+from importlib import resources
 import json
 import secrets
 import time
@@ -26,8 +27,10 @@ from jwt.algorithms import RSAAlgorithm
 import pytest
 
 from axentra.api.app import create_app
+from axentra.core.errors import Forbidden
 from axentra.data.database import DbScope
-from tests.integration.conftest import Browser, World, bootstrap_admin
+from axentra.data.migrations import split_statements
+from tests.integration.conftest import ADMIN_EMAIL, Browser, World, bootstrap_admin
 
 ISSUER = "https://idp.test"
 CLIENT_ID = "axentra-test"
@@ -270,6 +273,195 @@ def test_existing_user_is_linked_by_verified_email(make_world) -> None:  # type:
     assert _error(r) is None
     assert b.get("/v1/auth/session").json()["user"]["id"] == uid
     assert w.login_as("bob@example.com").get("/v1/auth/session").status_code == 200  # password still works
+
+
+@pytest.mark.parametrize("role", ["platform_admin", "platform_viewer"])
+def test_platform_user_is_not_linked_by_verified_email(make_world, role: str) -> None:  # type: ignore[no-untyped-def]
+    """Owner decision I5: a provider that vouches for a platform user's address does not get that account."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": role}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) == "explicit_link_required"
+    assert b.client.cookies.get(SESSION_COOKIE) is None
+    assert _identities(w) == []  # nothing linked, no second account created
+    with w.ax.db.transaction(DbScope.platform(), read_only=True) as tx:
+        assert tx.scalar("SELECT count(*) FROM axentra_users WHERE lower(email) = 'ops@example.com'") == 1
+        assert tx.scalar("SELECT count(*) FROM axentra_users") == 2  # the bootstrap admin and ops
+    assert w.login_as("ops@example.com").get("/v1/auth/session").status_code == 200  # password still works
+
+    # An explicit link by a platform admin is honored on the next login.
+    r = w.admin.post(f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "ops-sub"})
+    assert r.status_code == 201, r.text
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
+def test_email_link_stops_working_when_the_user_gets_a_platform_role(make_world) -> None:  # type: ignore[no-untyped-def]
+    """I5 also for an older link: an identity linked by email does not reach the account once it is a platform user."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    b, r = w.login(subject="ops-sub", email="ops@example.com")  # linked by email while an ordinary user
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) == "explicit_link_required"
+    assert b.client.cookies.get(SESSION_COOKIE) is None
+    # A platform admin confirms the existing link; then it works.
+    r = w.admin.post(f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "ops-sub"})
+    assert r.status_code == 201, r.text
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+    # Confirming again, or linking it to another user, is a conflict.
+    assert (
+        w.admin.post(
+            f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "ops-sub"}
+        ).status_code
+        == 409
+    )
+    other = w.user("other@example.com")
+    assert (
+        w.admin.post(
+            f"/v1/users/{other}/identities", json={"provider": ISSUER, "subject": "ops-sub"}
+        ).status_code
+        == 409
+    )
+
+
+def test_signup_identity_keeps_working_after_promotion(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    b, r = w.login(subject="new-sub", email="new@example.com")  # creates the account
+    uid = b.get("/v1/auth/session").json()["user"]["id"]
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_viewer"}).status_code == 200
+    b, r = w.login(subject="new-sub", email="new@example.com")
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
+def test_session_from_an_email_link_ends_when_the_user_gets_a_platform_role(make_world) -> None:  # type: ignore[no-untyped-def]
+    """I5 for a session that already exists: promoting the user ends sessions started through an email link."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None and b.get("/v1/auth/session").json()["user"]["id"] == uid
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    assert b.get("/v1/users").status_code == 401
+    assert b.get("/v1/auth/session").status_code == 401
+    # Revoked, not only refused: removing the role again does not bring the session back.
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "none"}).status_code == 200
+    assert b.get("/v1/auth/session").status_code == 401
+    # A password session of the same user is not affected.
+    owner = w.browser()
+    owner.login("ops@example.com", "user password 12345")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    assert owner.get("/v1/users").status_code == 200
+
+
+def test_promotion_between_link_check_and_session_start_is_refused(make_world) -> None:  # type: ignore[no-untyped-def]
+    """The race the session check closes: the role is granted after the link check, before the session exists."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    _, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    with pytest.raises(Forbidden) as exc:
+        w.ax.identity.start_session(uid, "oidc:test", ip=None, user_agent="", identity=(ISSUER, "ops-sub"))
+    assert exc.value.extra["reason"] == "explicit_link_required"
+    # With the provider's opt-in the session starts and is not marked.
+    session = w.ax.identity.start_session(
+        uid,
+        "oidc:test",
+        ip=None,
+        user_agent="",
+        identity=(ISSUER, "ops-sub"),
+        link_platform_users_by_verified_email=True,
+    )
+    principal, _ = w.ax.identity.resolve_session(session.token)
+    assert principal.platform_role is not None
+
+
+def _run_backfill(w: OidcWorld) -> dict[str, str]:
+    """The data statements of migration 15 as the runner applies them: no scope set beforehand."""
+    sql = (resources.files("axentra.data") / "sql" / "0015_identity_link_method.sql").read_text()
+    statements = [s for s in split_statements(sql) if "ALTER TABLE" not in s]
+    with w.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("UPDATE axentra_user_identities SET linked_by = 'unknown'")
+        tx.execute("SELECT set_config('axentra.scope', '', true)")
+        assert tx.scalar("SELECT count(*) FROM axentra_audit_events") == 0  # forced RLS hides them
+        for statement in statements:
+            tx.execute(statement)
+    return {i["subject"]: i["linked_by"] for i in _identities(w)}
+
+
+def test_existing_identities_take_their_link_method_from_the_audit_log(make_world) -> None:  # type: ignore[no-untyped-def]
+    """Migration 15 backfills ``linked_by`` from ``identity.external.*`` audit records; no record stays ``unknown``."""
+    w = make_world()
+    w.user("ops@example.com")
+    w.login(subject="email-sub", email="ops@example.com")  # linked_by_email
+    w.login(subject="signup-sub", email="new@example.com")  # created
+    other = w.user("other@example.com")
+    assert (
+        w.admin.post(
+            f"/v1/users/{other}/identities", json={"provider": ISSUER, "subject": "explicit-sub"}
+        ).status_code
+        == 201
+    )
+    with w.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute(
+            "INSERT INTO axentra_user_identities (id, user_id, provider, subject) VALUES ('uid_noaudit', %s,"
+            " 'other-idp', 'x')",
+            (other,),
+        )
+    assert _run_backfill(w) == {
+        "email-sub": "email",
+        "signup-sub": "signup",
+        "explicit-sub": "explicit",
+        "x": "unknown",
+    }
+
+
+def test_backfill_leaves_ambiguous_identities_unknown(make_world) -> None:  # type: ignore[no-untyped-def]
+    """Audit records name no subject: two identities of one user and provider, or records that disagree, stay unknown."""
+    w = make_world()
+    uid = w.user("ops@example.com")
+    w.login(subject="email-sub", email="ops@example.com")  # linked by email
+    assert (
+        w.admin.post(
+            f"/v1/users/{uid}/identities", json={"provider": ISSUER, "subject": "admin-sub"}
+        ).status_code
+        == 201
+    )
+    assert _run_backfill(w) == {"email-sub": "unknown", "admin-sub": "unknown"}
+    # One identity left, but the records still disagree (email and explicit): unknown.
+    with w.ax.db.transaction(DbScope.platform()) as tx:
+        tx.execute("DELETE FROM axentra_user_identities WHERE subject = 'admin-sub'")
+    assert _run_backfill(w) == {"email-sub": "unknown"}
+
+
+def test_bootstrap_admin_is_not_linked_by_verified_email(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    _, r = w.login(subject="admin-sub", email=ADMIN_EMAIL)
+    assert _error(r) == "explicit_link_required"
+    assert _identities(w) == []
+
+
+def test_platform_user_linking_can_be_turned_back_on(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world(link_platform_users_by_verified_email=True)
+    uid = w.user("ops@example.com")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert b.get("/v1/auth/session").json()["user"]["id"] == uid
+
+
+def test_role_removed_user_is_linked_again(make_world) -> None:  # type: ignore[no-untyped-def]
+    w = make_world()
+    uid = w.user("ops@example.com")
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "platform_admin"}).status_code == 200
+    assert w.admin.patch(f"/v1/users/{uid}", json={"platform_role": "none"}).status_code == 200
+    b, r = w.login(subject="ops-sub", email="ops@example.com")
+    assert _error(r) is None
+    assert b.get("/v1/auth/session").json()["user"]["id"] == uid
 
 
 # -- state and browser binding -----------------------------------------------------------------------

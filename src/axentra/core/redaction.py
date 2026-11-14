@@ -63,6 +63,12 @@ _DSN = re.compile(r"(?i)(postgres(ql)?://[^:/@\s]+:)[^@\s]+@")
 _PREFIXED = [
     # ``Authorization: Basic <base64>`` (also ``Proxy-Authorization`` and a header dict ``'Authorization': 'Basic ...'``).
     re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*[\"']?basic\s+)[A-Za-z0-9+/=._~-]+"),
+    # AWS SigV4 (S3 backend; botocore logs request headers at DEBUG): the access key id, scope and signature after
+    # ``Authorization: AWS4-HMAC-SHA256 `` (also ``'Authorization': b'AWS4-HMAC-SHA256 ...'`` in a header dict).
+    re.compile(r"(?i)(authorization[\"']?\s*[:=]\s*b?[\"']?aws4-hmac-sha256\s+)[^\r\n\"']+"),
+    # Presigned URL parameters and the session token header (``X-Amz-Credential=...``, ``'X-Amz-Security-Token': b'...'``).
+    re.compile(r"(?i)((?<![a-z0-9-])x-amz-(?:signature|credential|security-token)(?:=|%3d))[^&\s\"']+"),
+    re.compile(r"""(?i)((["'])x-amz-security-token\2\s*:\s*b?(["']))[^"'\r\n]+"""),
     # A cookie header carries session cookies: everything after ``Cookie:`` / ``Set-Cookie:`` up to the line end.
     re.compile(r"(?i)((?<![a-z0-9_-])(?:set-)?cookie\s*:\s*)[^\r\n]+"),
     # Axentra's session and login cookies wherever they appear (``name=value``).

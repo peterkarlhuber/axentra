@@ -534,14 +534,19 @@ class WebhookService:
             " AND (tenant_id IS NULL OR tenant_id = %s) ORDER BY id",
             (event.product_id, event.tenant_id),
         )
-        access: dict[str | None, bool] = {}
+        rows = [ep for ep in rows if type_matches(event.type, ep["event_types"])]
+        # Each creator's access is checked on this transaction's connection (savepoints, Database.joined), not on
+        # a second pooled connection per check (delta review N-4): a dispatch job holds one connection, so
+        # concurrent jobs cannot exhaust the pool waiting on themselves.
+        # A denial audit written by the authorizer during these checks shares the transaction: if the dispatch
+        # rolls back, the audit row is lost while the denial throttle already counts it (accepted, review r3 L-1).
+        with self.db.joined(tx.conn):
+            access = {
+                creator: self.creator_has_access(event.product_id, creator)
+                for creator in dict.fromkeys(ep["created_by"] for ep in rows)
+            }
         for ep in rows:
-            if not type_matches(event.type, ep["event_types"]):
-                continue
-            creator = ep["created_by"]
-            if creator not in access:
-                access[creator] = self.creator_has_access(event.product_id, creator)
-            if not access[creator]:
+            if not access[ep["created_by"]]:
                 continue
             did = new_id("dlv")
             inserted = tx.one(

@@ -107,3 +107,44 @@ def test_quoted_password_values_are_redacted(text: str, secret: str) -> None:
 )
 def test_quoted_names_without_a_secret_value_are_unchanged(text: str) -> None:
     assert redact_text(text) == text
+
+
+AWS = [
+    (
+        "{'Authorization': b'AWS4-HMAC-SHA256 Credential=AKIAEXAMPLEKEY01/20261114/us-east-1/s3/aws4_request, "
+        "SignedHeaders=host;x-amz-date, Signature=51c38408d758a3da5f8e92104fe8060bcefd21ebda89246d23d2c1a69da6525e'}",
+        ["AKIAEXAMPLEKEY01", "51c38408d758a3da5f8e92104fe8060bcefd21ebda89246d23d2c1a69da6525e"],
+    ),
+    (
+        "Authorization: AWS4-HMAC-SHA256 Credential=AKIAEXAMPLEKEY01/x, Signature=deadbeefdeadbeefdeadbeef",
+        ["AKIAEXAMPLEKEY01", "deadbeefdeadbeefdeadbeef"],
+    ),
+    (
+        "GET /b/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEY01%2F20261114%2Fus-east-1"
+        "&X-Amz-Date=20261114T000000Z&X-Amz-Signature=0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        ["AKIAEXAMPLEKEY01", "0a1b2c3d4e5f60718293a4b5c6d7e8f9"],
+    ),
+    ("{'X-Amz-Security-Token': b'FwoGZXIvYXdzEXAMPLEsessiontoken'}", ["FwoGZXIvYXdzEXAMPLEsessiontoken"]),
+]
+
+
+@pytest.mark.parametrize(("text", "secrets"), AWS)
+def test_aws_sigv4_credentials_are_redacted(text: str, secrets: list[str]) -> None:
+    out = redact_text(text)
+    assert REDACTED in out
+    for secret in secrets:
+        assert secret not in out, out
+
+
+def test_botocore_debug_records_are_redacted() -> None:
+    """botocore logs request headers at DEBUG (``log_level = "DEBUG"``); the JSON log must not carry them."""
+    import logging
+
+    from axentra.audit.logging import JsonFormatter
+
+    record = logging.LogRecord(
+        "botocore.endpoint", logging.DEBUG, __file__, 1, "Making request with params: %r", (AWS[0][0],), None
+    )
+    line = JsonFormatter().format(record)
+    assert "AKIAEXAMPLEKEY01" not in line and "51c38408d758a3da" not in line
+    assert "Making request with params" in line  # the rest of the record stays readable

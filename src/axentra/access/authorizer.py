@@ -63,6 +63,27 @@ CREATOR_DENIAL_AUDIT_INTERVAL_SECONDS = 60.0
 DenialHook = Callable[[Principal, str, str | None, str | None, str], None]
 
 
+def _active_product_role(tx: Tx, product_id: str, user_id: str | None) -> tuple[bool, str | None]:
+    """Whether the user is active, and their product role (``None`` without one), in one query.
+
+    The one rule for a disabled or deleted user (delta review N-5): no product or tenant relation, wherever the
+    principal comes from (a session, an API key's creator, the creator of a webhook endpoint, a schedule or a
+    job). Their memberships stay, so enabling the user again restores them. A principal that is no user has no
+    membership and is not subject to this rule. The rule covers relations read here only: platform permissions the
+    principal already carries are not re-read (sessions and API keys of a disabled user are refused when they
+    are resolved)."""
+    if user_id is None:
+        return True, None
+    row = tx.one(
+        "SELECT u.status, m.role FROM axentra_users u LEFT JOIN axentra_product_members m"
+        " ON m.user_id = u.id AND m.product_id = %s WHERE u.id = %s",
+        (product_id, user_id),
+    )
+    if row is None or row["status"] != "active":
+        return False, None
+    return True, row["role"]
+
+
 class Authorizer:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -208,11 +229,9 @@ class Authorizer:
                     "SELECT key, permissions FROM axentra_roles WHERE product_id = %s", (product_id,)
                 )
             }
-            prow = tx.one(
-                "SELECT role FROM axentra_product_members WHERE product_id = %s AND user_id = %s",
-                (product_id, user_id),
-            )
-            product_role = prow["role"] if prow else None
+            active, product_role = _active_product_role(tx, product_id, user_id)
+            if not active:
+                raise NotFound("tenant not found" if tenant_id else "product not found")
             tenant_role = None
             if tenant_id is not None:
                 trow = tx.one(
@@ -349,11 +368,9 @@ class Authorizer:
                     "SELECT key, permissions FROM axentra_roles WHERE product_id = %s", (product_id,)
                 )
             }
-            prow = tx.one(
-                "SELECT role FROM axentra_product_members WHERE product_id = %s AND user_id = %s",
-                (product_id, user_id),
-            )
-            product_role = prow["role"] if prow else None
+            active, product_role = _active_product_role(tx, product_id, user_id)
+            if not active:
+                return {}
             if product_role or platform_perms:
                 rows = tx.all(
                     "SELECT t.id, t.status, m.role FROM axentra_tenants t LEFT JOIN axentra_memberships m"

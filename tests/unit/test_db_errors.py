@@ -508,3 +508,130 @@ def test_cli_unreachable_text_keeps_the_client_reason_without_server_text() -> N
     assert SECRET not in _unreachable_text(odd) and "DETAIL" not in _unreachable_text(odd)
     terminated = psycopg.errors.lookup("57P01")(f"terminating connection\nDETAIL:  {SECRET}")
     assert _unreachable_text(terminated) == "connection error (SQLSTATE 57P01)"
+
+
+# --- N-3: threading.excepthook and sys.unraisablehook ---------------------------------------------------------------
+
+
+def _install_cli_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The interpreter's default hooks (pytest replaces some during a test), then the CLI's."""
+    import sys
+    import threading
+
+    from axentra import cli
+
+    monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
+    monkeypatch.setattr(threading, "excepthook", threading.__excepthook__)
+    monkeypatch.setattr(sys, "unraisablehook", sys.__unraisablehook__)
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+
+
+def test_cli_redacts_an_exception_that_ends_a_thread(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import threading
+
+    _install_cli_hooks(monkeypatch)
+
+    def run() -> None:
+        try:
+            raise _unique()
+        except psycopg.Error as exc:
+            raise RuntimeError("worker failed") from exc
+
+    thread = threading.Thread(target=run, name="n3-probe")
+    thread.start()
+    thread.join()
+    err = capsys.readouterr().err
+    assert SECRET not in err and "DETAIL" not in err
+    assert "Exception in thread n3-probe:" in err and "RuntimeError: worker failed" in err
+    assert "unique violation (SQLSTATE 23505)" in err
+
+
+def test_cli_redacts_an_unraisable_exception(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import gc
+
+    _install_cli_hooks(monkeypatch)
+
+    class Holder:
+        def __repr__(self) -> str:
+            return f"<Holder {SECRET}>"
+
+        def __del__(self) -> None:
+            raise _unique()
+
+    Holder()
+    gc.collect()
+    err = capsys.readouterr().err
+    assert SECRET not in err and "DETAIL" not in err
+    assert "Exception ignored in: <function " in err and "Holder.__del__>" in err
+    assert "unique violation (SQLSTATE 23505)" in err
+
+
+def test_unraisable_hook_names_an_object_by_its_type(capsys: pytest.CaptureFixture[str]) -> None:
+    from types import SimpleNamespace
+
+    class Box:
+        def __repr__(self) -> str:
+            return f"<Box {SECRET}>"
+
+    exc = _unique()
+    args = SimpleNamespace(exc_type=type(exc), exc_value=exc, exc_traceback=None, err_msg=None, object=Box())
+    db_errors.redacted_unraisablehook(args)
+    err = capsys.readouterr().err
+    assert SECRET not in err and "DETAIL" not in err
+    assert err.startswith("Exception ignored in: <") and "Box object>" in err
+    assert "unique violation (SQLSTATE 23505)" in err
+
+
+def test_cli_keeps_own_thread_and_unraisable_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import threading
+
+    from axentra import cli
+
+    def own(*args: object) -> None:
+        pass
+
+    monkeypatch.setattr(threading, "excepthook", own)
+    monkeypatch.setattr(sys, "unraisablehook", own)
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    assert threading.excepthook is own and sys.unraisablehook is own
+
+
+def test_thread_hook_stays_silent_for_system_exit(capsys: pytest.CaptureFixture[str]) -> None:
+    import threading
+
+    exc = SystemExit(1)
+    db_errors.redacted_threading_excepthook(
+        threading.ExceptHookArgs((SystemExit, exc, None, threading.current_thread()))  # type: ignore[call-arg]
+    )
+    assert capsys.readouterr().err == ""
+
+
+def test_asyncio_default_exception_handler_logs_through_the_filter(caplog: pytest.LogCaptureFixture) -> None:
+    """The event loop's default handler (an unretrieved task exception under uvicorn/anyio) reports through the
+    ``asyncio`` logger, so the record factory redacts it: no hook of its own is needed (N-3)."""
+    import asyncio
+
+    install_db_error_redaction()
+
+    async def failing() -> None:
+        raise _unique()
+
+    loop = asyncio.new_event_loop()
+    try:
+        task = loop.create_task(failing())
+        loop.run_until_complete(asyncio.sleep(0))
+        loop.call_exception_handler(
+            {"message": "Task exception was never retrieved", "exception": task.exception()}
+        )
+    finally:
+        loop.close()
+    text = "\n".join(caplog.text.splitlines())
+    assert "Task exception was never retrieved" in text and "unique violation (SQLSTATE 23505)" in text
+    assert SECRET not in text and "DETAIL" not in text

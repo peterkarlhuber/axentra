@@ -32,6 +32,10 @@ Axentra is not published on PyPI yet; install it from the
 repository at a commit, or from a checkout (`pip install -r requirements/tabrion.txt -e ".[server]"`). Tabrion, which Axentra names by a
 version range, is not on PyPI either: add `-r requirements/tabrion.txt` (from the same commit) to the install
 command, with pip 25.0 or newer (see [docs/development/DEVELOPMENT.md](docs/development/DEVELOPMENT.md#tabrion)).
+Only these pinned install paths are supported: an install without `-r requirements/tabrion.txt` would ask the
+package index for `tabrion`, a name that is not reserved there (dependency confusion). Officially supported for
+production is Linux amd64 with the container image; see
+[Supported platforms and install paths](docs/operations/DEPLOYMENT.md#supported-platforms-and-install-paths).
 
 | | Library | HTTP API |
 |---|---|---|

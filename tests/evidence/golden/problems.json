@@ -344,6 +344,25 @@
         "type": "urn:axentra:problem:reauthentication_required"
       }
     },
+    "axentra.core.errors.ServiceUnavailable": {
+      "class": {
+        "code": "service_unavailable",
+        "status": 503,
+        "title": "Service unavailable"
+      },
+      "headers": {
+        "Retry-After": "10"
+      },
+      "internal": true,
+      "problem": {
+        "code": "service_unavailable",
+        "detail": "Service unavailable",
+        "request_id": null,
+        "status": 503,
+        "title": "Service unavailable",
+        "type": "urn:axentra:problem:service_unavailable"
+      }
+    },
     "axentra.core.errors.SetupAlreadyCompleted": {
       "class": {
         "code": "setup_already_completed",
@@ -478,6 +497,25 @@
         "status": 404,
         "title": "Not found",
         "type": "urn:axentra:problem:not_found"
+      }
+    },
+    "axentra.storage.backends.StorageUnavailable": {
+      "class": {
+        "code": "service_unavailable",
+        "status": 503,
+        "title": "Service unavailable"
+      },
+      "headers": {
+        "Retry-After": "10"
+      },
+      "internal": true,
+      "problem": {
+        "code": "service_unavailable",
+        "detail": "The file storage is temporarily unavailable. Try again later.",
+        "request_id": null,
+        "status": 503,
+        "title": "Service unavailable",
+        "type": "urn:axentra:problem:service_unavailable"
       }
     }
   },

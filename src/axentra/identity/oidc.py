@@ -76,6 +76,8 @@ ERROR_CODES = frozenset(
         "email_not_verified",
         "domain_not_allowed",
         "signup_disabled",
+        # the verified email belongs to a platform user, who is linked only explicitly (I5)
+        "explicit_link_required",
         "account_disabled",
         "rate_limited",
         # an invitation on the GET start, which has no Origin check: send it with the POST start
@@ -480,6 +482,11 @@ class LoginResult:
     #: The host context given to :meth:`OidcService.start` (empty when none was given).
     context: dict[str, str] = field(default_factory=dict)
     identity: ExternalIdentity | None = None
+    #: The identity was linked by verified email (or before link methods were recorded) and the provider
+    #: does not allow that for platform users: a host that keeps its own sessions
+    #: (``finish(start_session=False)``) must not give this session a platform role and must end it when
+    #: the user gets one (I5). Axentra's own sessions do that themselves.
+    via_email_link: bool = False
 
 
 AcceptInvitation = Callable[[Principal, str], Any]
@@ -738,6 +745,7 @@ class OidcService:
                 allow_signup=allow_signup,
                 allowed_domains=allowed_domains,
                 link_by_verified_email=provider.link_by_verified_email,
+                link_platform_users_by_verified_email=provider.link_platform_users_by_verified_email,
                 allow_signup_without_email=provider.allow_signup_without_email,
                 ip=ip,
                 request_id=request_id,
@@ -751,13 +759,29 @@ class OidcService:
         identity = ExternalIdentity(
             provider=provider.issuer, subject=str(claims["sub"]), email=email, name=str(name)[:200]
         )
-        session = (
-            self.identity.start_session(
-                user_id, f"oidc:{provider.id}", ip=ip, user_agent=user_agent, request_id=request_id
+        session = None
+        signed_in_with = (provider.issuer, str(claims["sub"]))
+        try:
+            # Checked again right before the session starts: a platform role granted after the link check
+            # refuses an identity linked by email (I5). Axentra's own session repeats the check atomically.
+            via_email_link = self.identity.identity_sign_in(
+                user_id,
+                signed_in_with,
+                link_platform_users_by_verified_email=provider.link_platform_users_by_verified_email,
             )
-            if start_session
-            else None
-        )
+            if start_session:
+                session = self.identity.start_session(
+                    user_id,
+                    f"oidc:{provider.id}",
+                    ip=ip,
+                    user_agent=user_agent,
+                    request_id=request_id,
+                    identity=signed_in_with,
+                    link_platform_users_by_verified_email=provider.link_platform_users_by_verified_email,
+                )
+        except Forbidden as exc:
+            reason = str(exc.extra.get("reason", "login_failed"))
+            raise OidcLoginError(reason if reason in ERROR_CODES else "login_failed", exc.detail) from exc
         accepted = False
         tenant_id: str | None = None
         product_id: str | None = None
@@ -792,6 +816,7 @@ class OidcService:
             invitation_product_id=product_id if isinstance(product_id, str) else None,
             context=context,
             identity=identity,
+            via_email_link=via_email_link,
         )
 
     def _invited(self, invitation: str, email: str) -> bool:
