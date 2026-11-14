@@ -83,7 +83,13 @@ class DatabaseSettings(_Section):
     """Also apply migrations published by installed packages in the ``axentra.migrations`` entry point group."""
     pool_min: int = Field(1, ge=0)
     pool_max: int = Field(10, ge=1)
-    statement_timeout_ms: int = Field(30_000, ge=0)
+    statement_timeout_ms: int = Field(30_000, ge=0, le=2_147_483_647)
+    idle_in_transaction_timeout_ms: int = Field(0, ge=0, le=2_147_483_647)
+    """``idle_in_transaction_session_timeout`` of each connection of Axentra's own pool (``0``: not set, the
+    server's setting). Ends a session that keeps a transaction open without a statement for longer."""
+    application_name: str = Field("", max_length=63, pattern=r"^[\x20-\x7e]*$")
+    """``application_name`` of each connection of Axentra's own pool (``""``: not set, the server's or the URL's
+    value); printable ASCII, at most 63 characters."""
     allow_superuser: bool = False
     """Superusers bypass row-level security; refused in production unless explicitly allowed."""
     allow_table_owner: bool | None = None

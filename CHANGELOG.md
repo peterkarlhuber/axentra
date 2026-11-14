@@ -28,6 +28,16 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 - Build: the image's build stage takes `SOURCE_DATE_EPOCH` as a build argument, so pip writes hash-based `.pyc`
   files and two builds of one commit (with `rewrite-timestamp=true`) give identical layers; before, only the `.pyc`
   source mtimes differed (release-candidate dry run). docs/operations/DEPLOYMENT.md has the command.
+- Added (TABRION MIG-AXE-4): settings `database.idle_in_transaction_timeout_ms` (default `0`) and
+  `database.application_name` (default empty) for the connections of Axentra's own pool; both are not set by
+  default, so the session of a pool connection is unchanged. The pool now sets its session with
+  `tabrion.postgres.configure`; a pool borrowed with `Database.on_pool` is still never configured.
+- Changed (TABRION MIG-AXE-4): `database.statement_timeout_ms` above 2147483647 (PostgreSQL's limit) is refused when
+  the configuration is loaded, and invalid session settings fail when a `Database` is built
+  (`tabrion.errors.ConfigurationError`) instead of when the pool connects.
+- Changed (TABRION MIG-AXE-5): the scheduler leader lock (`LeaderLock`) runs on `tabrion.postgres.SessionLock`, and
+  the migration lock waits with `tabrion.postgres.wait_advisory_lock`. Keys, polling and the connections used are
+  unchanged.
 - Security (TABRION DC-AX-1, dependency confusion): Tabrion is not on a package index, and a PyPI project of that
   name would be someone else's. `tests/unit/test_tabrion_requirements.py` now refuses an installed Tabrion that does
   not come from the pin (Git commit of `requirements/tabrion.txt`) or the hashed archive of `deploy/locks/tabrion.txt`,

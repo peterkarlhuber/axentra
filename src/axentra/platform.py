@@ -135,6 +135,8 @@ class Axentra:
             min_size=settings.database.pool_min,
             max_size=settings.database.pool_max,
             statement_timeout_ms=settings.database.statement_timeout_ms,
+            idle_in_transaction_timeout_ms=settings.database.idle_in_transaction_timeout_ms,
+            application_name=settings.database.application_name,
         )
         self.keyring = (
             keyring

@@ -86,6 +86,8 @@ not permitted` for the typo `AXENTRA__DATABSE__URL`). `axentra --debug <command>
 | `pool_min` | `AXENTRA__DATABASE__POOL_MIN` | `1` | Minimum pooled connections per process |
 | `pool_max` | `AXENTRA__DATABASE__POOL_MAX` | `10` | Maximum pooled connections per process |
 | `statement_timeout_ms` | `AXENTRA__DATABASE__STATEMENT_TIMEOUT_MS` | `30000` | `statement_timeout` per connection (0 = none) |
+| `idle_in_transaction_timeout_ms` | `AXENTRA__DATABASE__IDLE_IN_TRANSACTION_TIMEOUT_MS` | `0` (not set) | `idle_in_transaction_session_timeout` per connection of Axentra's own pool: ends a session that keeps a transaction open without a statement for longer. `0`: the server's setting |
+| `application_name` | `AXENTRA__DATABASE__APPLICATION_NAME` | empty (not set) | `application_name` per connection of Axentra's own pool (printable ASCII, at most 63 characters). Empty: the server's or the URL's value |
 | `allow_superuser` | `AXENTRA__DATABASE__ALLOW_SUPERUSER` | `false` | Allow a role that bypasses RLS in production. Never set this in production |
 | `allow_table_owner` | `AXENTRA__DATABASE__ALLOW_TABLE_OWNER` | unset | Allow an application role that owns the RLS-protected tables (it could switch RLS off). Unset: refused in production (start fails), allowed in development and test. `true`: allowed everywhere (production logs a warning). `false`: refused everywhere. Migrate with a separate owner role and `axentra db grant-runtime-role` |
 
