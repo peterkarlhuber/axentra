@@ -31,6 +31,29 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
   the Debian security fixes of a fixed `snapshot.debian.org` timestamp of `trixie-security` (zlib1g), so the image
   stays reproducible. A scan then reports no fixable OS or Python finding. docs/operations/RELEASE_SIGNING.md
   proposes a signing procedure (cosign with a key pair); nothing is signed or published yet.
+- Security (I5, owner decision 2026-11-14): OIDC sign-in no longer links an identity to an existing user with a
+  platform role by verified email; the sign-in is refused with `explicit_link_required` and an administrator links
+  the identity explicitly (`POST /v1/users/{user_id}/identities`). The new per-provider OIDC setting
+  `link_platform_users_by_verified_email` (default `false`) restores the old behavior. Migration 15 records how each
+  identity was linked (`axentra_user_identities.linked_by`), so an identity linked by email before the user got a
+  platform role also stops working until it is confirmed.
+- Security (delta review N-5): a disabled user has no product or tenant access any more through any principal, also
+  not through the API keys, webhook endpoints, schedules or jobs they created.
+- Security (delta review N-3): uncaught exceptions in threads and unraisable exceptions are logged through the same
+  redaction as every other log record (`threading.excepthook`, `sys.unraisablehook`).
+- Security: logs redact AWS SigV4 credentials (Authorization header, `X-Amz-Credential`, `X-Amz-Signature`,
+  `X-Amz-Security-Token`), which botocore logs at DEBUG level.
+- Fixed (delta review N-4): a webhook fan-out checks every endpoint creator's access on its own connection instead of
+  a second pooled connection per check; 16 concurrent fan-outs on a pool of 4 no longer time out.
+- Fixed: S3 presigned download URLs are signed with SigV4 (they were SigV2 and refused by S3-compatible stores such
+  as SeaweedFS). The S3 client connects within 5 s, waits at most 30 s per read and makes at most 3 attempts.
+- Fixed: storage requests answer `503 service_unavailable` with `Retry-After` when the S3 store is unreachable, times
+  out or answers 5xx/SlowDown, instead of `500 internal` and a dropped connection. New error
+  `axentra.core.errors.ServiceUnavailable`.
+- Docs: supported platform for the first public release is the Linux amd64 container; only the pinned install paths
+  are supported (DEPLOYMENT.md, residual risk C-02). CONFIGURATION.md lists `smtp_ca_file`, `smtp_timeout_seconds`,
+  `s3_prefix`, `s3_server_side_encryption` and `s3_presigned_downloads`. `scripts/live-integration/` is an opt-in
+  harness that runs the SMTP, S3, OIDC and webhook adapters against local containers (Stripe test mode: runbook only).
 - Security (TABRION MIG-AXE-6): role tools run on `tabrion.postgres` (`inspect_role`, `grant_runtime_role`,
   `role_info`); `axentra.data.roles` is a shim with the same `RoleReport`, `as_dict()` and error texts, and the
   grants are identical. The role check is stricter: a role counts as superuser, `BYPASSRLS` or table owner also when
