@@ -86,8 +86,11 @@ table users)`; JSON logs also carry `db_sqlstate` and `db_constraint`). The reda
 (`tabrion.errors.safe_message` and `DbErrorRedactionFilter`, TABRION MIG-AXE-3); Axentra installs it. This holds for
 every log record of the process, also with an application's own handlers or logging configuration: creating an
 `Axentra` instance installs the redaction in the log record factory. Trace spans, job and notification
-`last_error` and CLI error messages use the same text; the CLI also prints the traceback of an uncaught exception
-without database values (its `sys.excepthook`; an application that embeds Axentra keeps its own hooks).
+`last_error` and CLI error messages use the same text; the CLI also prints the traceback of an uncaught exception,
+of an exception that ends a thread and of one raised in a finalizer without database values (its `sys.excepthook`,
+`threading.excepthook` and `sys.unraisablehook`, each only where the interpreter's default is in place; an
+application that embeds Axentra keeps its own hooks). The event loop's default exception handler reports through
+the `asyncio` logger and is redacted like any log record.
 The redaction also covers an error logged inside a list, tuple, set or dict argument, in an exception's `args`,
 as a non-`str` message, and in `repr` form (`f"{e!r}"`, `%r`). In a message that was formatted before it was
 logged, everything from a `DETAIL:`, `HINT:` or `CONTEXT:` label (also as the escaped `\nDETAIL:` of a `repr`) to

@@ -509,15 +509,15 @@ def main(argv: list[str] | None = None) -> int:
     ``--debug`` (or ``AXENTRA_DEBUG=1``) shows the traceback instead."""
     import os
 
-    from axentra.core.db_errors import install_db_error_redaction, redacted_excepthook
+    from axentra.core.db_errors import install_db_error_redaction, install_redacted_excepthooks
 
     # Commands that never call configure_logging (migrate, purge, ...) log through logging.lastResort or the
     # operator's handlers: their records must not carry database values either (B-06-1).
     install_db_error_redaction()
     # An exception that is no operator error (a bug, or --debug) ends the process with a traceback that the
-    # interpreter prints outside any log filter: without database values as well (TABRION MIG-AXE-3).
-    if sys.excepthook is sys.__excepthook__:
-        sys.excepthook = redacted_excepthook
+    # interpreter prints outside any log filter: without database values as well (TABRION MIG-AXE-3). The same
+    # holds for an exception that ends a thread or is raised in a finalizer (N-3).
+    install_redacted_excepthooks()
     args = build_parser().parse_args(argv)
     try:
         try:
