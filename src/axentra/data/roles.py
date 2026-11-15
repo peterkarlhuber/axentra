@@ -172,6 +172,9 @@ def _refusal(
             "can still write the migration bookkeeping after the grant (a privilege of PUBLIC or of a role it is a"
             " member of)"
         )
+    if "createrole" in reasons and "superuser" not in reasons:
+        # Before PostgreSQL 16 a CREATEROLE role can grant itself any role that is not a superuser (Tabrion D-127).
+        texts.append("has CREATEROLE or can become a role with it (before PostgreSQL 16, role membership)")
     unknown = sorted({r for r in reasons if r and r not in _KNOWN_REASONS})
     if unknown or not texts:
         # A reason this Axentra does not know yet (a newer Tabrion): name it instead of an empty sentence.
@@ -185,7 +188,7 @@ def _refusal(
 
 #: The reasons of Tabrion's ``RoleUnsafe`` that :func:`_refusal` words itself.
 _KNOWN_REASONS = frozenset(
-    {"superuser", "bypass_rls", "table_owner", "predefined_role", "protected_writable"}
+    {"superuser", "bypass_rls", "table_owner", "predefined_role", "protected_writable", "createrole"}
 )
 
 
