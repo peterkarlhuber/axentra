@@ -30,6 +30,7 @@ REQUIREMENTS = ROOT / "requirements" / "tabrion.txt"
 FINAL_RELEASES = {
     "d5821faa8742dea012abda3b663549c038d76543": "0.1.0",
     "af0458d54467571abfc1afdd44d76e1f4d727c06": "0.2.1",
+    "5bc690e2de74a92cd44bb4522cf2533cc2c8d14f": "0.2.2",
 }
 """Final Tabrion releases a pin may name: commit SHA -> version (``src/tabrion/_version.py`` at that commit)."""
 

@@ -33,6 +33,11 @@ Changes since then, each rewritten with the tool and explained in its pull reque
 - S3 storage outages: `problems.json` (`--only problems write`). Two new error classes,
   `axentra.core.errors.ServiceUnavailable` and `axentra.storage.backends.StorageUnavailable` (`503
   service_unavailable`, `Retry-After: 10`); every existing entry is unchanged.
+- TABRION 0.2.2 pin (`5bc690e`): `roles.json` (`--only roles write`). Tabrion's `grant_runtime_role` refuses
+  members of predefined roles (TB-150, reason `predefined_role`). The `owner_member` variant can become the database
+  owner and so `pg_database_owner`: its `grant_runtime_role` message now also names that role (1 line). Every
+  decision and error class is unchanged; the superuser variants are unchanged (Axentra leaves the predefined roles
+  out of a superuser's message).
 
 A pull request that changes a snapshot on purpose (a new migration, or a step whose plan allows the change) rewrites
 the file with the tool and says why; the diff is part of the review. A rollback (revert pull request) is verified by
