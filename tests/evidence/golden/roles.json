@@ -197,7 +197,7 @@
       },
       "grant_runtime_role": {
         "code": "configuration_error",
-        "message": "the runtime role '<role:owner_member>' owns tables (axentra_access_definitions, axentra_account_tokens, axentra_api_keys, axentra_audit_events, axentra_billing_overrides): row-level security would not apply to it",
+        "message": "the runtime role '<role:owner_member>' owns tables (axentra_access_definitions, axentra_account_tokens, axentra_api_keys, axentra_audit_events, axentra_billing_overrides) and is a member of the predefined role pg_database_owner (role membership): row-level security would not apply to it",
         "refused": "ConfigurationError"
       },
       "inspect_role": {

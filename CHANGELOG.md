@@ -25,6 +25,15 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Security (TABRION 0.2.2): Axentra pins the final Tabrion 0.2.2 (`5bc690e`, tabrion #83; `requirements/tabrion.txt`,
+  `deploy/locks/tabrion.txt`); the range stays `>=0.2,<0.3`. Tabrion's `grant_runtime_role` now refuses a member of a
+  predefined role (`predefined_role`, e.g. `pg_read_all_data`), a role that can still write the migration bookkeeping
+  after the grant (`protected_writable`, re-checked inside the grant transaction, which is rolled back) and a
+  CREATEROLE role before PostgreSQL 16 (`createrole`); `tabrion.check` adds TAB-PG-013/014 and `tabrion.profilefile`
+  refuses more host values. The runtime role of `deploy/compose/initdb/01-roles.sql` (`axentra_app`) and of the
+  tests is not affected. `tests/evidence/golden/roles.json` is rewritten: the `owner_member` variant's refusal also
+  names `pg_database_owner` (decision unchanged). New test `test_a_member_of_a_predefined_role_is_refused_by_the_grant`;
+  the bookkeeping re-check test expects Tabrion's `protected_writable` wording.
 - Fixed (TABRION TB-150 item 3 follow-up): the error of a refused `grant_runtime_role` also words Tabrion 0.2.2's
   reason `protected_writable` (the migration bookkeeping stays writable through PUBLIC or another role after the
   REVOKE) and `createrole` (CREATEROLE before PostgreSQL 16). No change with the pinned Tabrion 0.2.1.

@@ -503,7 +503,7 @@ def test_a_member_of_pg_write_all_data_is_refused_before_anything_is_granted(
 def test_the_refusal_names_predefined_roles_and_unknown_reasons(roles_db: dict[str, str]) -> None:
     """Tabrion's ``predefined_role`` reason (TB-150) and a reason Axentra does not know get their own text.
 
-    Called directly: the pinned Tabrion does not raise ``predefined_role`` yet, a later pin does."""
+    Called directly for the texts; ``test_a_member_of_a_predefined_role_is_refused_by_the_grant`` covers the grant."""
     name = f"ax6_pre_{uuid.uuid4().hex[:6]}"
     with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
         _make_role(admin, name)
@@ -535,8 +535,35 @@ def test_the_refusal_names_predefined_roles_and_unknown_reasons(roles_db: dict[s
             admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
 
 
+def test_a_member_of_a_predefined_role_is_refused_by_the_grant(roles_db: dict[str, str]) -> None:
+    """Tabrion 0.2.2 (TB-150, tabrion #77): a member of ``pg_read_all_data`` reads every table past row-level
+    security, so ``grant_runtime_role`` refuses it with the ``predefined_role`` reason and grants nothing."""
+    name = f"ax6_rad_{uuid.uuid4().hex[:6]}"
+    with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+        _make_role(admin, name)
+        admin.execute(sql.SQL("GRANT pg_read_all_data TO {}").format(sql.Identifier(name)))
+    try:
+        with pytest.raises(ConfigurationError) as err:
+            grant_runtime_role(roles_db["owner"], name)
+        assert str(err.value) == (
+            f"the runtime role {name!r} is a member of the predefined role pg_read_all_data (role membership):"
+            " row-level security would not apply to it"
+        )
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            granted = admin.execute(
+                "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee = %s", (name,)
+            ).fetchone()
+        assert granted == (0,)
+    finally:
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(name)))
+
+
 def test_a_protected_table_still_writable_after_the_grant_is_refused(roles_db: dict[str, str]) -> None:
-    """The re-check after the grant: a privilege on the bookkeeping granted elsewhere fails the grant."""
+    """The re-check after the grant: a privilege on the bookkeeping granted elsewhere fails the grant.
+
+    Since Tabrion 0.2.2 (TB-150 item 3) Tabrion re-checks inside its grant transaction and rolls the grant back
+    (reason ``protected_writable``); Axentra's own re-check after the grant stays as a second line."""
     name = f"ax6_wr_{uuid.uuid4().hex[:6]}"
     with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
         _make_role(admin, name, "INHERIT")
@@ -548,10 +575,17 @@ def test_a_protected_table_still_writable_after_the_grant_is_refused(roles_db: d
             sql.SQL("GRANT INSERT ON axentra_schema_migrations TO {}").format(sql.Identifier(name + "_g"))
         )
     try:
-        with pytest.raises(
-            ConfigurationError, match="can still write axentra_schema_migrations after the grant"
-        ):
+        with pytest.raises(ConfigurationError) as err:
             grant_runtime_role(roles_db["owner"], name)
+        assert str(err.value) == (
+            f"the runtime role {name!r} can still write the migration bookkeeping after the grant (a privilege of"
+            " PUBLIC or of a role it is a member of): row-level security would not apply to it"
+        )
+        with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
+            granted = admin.execute(
+                "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee = %s", (name,)
+            ).fetchone()
+        assert granted == (0,)  # rolled back with the grant transaction
     finally:
         with psycopg.connect(roles_db["admin"], autocommit=True) as admin:
             admin.execute(

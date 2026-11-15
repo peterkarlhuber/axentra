@@ -7,7 +7,7 @@
 #   pip install -r requirements/tabrion.txt -e ".[dev]"
 #   pip install -r requirements/tabrion.txt "axentra @ git+https://github.com/peterkarlhuber/axentra.git@<commit>"
 #
-# Exactly one requirement: Tabrion at the full 40-hex commit SHA of a final release (here v0.2.1), never a
+# Exactly one requirement: Tabrion at the full 40-hex commit SHA of a final release (here v0.2.2), never a
 # pre-release (RC-8). No extras on purpose: pip adds the extras that Axentra's own requirements ask for, so a library
 # install does not pull in the test tools. tests/unit/test_tabrion_requirements.py checks all of this.
-tabrion @ git+https://github.com/peterkarlhuber/tabrion.git@af0458d54467571abfc1afdd44d76e1f4d727c06
+tabrion @ git+https://github.com/peterkarlhuber/tabrion.git@5bc690e2de74a92cd44bb4522cf2533cc2c8d14f
