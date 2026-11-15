@@ -518,6 +518,10 @@ def test_the_refusal_names_predefined_roles_and_unknown_reasons(roles_db: dict[s
                 " and is refused by tabrion.postgres.grant_runtime_role (new_reason): row-level security would not"
                 " apply to it"
             )
+            assert str(_refusal(conn, name, None, ["protected_writable"])) == (
+                f"the runtime role {name!r} can still write the migration bookkeeping after the grant (a privilege of"
+                " PUBLIC or of a role it is a member of): row-level security would not apply to it"
+            )
             assert str(_refusal(conn, name, None, [""])) == (
                 f"the runtime role {name!r} is refused by tabrion.postgres.grant_runtime_role (no reason given):"
                 " row-level security would not apply to it"

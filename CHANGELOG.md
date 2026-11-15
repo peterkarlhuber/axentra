@@ -25,6 +25,9 @@ Agreed in the MUP-ONA plan (MP-B0, decision O3); they apply from the next releas
 
 ## [Unreleased]
 
+- Fixed (TABRION TB-150 item 3 follow-up): the error of a refused `grant_runtime_role` also words Tabrion 0.2.2's
+  reason `protected_writable` (the migration bookkeeping stays writable through PUBLIC or another role after the
+  REVOKE). No change with the pinned Tabrion 0.2.1.
 - Fixed (TABRION TB-150 follow-up): the error of a refused `grant_runtime_role` names Tabrion's new reason
   `predefined_role` (a member of a predefined role such as `pg_read_all_data`, refused by Tabrion from the release
   with tabrion #77 on) with the roles, and names any reason Axentra does not know yet instead of an empty sentence.
